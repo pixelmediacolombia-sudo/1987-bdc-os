@@ -1,0 +1,55 @@
+import type { Pool } from "pg";
+import type {
+  SaveGhlInstallationInput,
+  TenantIntegrationRepository,
+} from "@/features/ghl-oauth/application/ports/tenant-integration-repository.port";
+
+export class PostgresTenantIntegrationRepository implements TenantIntegrationRepository {
+  constructor(private readonly pool: Pool) {}
+
+  async saveGhlInstallation(input: SaveGhlInstallationInput): Promise<string> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const tenant = input.expectedTenantId
+        ? await client.query<{ dealer_id: string; ghl_location_id: string }>(
+            "SELECT dealer_id, ghl_location_id FROM public.tenants WHERE dealer_id = $1 FOR UPDATE",
+            [input.expectedTenantId],
+          )
+        : await client.query<{ dealer_id: string; ghl_location_id: string }>(
+            `INSERT INTO public.tenants (ghl_location_id)
+             VALUES ($1)
+             ON CONFLICT (ghl_location_id) DO UPDATE SET updated_at = now()
+             RETURNING dealer_id, ghl_location_id`,
+            [input.locationId],
+          );
+
+      if (tenant.rowCount !== 1 || !tenant.rows[0]) throw new Error("OAuth tenant was not found");
+      if (tenant.rows[0].ghl_location_id !== input.locationId) {
+        throw new Error("OAuth location does not match the requested tenant");
+      }
+
+      const tenantId = tenant.rows[0].dealer_id;
+      await client.query(
+        `INSERT INTO public.integrations
+           (tenant_id, provider, encrypted_access_token, encrypted_refresh_token, scopes, health_state)
+         VALUES ($1, 'ghl', $2, $3, $4::text[], 'healthy')
+         ON CONFLICT (tenant_id, provider) DO UPDATE SET
+           encrypted_access_token = EXCLUDED.encrypted_access_token,
+           encrypted_refresh_token = EXCLUDED.encrypted_refresh_token,
+           scopes = EXCLUDED.scopes,
+           health_state = 'healthy',
+           updated_at = now()`,
+        [tenantId, input.encryptedAccessToken, input.encryptedRefreshToken ?? null, input.scopes],
+      );
+
+      await client.query("COMMIT");
+      return tenantId;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+}

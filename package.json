@@ -1,0 +1,36 @@
+{
+  "name": "1987-bdc-os-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only -r tsconfig-paths/register src/main.ts",
+    "build": "tsc",
+    "start": "node -r module-alias/register dist/main.js",
+    "db:migrate": "ts-node-dev --transpile-only --exit-child -r tsconfig-paths/register src/features/ghl-oauth/infrastructure/persistence/postgres/migrate.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "_moduleAliases": {
+    "@": "dist"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.19.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "module-alias": "^2.3.4",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/module-alias": "^2.0.4",
+    "@types/node": "^26.2.0",
+    "@types/pg": "^8.23.1",
+    "ts-node-dev": "^2.0.0",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^7.0.2"
+  }
+}

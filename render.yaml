@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: 1987-bdc-os-backend
+    runtime: node
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DATABASE_URL
+        sync: false
+      - key: PGSSL
+        value: "true"
+      - key: GHL_CLIENT_ID
+        sync: false
+      - key: GHL_CLIENT_SECRET
+        sync: false
+      - key: GHL_REDIRECT_URI
+        sync: false
+      - key: GHL_AUTHORIZATION_URL
+        value: https://marketplace.gohighlevel.com/oauth/chooselocation
+      - key: GHL_TOKEN_URL
+        value: https://services.leadconnectorhq.com/oauth/token
+      - key: GHL_SCOPES
+        sync: false
+      - key: ENCRYPTION_SECRET
+        sync: false
+      - key: OAUTH_STATE_SECRET
+        sync: false
