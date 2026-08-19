@@ -10,11 +10,16 @@ import { CompleteGhlOAuthUseCase } from "@/features/ghl-oauth/application/use-ca
 import { InitiateGhlOAuthUseCase } from "@/features/ghl-oauth/application/use-cases/initiate-ghl-oauth.use-case";
 import { GhlOAuthController } from "@/features/ghl-oauth/presentation/http/ghl-oauth.controller";
 import { GhlOAuthPresentationService } from "@/features/ghl-oauth/presentation/services/ghl-oauth.presentation.service";
+import { ensureWebhookTables } from "@/modules/webhooks/infrastructure/persistence/postgres/webhooks.migration";
+import { PostgresWebhookRepository } from "@/modules/webhooks/infrastructure/persistence/postgres/postgres-webhook.repository";
+import { ProcessGHLWebhookUseCase } from "@/modules/webhooks/application/process-ghl-webhook.use-case";
+import { WebhookController } from "@/modules/webhooks/presentation/http/webhook.controller";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
   const pool = createPostgresPool(config.databaseUrl, config.pgSsl);
   await ensureIntegrationsTable(pool);
+  await ensureWebhookTables(pool);
 
   const oauthClient = new GhlOAuthClientAdapter(config);
   const stateService = new HmacOAuthStateService(config.oauthStateSecret);
@@ -25,7 +30,8 @@ async function start(): Promise<void> {
     new CompleteGhlOAuthUseCase(oauthClient, stateService, cryptor, repository),
   );
   const controller = new GhlOAuthController(presentationService);
-  const app = createHttpApp(controller);
+  const webhookController = new WebhookController(new ProcessGHLWebhookUseCase(new PostgresWebhookRepository(pool)));
+  const app = createHttpApp(controller, webhookController, config.ghlClientSecret);
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
   const shutdown = (signal: string) => {
