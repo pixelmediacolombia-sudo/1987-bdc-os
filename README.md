@@ -29,6 +29,8 @@ La aplicación ejecuta una migración idempotente al iniciar y garantiza que `pu
 
 La misma migración garantiza que `public.raw_webhooks` exista. El endpoint acepta `X-GHL-Signature` (Ed25519, preferida) o `X-WH-Signature` (RSA-SHA256, compatibilidad temporal), verificadas antes de parsear JSON. El evento debe incluir `locationId` y un identificador único (`eventId` o `messageId`). El ACK `200` se emite inmediatamente y el procesamiento se encola en memoria; la unicidad SQL mantiene la idempotencia durable entre procesos.
 
+Para los eventos inbound no duplicados, el Ticket 4 añade un búfer Redis por contacto de `BURST_BUFFER_SECONDS` (15 por defecto) y un mutex Redis con TTL de `CONTACT_MUTEX_TTL_SECONDS` (30 por defecto). Los fragmentos se consolidan en orden antes de entregarse al puerto de orquestación. El adaptador de orquestación permanece deshabilitado hasta el piloto controlado. La cola de trabajo HTTP continúa siendo en memoria y debe sustituirse por una cola durable en la siguiente fase.
+
 ## Seguridad
 
 - Los secretos solo se leen desde variables de entorno.
@@ -39,6 +41,7 @@ La misma migración garantiza que `public.raw_webhooks` exista. El endpoint acep
 - Los webhooks se validan contra el cuerpo crudo antes de procesarse; una firma inválida recibe `401`.
 - Los reintentos con el mismo identificador por tenant reciben `200` y no vuelven a insertar mensajes.
 - `raw_webhooks`, `integrations` y `integration_token_audits` usan RLS forzado; antes de acceder a ellas, el repositorio fija `app.tenant_id` dentro de la transacción.
+- Redis se configura únicamente mediante `REDIS_URL`; el repositorio no contiene ni registra credenciales, URL o puertos reales.
 - El código no registra tokens, contraseñas ni URLs de conexión.
 
 ## Regresión de seguridad

@@ -14,10 +14,15 @@ import { ensureWebhookTables } from "@/modules/webhooks/infrastructure/persisten
 import { PostgresWebhookRepository } from "@/modules/webhooks/infrastructure/persistence/postgres/postgres-webhook.repository";
 import { ProcessGHLWebhookUseCase } from "@/modules/webhooks/application/process-ghl-webhook.use-case";
 import { WebhookController } from "@/modules/webhooks/presentation/http/webhook.controller";
+import { ContactMutex } from "@/modules/control/application/contact-mutex";
+import { BurstBufferService } from "@/modules/control/application/burst-buffer.service";
+import { DisabledInboundConversationOrchestrator } from "@/modules/control/application/disabled-inbound-conversation-orchestrator";
+import { IoredisClient } from "@/modules/control/infrastructure/redis/ioredis-client";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
   const pool = createPostgresPool(config.databaseUrl, config.pgSsl);
+  const redis = new IoredisClient(config.redisUrl);
   await ensureIntegrationsTable(pool);
   await ensureWebhookTables(pool);
 
@@ -30,13 +35,21 @@ async function start(): Promise<void> {
     new CompleteGhlOAuthUseCase(oauthClient, stateService, cryptor, repository),
   );
   const controller = new GhlOAuthController(presentationService);
-  const webhookController = new WebhookController(new ProcessGHLWebhookUseCase(new PostgresWebhookRepository(pool)));
+  const burstBuffer = new BurstBufferService(
+    redis,
+    new ContactMutex(redis, config.contactMutexTtlMs),
+    new DisabledInboundConversationOrchestrator(),
+    { bufferSeconds: config.burstBufferSeconds },
+  );
+  const webhookController = new WebhookController(
+    new ProcessGHLWebhookUseCase(new PostgresWebhookRepository(pool), burstBuffer),
+  );
   const app = createHttpApp(controller, webhookController);
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
   const shutdown = (signal: string) => {
     console.log(`Received ${signal}; shutting down`);
-    server.close(() => void pool.end());
+    server.close(() => void Promise.all([pool.end(), redis.close()]));
   };
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
