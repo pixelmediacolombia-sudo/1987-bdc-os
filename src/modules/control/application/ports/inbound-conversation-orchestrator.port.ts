@@ -5,7 +5,6 @@ export type BufferedInboundMessage = InboundMessage & {
 };
 
 export type ConsolidatedInboundConversation = {
-  tenantId: string;
   contactId: string;
   messages: BufferedInboundMessage[];
   consolidatedText: string;

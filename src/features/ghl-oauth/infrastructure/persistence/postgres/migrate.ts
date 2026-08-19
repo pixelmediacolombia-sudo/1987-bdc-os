@@ -2,7 +2,6 @@ import { loadAppConfig } from "@/features/ghl-oauth/infrastructure/config/env.co
 import { createPostgresPool } from "@/features/ghl-oauth/infrastructure/persistence/postgres/pool";
 import { ensureIntegrationsTable } from "@/features/ghl-oauth/infrastructure/persistence/postgres/integrations.migration";
 import { ensureWebhookTables } from "@/modules/webhooks/infrastructure/persistence/postgres/webhooks.migration";
-import { ensureMemoryTables } from "@/modules/memory/infrastructure/persistence/postgres/memory.migration";
 
 async function main(): Promise<void> {
   const config = loadAppConfig();
@@ -10,8 +9,7 @@ async function main(): Promise<void> {
   try {
     await ensureIntegrationsTable(pool);
     await ensureWebhookTables(pool);
-    await ensureMemoryTables(pool);
-    console.log("Database migration completed: integrations, webhooks, facts, and objectives are ready.");
+    console.log("Database migration completed: public.integrations is ready.");
   } finally {
     await pool.end();
   }

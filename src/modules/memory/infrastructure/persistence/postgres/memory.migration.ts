@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS public.facts (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Existing installations may already have facts without the audit timestamp.
+ALTER TABLE public.facts
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 CREATE INDEX IF NOT EXISTS facts_contact_active_idx ON public.facts (tenant_id, contact_id, active, updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS facts_one_active_key_idx ON public.facts (tenant_id, contact_id, fact_key) WHERE active = true;
 ALTER TABLE public.facts ENABLE ROW LEVEL SECURITY;
@@ -39,6 +42,9 @@ CREATE TABLE IF NOT EXISTS public.objectives (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT objectives_contact_type_uq UNIQUE (tenant_id, contact_id, objective_type)
 );
+-- Keep the migration additive when objectives predate this contract.
+ALTER TABLE public.objectives
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 CREATE INDEX IF NOT EXISTS objectives_contact_state_idx ON public.objectives (tenant_id, contact_id, answered, skipped);
 ALTER TABLE public.objectives ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.objectives FORCE ROW LEVEL SECURITY;

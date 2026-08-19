@@ -16,7 +16,7 @@ export class ProcessGHLWebhookUseCase {
     const event = parseGhlWebhookPayload(input.payload, input.rawBody, input.signature);
     const result = await this.repository.process(event);
     if (!result.duplicate && event.inboundMessage && this.burstBuffer) {
-      await this.burstBuffer.add(event.inboundMessage, result.tenantId);
+      await this.burstBuffer.add(event.inboundMessage);
     }
     return {
       duplicate: result.duplicate,
