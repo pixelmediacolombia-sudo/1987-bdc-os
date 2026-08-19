@@ -30,6 +30,7 @@ export class GhlOAuthClientAdapter implements GhlOAuthClient {
     url.search = new URLSearchParams({
       response_type: "code",
       client_id: this.config.ghlClientId,
+      version_id: this.config.ghlAppVersionId,
       redirect_uri: this.config.ghlRedirectUri,
       scope: this.config.ghlScopes.join(" "),
       state: input.state,

@@ -7,6 +7,7 @@ export type AppConfig = {
   pgSsl: boolean;
   ghlClientId: string;
   ghlClientSecret: string;
+  ghlAppVersionId: string;
   ghlRedirectUri: string;
   ghlAuthorizationUrl: string;
   ghlTokenUrl: string;
@@ -46,6 +47,7 @@ export function loadAppConfig(): AppConfig {
     pgSsl: booleanEnv("PGSSL", false),
     ghlClientId: required("GHL_CLIENT_ID"),
     ghlClientSecret: required("GHL_CLIENT_SECRET"),
+    ghlAppVersionId: required("GHL_APP_VERSION_ID"),
     ghlRedirectUri: required("GHL_REDIRECT_URI"),
     ghlAuthorizationUrl:
       process.env.GHL_AUTHORIZATION_URL?.trim() ||
