@@ -8,6 +8,10 @@ export class GhlOAuthController {
 
   initiateHandler = (req: Request, res: Response): void => {
     const tenantId = typeof req.query.tenant_id === "string" ? req.query.tenant_id : undefined;
+    if (!tenantId) {
+      res.status(400).json({ error: "tenant_id is required for OAuth onboarding" });
+      return;
+    }
     const result = this.service.initiate({ tenantId });
     res.redirect(result.authorizationUrl);
   };

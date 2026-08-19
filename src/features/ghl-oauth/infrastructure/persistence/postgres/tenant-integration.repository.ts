@@ -11,18 +11,18 @@ export class PostgresTenantIntegrationRepository implements TenantIntegrationRep
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const tenant = input.expectedTenantId
-        ? await client.query<{ dealer_id: string; ghl_location_id: string }>(
-            "SELECT dealer_id, ghl_location_id FROM public.tenants WHERE dealer_id = $1 FOR UPDATE",
-            [input.expectedTenantId],
-          )
-        : await client.query<{ dealer_id: string; ghl_location_id: string }>(
-            `INSERT INTO public.tenants (ghl_location_id)
-             VALUES ($1)
-             ON CONFLICT (ghl_location_id) DO UPDATE SET updated_at = now()
-             RETURNING dealer_id, ghl_location_id`,
-            [input.locationId],
-          );
+      if (!input.expectedTenantId) {
+        throw new Error("OAuth installation requires a pre-provisioned tenant when RLS is enabled");
+      }
+
+      // The database RLS policy scopes all tenant rows to this transaction-local tenant id.
+      // The value comes from the signed OAuth state, never from the token response.
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [input.expectedTenantId]);
+
+      const tenant = await client.query<{ dealer_id: string; ghl_location_id: string }>(
+        "SELECT dealer_id, ghl_location_id FROM public.tenants WHERE dealer_id = $1 FOR UPDATE",
+        [input.expectedTenantId],
+      );
 
       if (tenant.rowCount !== 1 || !tenant.rows[0]) throw new Error("OAuth tenant was not found");
       if (tenant.rows[0].ghl_location_id !== input.locationId) {
