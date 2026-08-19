@@ -33,6 +33,39 @@ CREATE POLICY raw_webhooks_isolation ON public.raw_webhooks
   USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
   WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
 
+-- Bootstrap-only routing metadata. This table contains identifiers only and is
+-- intentionally separate from tenant-scoped business data because tenants is
+-- FORCE ROW LEVEL SECURITY and cannot be queried before app.tenant_id exists.
+CREATE TABLE IF NOT EXISTS public.tenant_location_routes (
+  ghl_location_id TEXT PRIMARY KEY,
+  dealer_id UUID NOT NULL UNIQUE REFERENCES public.tenants(dealer_id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION public.sync_tenant_location_route()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  INSERT INTO public.tenant_location_routes (ghl_location_id, dealer_id)
+  VALUES (NEW.ghl_location_id, NEW.dealer_id)
+  ON CONFLICT (ghl_location_id) DO UPDATE
+    SET dealer_id = EXCLUDED.dealer_id,
+        updated_at = now();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tenants_sync_location_route ON public.tenants;
+CREATE TRIGGER tenants_sync_location_route
+AFTER INSERT OR UPDATE OF ghl_location_id ON public.tenants
+FOR EACH ROW EXECUTE FUNCTION public.sync_tenant_location_route();
+
+REVOKE ALL ON TABLE public.tenant_location_routes FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION public.resolve_ghl_tenant_id(p_location_id TEXT)
 RETURNS UUID
 LANGUAGE SQL
@@ -41,7 +74,7 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
   SELECT dealer_id
-    FROM public.tenants
+    FROM public.tenant_location_routes
    WHERE ghl_location_id = p_location_id
    LIMIT 1;
 $$;
