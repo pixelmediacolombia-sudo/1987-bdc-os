@@ -16,8 +16,12 @@ import { ProcessGHLWebhookUseCase } from "@/modules/webhooks/application/process
 import { WebhookController } from "@/modules/webhooks/presentation/http/webhook.controller";
 import { ContactMutex } from "@/modules/control/application/contact-mutex";
 import { BurstBufferService } from "@/modules/control/application/burst-buffer.service";
-import { DisabledInboundConversationOrchestrator } from "@/modules/control/application/disabled-inbound-conversation-orchestrator";
+import { HydratingInboundConversationOrchestrator } from "@/modules/control/application/hydrating-inbound-conversation-orchestrator";
 import { IoredisClient } from "@/modules/control/infrastructure/redis/ioredis-client";
+import { ConversationHydrator } from "@/modules/memory/application/conversation-hydrator";
+import { LocalPolicyPackProvider } from "@/modules/memory/infrastructure/policies/local-policy-pack.provider";
+import { ensureMemoryTables } from "@/modules/memory/infrastructure/persistence/postgres/memory.migration";
+import { PostgresHydrationRepository } from "@/modules/memory/infrastructure/persistence/postgres/postgres-hydration.repository";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -25,6 +29,7 @@ async function start(): Promise<void> {
   const redis = new IoredisClient(config.redisUrl);
   await ensureIntegrationsTable(pool);
   await ensureWebhookTables(pool);
+  await ensureMemoryTables(pool);
 
   const oauthClient = new GhlOAuthClientAdapter(config);
   const stateService = new HmacOAuthStateService(config.oauthStateSecret);
@@ -35,10 +40,14 @@ async function start(): Promise<void> {
     new CompleteGhlOAuthUseCase(oauthClient, stateService, cryptor, repository),
   );
   const controller = new GhlOAuthController(presentationService);
+  const hydrator = new ConversationHydrator(
+    new PostgresHydrationRepository(pool),
+    new LocalPolicyPackProvider(),
+  );
   const burstBuffer = new BurstBufferService(
     redis,
     new ContactMutex(redis, config.contactMutexTtlMs),
-    new DisabledInboundConversationOrchestrator(),
+    new HydratingInboundConversationOrchestrator(hydrator),
     { bufferSeconds: config.burstBufferSeconds },
   );
   const webhookController = new WebhookController(
