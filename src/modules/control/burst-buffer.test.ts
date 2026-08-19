@@ -116,11 +116,11 @@ test("consolida tres fragmentos después de un búfer exacto de 15 segundos", as
     },
   });
 
-  await service.add(createMessage("message-1", "Hola"));
+  await service.add(createMessage("message-1", "Hola"), "tenant-42");
   await new Promise((resolve) => setTimeout(resolve, 2_000));
-  await service.add(createMessage("message-2", "Me interesa la Tacoma"));
+  await service.add(createMessage("message-2", "Me interesa la Tacoma"), "tenant-42");
   await new Promise((resolve) => setTimeout(resolve, 2_000));
-  await service.add(createMessage("message-3", "¿La tienen manual?"));
+  await service.add(createMessage("message-3", "¿La tienen manual?"), "tenant-42");
 
   assert.equal(redis.lists.get("buffer:messages:contact-42")?.length, 3);
   assert.equal(scheduledDelayMs, 15_000);
@@ -141,6 +141,7 @@ test("consolida tres fragmentos después de un búfer exacto de 15 segundos", as
     "Me interesa la Tacoma",
     "¿La tienen manual?",
   ]);
+  assert.equal(orchestrator.result?.tenantId, "tenant-42");
   assert.equal(orchestrator.result?.consolidatedText, "Hola\nMe interesa la Tacoma\n¿La tienen manual?");
   assert.match(logs.join("\n"), /mutex acquired/);
   assert.match(logs.join("\n"), /consolidated 3 messages/);
