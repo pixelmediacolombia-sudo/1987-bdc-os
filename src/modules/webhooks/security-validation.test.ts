@@ -147,6 +147,8 @@ test("RLS cross-tenant matrix isolates integrations, audits, and raw webhooks", 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await client.query("SET LOCAL lock_timeout = '2s'");
+    await client.query("SET LOCAL statement_timeout = '10s'");
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantA]);
 
     const integration = await client.query<{ id: string }>(
@@ -177,14 +179,20 @@ test("RLS cross-tenant matrix isolates integrations, audits, and raw webhooks", 
       assert.equal(visible.rows[0]?.count, "0", `${table} leaked tenant A rows`);
     }
 
-    await assert.rejects(
-      client.query(
-        `INSERT INTO public.integrations
-           (tenant_id, provider, encrypted_access_token, scopes)
-         VALUES ($1, 'ghl', 'cross-tenant', ARRAY[]::text[])`,
-        [tenantA],
-      ),
-    );
+    await client.query("SAVEPOINT cross_tenant_insert");
+    try {
+      await assert.rejects(
+        client.query(
+          `INSERT INTO public.integrations
+             (tenant_id, provider, encrypted_access_token, scopes)
+           VALUES ($1, 'ghl', 'cross-tenant', ARRAY[]::text[])`,
+          [tenantA],
+        ),
+      );
+    } finally {
+      await client.query("ROLLBACK TO SAVEPOINT cross_tenant_insert");
+      await client.query("RELEASE SAVEPOINT cross_tenant_insert");
+    }
     assert.equal(
       (await client.query("UPDATE public.integrations SET health_state = 'degraded' WHERE id = $1", [integrationId])).rowCount,
       0,
