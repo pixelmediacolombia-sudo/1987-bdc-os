@@ -2,7 +2,7 @@
 
 Backend local en Node.js + TypeScript para la instalación OAuth de GoHighLevel y el almacenamiento multi-tenant de tokens cifrados.
 
-El Ticket 3 añade `POST /webhooks/ghl`, validación HMAC-SHA256 sobre el cuerpo JSON crudo, almacenamiento de eventos en `public.raw_webhooks`, idempotencia por `(tenant_id, external_id)` y registro estructurado de mensajes inbound.
+El backend recibe `POST /webhooks/ghl`, valida la firma oficial de HighLevel sobre los bytes exactos del cuerpo, almacena eventos en `public.raw_webhooks`, aplica idempotencia por `(tenant_id, external_id)` y registra mensajes inbound fuera del ciclo HTTP.
 
 ## Arquitectura
 
@@ -27,18 +27,23 @@ Los imports internos utilizan el alias absoluto `@/*`. TypeScript lo resuelve me
 
 La aplicación ejecuta una migración idempotente al iniciar y garantiza que `public.integrations` exista antes de escuchar peticiones. También está disponible `npm run db:migrate` para ejecutarla de forma explícita.
 
-La misma migración garantiza que `public.raw_webhooks` exista. El endpoint de webhook acepta `x-ghl-signature` y usa `x-signature` como fallback; ambos deben contener el HMAC-SHA256 hexadecimal calculado con `GHL_CLIENT_SECRET`. El evento debe incluir `locationId` y un identificador único (`eventId` o `messageId`).
+La misma migración garantiza que `public.raw_webhooks` exista. El endpoint acepta `X-GHL-Signature` (Ed25519, preferida) o `X-WH-Signature` (RSA-SHA256, compatibilidad temporal), verificadas antes de parsear JSON. El evento debe incluir `locationId` y un identificador único (`eventId` o `messageId`). El ACK `200` se emite inmediatamente y el procesamiento se encola en memoria; la unicidad SQL mantiene la idempotencia durable entre procesos.
 
 ## Seguridad
 
 - Los secretos solo se leen desde variables de entorno.
 - Los tokens de GHL se cifran con AES-256-GCM antes de persistirse.
 - La tabla `integrations` se vincula a `tenants(dealer_id)` y usa unicidad `(tenant_id, provider)`.
+- Los tokens OAuth guardan expiración, se refrescan automáticamente cinco minutos antes de vencer o tras un `401`, se vuelven a cifrar y dejan auditoría técnica.
 - El parámetro OAuth `state` está firmado con HMAC y expira en 10 minutos.
 - Los webhooks se validan contra el cuerpo crudo antes de procesarse; una firma inválida recibe `401`.
 - Los reintentos con el mismo identificador por tenant reciben `200` y no vuelven a insertar mensajes.
-- Antes de acceder a tablas RLS, el repositorio fija `app.tenant_id` dentro de la transacción.
+- `raw_webhooks`, `integrations` y `integration_token_audits` usan RLS forzado; antes de acceder a ellas, el repositorio fija `app.tenant_id` dentro de la transacción.
 - El código no registra tokens, contraseñas ni URLs de conexión.
+
+## Regresión de seguridad
+
+`npm run test:security` compila y ejecuta pruebas de firma sin cabecera, firma Ed25519 inválida, cuerpo alterado, ACK asíncrono y cinco entregas idénticas concurrentes. La matriz RLS requiere una base de pruebas desechable configurada explícitamente mediante variables de entorno y no usa el `.env` local ni producción.
 
 ## Render
 

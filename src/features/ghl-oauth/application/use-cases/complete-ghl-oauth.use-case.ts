@@ -21,6 +21,7 @@ export class CompleteGhlOAuthUseCase {
       encryptedAccessToken: this.cryptor.encrypt(tokens.accessToken),
       ...(tokens.refreshToken ? { encryptedRefreshToken: this.cryptor.encrypt(tokens.refreshToken) } : {}),
       scopes: tokens.scopes,
+      ...(tokens.expiresAt ? { accessTokenExpiresAt: tokens.expiresAt } : {}),
     });
 
     return { tenantId, locationId: tokens.locationId };

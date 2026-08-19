@@ -31,7 +31,7 @@ async function start(): Promise<void> {
   );
   const controller = new GhlOAuthController(presentationService);
   const webhookController = new WebhookController(new ProcessGHLWebhookUseCase(new PostgresWebhookRepository(pool)));
-  const app = createHttpApp(controller, webhookController, config.ghlClientSecret);
+  const app = createHttpApp(controller, webhookController);
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
   const shutdown = (signal: string) => {

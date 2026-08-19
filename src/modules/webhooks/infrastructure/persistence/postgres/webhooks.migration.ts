@@ -24,10 +24,11 @@ CREATE INDEX IF NOT EXISTS raw_webhooks_location_idx
   ON public.raw_webhooks (location_id, received_at DESC);
 
 ALTER TABLE public.raw_webhooks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.raw_webhooks FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS raw_webhooks_isolation ON public.raw_webhooks;
 CREATE POLICY raw_webhooks_isolation ON public.raw_webhooks
-  AS RESTRICTIVE
+  AS PERMISSIVE
   FOR ALL
   TO PUBLIC
   USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))

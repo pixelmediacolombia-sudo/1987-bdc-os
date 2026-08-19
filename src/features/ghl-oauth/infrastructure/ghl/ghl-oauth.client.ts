@@ -1,6 +1,6 @@
 import axios from "axios";
 import type { GhlOAuthClient } from "@/features/ghl-oauth/application/ports/ghl-oauth-client.port";
-import type { GhlOAuthTokens } from "@/features/ghl-oauth/domain/value-objects/oauth";
+import type { GhlOAuthTokens, GhlRefreshedTokens } from "@/features/ghl-oauth/domain/value-objects/oauth";
 import type { AppConfig } from "@/features/ghl-oauth/infrastructure/config/env.config";
 
 type GhlTokenResponse = {
@@ -9,6 +9,8 @@ type GhlTokenResponse = {
   locationId?: unknown;
   scope?: unknown;
   scopes?: unknown;
+  expires_in?: unknown;
+  expires_at?: unknown;
 };
 
 function requiredString(value: unknown, field: string): string {
@@ -20,6 +22,17 @@ function scopesFrom(response: GhlTokenResponse): string[] {
   const raw = response.scopes ?? response.scope;
   if (Array.isArray(raw)) return raw.filter((item): item is string => typeof item === "string");
   return typeof raw === "string" ? raw.split(/[\s,]+/).filter(Boolean) : [];
+}
+
+function expiresAtFrom(response: GhlTokenResponse): Date | undefined {
+  if (typeof response.expires_at === "string" || typeof response.expires_at === "number") {
+    const raw = typeof response.expires_at === "number" ? response.expires_at * 1000 : Date.parse(response.expires_at);
+    if (Number.isFinite(raw)) return new Date(raw);
+  }
+  if (typeof response.expires_in === "number" && Number.isFinite(response.expires_in) && response.expires_in > 0) {
+    return new Date(Date.now() + response.expires_in * 1000);
+  }
+  return undefined;
 }
 
 export class GhlOAuthClientAdapter implements GhlOAuthClient {
@@ -64,6 +77,35 @@ export class GhlOAuthClientAdapter implements GhlOAuthClient {
       refreshToken: typeof response.data.refresh_token === "string" ? response.data.refresh_token : undefined,
       locationId: requiredString(response.data.locationId, "locationId"),
       scopes: scopesFrom(response.data),
+      expiresAt: expiresAtFrom(response.data),
+    };
+  }
+
+  async refreshToken(refreshToken: string): Promise<GhlRefreshedTokens> {
+    const response = await axios.post<GhlTokenResponse>(
+      this.config.ghlTokenUrl,
+      new URLSearchParams({
+        client_id: this.config.ghlClientId,
+        client_secret: this.config.ghlClientSecret,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        user_type: "Location",
+      }).toString(),
+      {
+        timeout: 15_000,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+          Version: "2021-07-28",
+        },
+      },
+    );
+
+    return {
+      accessToken: requiredString(response.data.access_token, "access_token"),
+      refreshToken: typeof response.data.refresh_token === "string" ? response.data.refresh_token : undefined,
+      scopes: scopesFrom(response.data),
+      expiresAt: expiresAtFrom(response.data),
     };
   }
 }

@@ -1,4 +1,4 @@
-import type { GhlOAuthTokens } from "@/features/ghl-oauth/domain/value-objects/oauth";
+import type { GhlOAuthTokens, GhlRefreshedTokens } from "@/features/ghl-oauth/domain/value-objects/oauth";
 
 export type AuthorizationUrlInput = {
   state: string;
@@ -7,4 +7,5 @@ export type AuthorizationUrlInput = {
 export interface GhlOAuthClient {
   createAuthorizationUrl(input: AuthorizationUrlInput): string;
   exchangeCode(code: string): Promise<GhlOAuthTokens>;
+  refreshToken(refreshToken: string): Promise<GhlRefreshedTokens>;
 }

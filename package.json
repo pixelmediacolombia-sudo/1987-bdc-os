@@ -7,8 +7,9 @@
     "dev": "ts-node-dev --respawn --transpile-only -r tsconfig-paths/register src/main.ts",
     "build": "tsc",
     "start": "node -r module-alias/register dist/main.js",
-    "db:migrate": "ts-node-dev --transpile-only --exit-child -r tsconfig-paths/register src/features/ghl-oauth/infrastructure/persistence/postgres/migrate.ts",
-    "typecheck": "tsc --noEmit"
+    "db:migrate": "npm run build && node -r module-alias/register dist/features/ghl-oauth/infrastructure/persistence/postgres/migrate.js",
+    "typecheck": "tsc --noEmit",
+    "test:security": "npm run build && node -r module-alias/register --test dist/modules/webhooks/security-validation.test.js"
   },
   "keywords": [],
   "author": "",

@@ -9,4 +9,12 @@ export type GhlOAuthTokens = {
   refreshToken?: string;
   locationId: string;
   scopes: string[];
+  expiresAt?: Date;
+};
+
+export type GhlRefreshedTokens = {
+  accessToken: string;
+  refreshToken?: string;
+  scopes: string[];
+  expiresAt?: Date;
 };

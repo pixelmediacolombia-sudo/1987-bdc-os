@@ -15,7 +15,18 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch(() => {
-  console.error("Database migration failed.");
+main().catch((error: unknown) => {
+  if (error instanceof Error) {
+    const databaseError = error as Error & { code?: string; detail?: string; hint?: string };
+    console.error("Database migration failed:", {
+      name: databaseError.name,
+      message: databaseError.message,
+      code: databaseError.code,
+      detail: databaseError.detail,
+      hint: databaseError.hint,
+    });
+  } else {
+    console.error("Database migration failed: unknown error");
+  }
   process.exitCode = 1;
 });
