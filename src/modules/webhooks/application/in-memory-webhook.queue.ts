@@ -1,16 +1,15 @@
 import { createHash } from "node:crypto";
-
-export type WebhookBackgroundTask = () => Promise<void>;
+import type { WebhookQueuePort } from "@/modules/webhooks/application/ports/webhook-queue.port";
 
 /**
  * Keeps the HTTP ACK independent from processing and collapses identical
  * deliveries while they are in flight. PostgreSQL remains the durable
  * idempotency boundary for retries after this process has finished.
  */
-export class InMemoryWebhookQueue {
+export class InMemoryWebhookQueue implements WebhookQueuePort {
   private readonly inFlight = new Set<string>();
 
-  enqueue(rawBody: Buffer, task: WebhookBackgroundTask): boolean {
+  enqueue(rawBody: Buffer, _signature: string, task: () => Promise<void>): boolean {
     const key = createHash("sha256").update(rawBody).digest("hex");
     if (this.inFlight.has(key)) return false;
 
@@ -24,4 +23,8 @@ export class InMemoryWebhookQueue {
     });
     return true;
   }
+
+  async start(): Promise<void> {}
+
+  async stop(): Promise<void> {}
 }

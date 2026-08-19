@@ -14,6 +14,7 @@ import { ensureWebhookTables } from "@/modules/webhooks/infrastructure/persisten
 import { PostgresWebhookRepository } from "@/modules/webhooks/infrastructure/persistence/postgres/postgres-webhook.repository";
 import { ProcessGHLWebhookUseCase } from "@/modules/webhooks/application/process-ghl-webhook.use-case";
 import { WebhookController } from "@/modules/webhooks/presentation/http/webhook.controller";
+import { RedisWebhookQueue } from "@/modules/webhooks/infrastructure/redis/redis-webhook-queue";
 import { ContactMutex } from "@/modules/control/application/contact-mutex";
 import { BurstBufferService } from "@/modules/control/application/burst-buffer.service";
 import { HumanSuppressionService } from "@/modules/control/application/human-suppression.service";
@@ -61,15 +62,26 @@ async function start(): Promise<void> {
   await burstBuffer.recoverPendingTimers();
   await burstBuffer.start();
   const humanSuppression = new HumanSuppressionService(burstBuffer, contactMutex);
+  const processWebhook = new ProcessGHLWebhookUseCase(
+    new PostgresWebhookRepository(pool, new PostgresOutboundMessageRegistry(pool)),
+    burstBuffer,
+    humanSuppression,
+  );
+  const webhookQueue = new RedisWebhookQueue(redis);
+  await webhookQueue.start(async (job) => {
+    const payload: unknown = JSON.parse(job.rawBody.toString("utf8"));
+    await processWebhook.execute({ payload, rawBody: job.rawBody, signature: job.signature });
+  });
   const webhookController = new WebhookController(
-    new ProcessGHLWebhookUseCase(new PostgresWebhookRepository(pool, new PostgresOutboundMessageRegistry(pool)), burstBuffer, humanSuppression),
+    processWebhook,
+    webhookQueue,
   );
   const app = createHttpApp(controller, webhookController);
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
   const shutdown = (signal: string) => {
     console.log(`Received ${signal}; shutting down`);
-    server.close(() => void Promise.all([burstBuffer.stop(), pool.end(), redis.close()]));
+    server.close(() => void Promise.all([webhookQueue.stop(), burstBuffer.stop(), pool.end(), redis.close()]));
   };
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
