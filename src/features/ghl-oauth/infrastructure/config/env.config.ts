@@ -5,6 +5,9 @@ export type AppConfig = {
   port: number;
   databaseUrl: string;
   pgSsl: boolean;
+  redisUrl: string;
+  burstBufferSeconds: number;
+  contactMutexTtlMs: number;
   ghlClientId: string;
   ghlClientSecret: string;
   ghlAppVersionId: string;
@@ -45,6 +48,9 @@ export function loadAppConfig(): AppConfig {
     port: Number.parseInt(process.env.PORT ?? "3000", 10),
     databaseUrl: required("DATABASE_URL"),
     pgSsl: booleanEnv("PGSSL", false),
+    redisUrl: required("REDIS_URL"),
+    burstBufferSeconds: positiveNumberEnv("BURST_BUFFER_SECONDS", 15),
+    contactMutexTtlMs: positiveNumberEnv("CONTACT_MUTEX_TTL_SECONDS", 30) * 1000,
     ghlClientId: required("GHL_CLIENT_ID"),
     ghlClientSecret: required("GHL_CLIENT_SECRET"),
     ghlAppVersionId: required("GHL_APP_VERSION_ID"),
@@ -59,4 +65,14 @@ export function loadAppConfig(): AppConfig {
     encryptionSecret,
     oauthStateSecret,
   };
+}
+
+function positiveNumberEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
 }
