@@ -3,7 +3,10 @@ import path from "node:path";
 import type { PolicyPackProviderPort } from "@/modules/memory/application/ports/policy-pack.provider.port";
 import type { PolicyPack } from "@/modules/memory/domain/hydrated-context";
 
-const POLICY_FILES: Record<string, string> = { default_v1: "default_policy_v1.json" };
+const POLICY_FILES: Record<string, string> = {
+  default_v1: "default_policy_v1.json",
+  v1: "policy_v1.json",
+};
 
 export class LocalPolicyPackProvider implements PolicyPackProviderPort {
   constructor(private readonly policiesDirectory = path.resolve(process.cwd(), "policies")) {}

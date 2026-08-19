@@ -121,3 +121,9 @@ test("rechaza límites de transcripción fuera del contrato 8..12", () => {
   assert.throws(() => new ConversationHydrator(repository, provider, 7), /between 8 and 12/);
   assert.throws(() => new ConversationHydrator(repository, provider, 13), /between 8 and 12/);
 });
+
+test("carga la política v1 existente en producción", async () => {
+  const policy = await new LocalPolicyPackProvider().load("v1");
+  assert.equal(policy.version, "v1");
+  assert.equal(policy.humanHandoff.enabled, true);
+});
