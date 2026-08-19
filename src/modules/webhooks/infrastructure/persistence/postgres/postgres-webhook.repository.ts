@@ -104,6 +104,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
       client,
       tenantId,
       contact.rows[0].id,
+      message.conversationId ?? `event:${message.externalId}`,
       message.channel,
     );
 
@@ -127,6 +128,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
     client: PoolClient,
     tenantId: string,
     contactId: string,
+    ghlConversationId: string,
     channel: string,
   ): Promise<ConversationRow> {
     const existing = await client.query<ConversationRow>(
@@ -141,10 +143,11 @@ export class PostgresWebhookRepository implements WebhookRepository {
     if (existing.rowCount === 1 && existing.rows[0]) return existing.rows[0];
 
     const created = await client.query<ConversationRow>(
-      `INSERT INTO public.conversations (tenant_id, contact_id, channel, owner, state, last_activity)
-       VALUES ($1, $2, $3, 'ghl', 'open', now())
+      `INSERT INTO public.conversations
+         (tenant_id, contact_id, ghl_conversation_id, channel, owner, state, last_activity)
+       VALUES ($1, $2, $3, $4, 'ghl', 'open', now())
        RETURNING id`,
-      [tenantId, contactId, channel],
+      [tenantId, contactId, ghlConversationId, channel],
     );
     if (created.rowCount !== 1 || !created.rows[0]) {
       throw new Error("GHL conversation was not persisted");
