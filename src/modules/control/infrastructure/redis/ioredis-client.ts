@@ -18,7 +18,13 @@ export class IoredisClient implements RedisClientPort {
 
   constructor(redisUrl: string) {
     if (!redisUrl.trim()) throw new Error("Missing required environment variable: REDIS_URL");
-    this.client = new Redis(redisUrl, { lazyConnect: true });
+    this.client = new Redis(redisUrl, {
+      lazyConnect: true,
+      connectTimeout: 5_000,
+      maxRetriesPerRequest: 1,
+      retryStrategy: (attempt) => (attempt > 3 ? null : Math.min(attempt * 250, 1_000)),
+    });
+    this.client.on("error", () => undefined);
   }
 
   async set(
