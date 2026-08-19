@@ -1,5 +1,9 @@
 import type { Pool, PoolClient } from "pg";
-import type { GhlWebhookEvent, InboundMessage } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type {
+  GhlWebhookEvent,
+  HumanInterruption,
+  InboundMessage,
+} from "@/modules/webhooks/domain/ghl-webhook-event";
 import { GhlTenantNotFoundError } from "@/modules/webhooks/domain/ghl-webhook-event";
 import type {
   WebhookProcessResult,
@@ -46,6 +50,10 @@ export class PostgresWebhookRepository implements WebhookRepository {
 
       if (event.inboundMessage) {
         await this.persistInboundMessage(client, tenantId, event.inboundMessage);
+      }
+
+      if (event.humanInterruption) {
+        await this.persistHumanInterruption(client, tenantId, event.humanInterruption);
       }
 
       await client.query(
@@ -153,6 +161,93 @@ export class PostgresWebhookRepository implements WebhookRepository {
       throw new Error("GHL conversation was not persisted");
     }
     return created.rows[0];
+  }
+
+  private async persistHumanInterruption(
+    client: PoolClient,
+    tenantId: string,
+    interruption: HumanInterruption,
+  ): Promise<void> {
+    const contact = await client.query<ContactRow>(
+      `INSERT INTO public.contacts AS c
+         (tenant_id, ghl_contact_id, phone, email, preferred_language, consent_state)
+       VALUES ($1, $2, $3, $4, 'unknown', 'unknown')
+       ON CONFLICT (tenant_id, ghl_contact_id) DO UPDATE SET
+         phone = COALESCE(EXCLUDED.phone, c.phone),
+         email = COALESCE(EXCLUDED.email, c.email),
+         updated_at = now()
+       RETURNING id`,
+      [tenantId, interruption.contactId, interruption.staffMessage?.phone ?? null, interruption.staffMessage?.email ?? null],
+    );
+    if (contact.rowCount !== 1 || !contact.rows[0]) throw new Error("Human interruption contact was not persisted");
+
+    let conversation = await this.findHumanConversation(
+      client,
+      tenantId,
+      contact.rows[0].id,
+      interruption.conversationId,
+    );
+
+    if (!conversation && interruption.staffMessage) {
+      conversation = await this.findOrCreateConversation(
+        client,
+        tenantId,
+        contact.rows[0].id,
+        interruption.conversationId ?? `event:${interruption.staffMessage.externalId}`,
+        interruption.staffMessage.channel,
+      );
+    }
+
+    if (conversation && interruption.staffMessage) {
+      await client.query(
+        `INSERT INTO public.messages
+           (tenant_id, conversation_id, external_id, direction, sender_type, content, semantic_hash, status)
+         VALUES ($1, $2, $3, 'outbound', 'staff', $4, $5, 'received')
+         ON CONFLICT DO NOTHING`,
+        [tenantId, conversation.id, interruption.staffMessage.externalId, interruption.staffMessage.content, interruption.staffMessage.semanticHash],
+      );
+    }
+
+    if (conversation) {
+      await client.query(
+        `UPDATE public.conversations
+            SET state = 'paused', owner = $2, last_activity = now()
+          WHERE id = $1`,
+        [conversation.id, interruption.ownerId ?? "staff"],
+      );
+    }
+
+    await client.query(
+      `INSERT INTO public.decision_logs
+         (tenant_id, contact_id, input_version, allowed_actions, selected_action, reason, model_trace)
+       VALUES ($1, $2, 'control-v1', '[]'::jsonb, 'pause_ai', $3, $4::jsonb)`,
+      [
+        tenantId,
+        contact.rows[0].id,
+        `AI execution cancelled: Human operator took control (Trigger: ${interruption.trigger === "staff_message" ? "Staff Message" : "Control Tag"})`,
+        JSON.stringify({ trigger: interruption.trigger, controlTag: interruption.controlTag ?? null, conversationId: conversation?.id ?? null }),
+      ],
+    );
+  }
+
+  private async findHumanConversation(
+    client: PoolClient,
+    tenantId: string,
+    contactId: string,
+    ghlConversationId?: string,
+  ): Promise<ConversationRow | undefined> {
+    const result = await client.query<ConversationRow>(
+      `SELECT id
+         FROM public.conversations
+        WHERE tenant_id = $1
+          AND contact_id = $2
+          AND ($3::text IS NULL OR ghl_conversation_id = $3)
+        ORDER BY last_activity DESC NULLS LAST
+        LIMIT 1
+        FOR UPDATE`,
+      [tenantId, contactId, ghlConversationId ?? null],
+    );
+    return result.rows[0];
   }
 
   private async recordFailedEvent(event: GhlWebhookEvent, tenantId: string, error: unknown): Promise<void> {
