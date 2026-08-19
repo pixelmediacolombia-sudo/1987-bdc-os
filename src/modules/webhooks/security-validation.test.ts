@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
+import { Pool } from "pg";
 import type { Request, Response } from "express";
 import type { GhlOAuthController } from "@/features/ghl-oauth/presentation/http/ghl-oauth.controller";
 import type { ProcessGHLWebhookUseCase } from "@/modules/webhooks/application/process-ghl-webhook.use-case";
@@ -129,10 +130,72 @@ test("collapses five identical concurrent deliveries to one background task", as
   }
 });
 
-test("RLS cross-tenant matrix requires an explicit test database", { skip: !process.env.SECURITY_TEST_DATABASE_URL }, async () => {
-  // This opt-in integration test is intentionally not run against .env or a
-  // production database. Set SECURITY_TEST_DATABASE_URL plus two disposable
-  // tenant UUIDs in the test environment to exercise SELECT/INSERT/UPDATE/DELETE.
-  assert.ok(process.env.SECURITY_TEST_TENANT_A);
-  assert.ok(process.env.SECURITY_TEST_TENANT_B);
+test("RLS cross-tenant matrix isolates integrations, audits, and raw webhooks", {
+  skip: !process.env.SECURITY_TEST_DATABASE_URL,
+}, async () => {
+  const tenantA = process.env.SECURITY_TEST_TENANT_A;
+  const tenantB = process.env.SECURITY_TEST_TENANT_B;
+  assert.match(tenantA ?? "", /^[0-9a-f-]{36}$/i);
+  assert.match(tenantB ?? "", /^[0-9a-f-]{36}$/i);
+
+  const pool = new Pool({
+    connectionString: process.env.SECURITY_TEST_DATABASE_URL,
+    ssl: ["1", "true", "yes"].includes((process.env.SECURITY_TEST_DATABASE_SSL ?? "").toLowerCase())
+      ? { rejectUnauthorized: false }
+      : undefined,
+  });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantA]);
+
+    const integration = await client.query<{ id: string }>(
+      `INSERT INTO public.integrations
+         (tenant_id, provider, encrypted_access_token, encrypted_refresh_token, scopes)
+       VALUES ($1, 'ghl', 'test-access-a', 'test-refresh-a', ARRAY['contacts.readonly'])
+       RETURNING id`,
+      [tenantA],
+    );
+    const integrationId = integration.rows[0]?.id;
+    assert.ok(integrationId);
+
+    await client.query(
+      `INSERT INTO public.integration_token_audits (tenant_id, integration_id, action, metadata)
+       VALUES ($1, $2, 'token_refreshed', '{}'::jsonb)`,
+      [tenantA, integrationId],
+    );
+    await client.query(
+      `INSERT INTO public.raw_webhooks
+         (tenant_id, external_id, event_type, location_id, signature, payload)
+       VALUES ($1, 'rls-test-a', 'ContactCreate', 'rls-location-a', 'test-signature', '{}'::jsonb)`,
+      [tenantA],
+    );
+
+    await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantB]);
+    for (const table of ["integrations", "integration_token_audits", "raw_webhooks"]) {
+      const visible = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM public.${table}`);
+      assert.equal(visible.rows[0]?.count, "0", `${table} leaked tenant A rows`);
+    }
+
+    await assert.rejects(
+      client.query(
+        `INSERT INTO public.integrations
+           (tenant_id, provider, encrypted_access_token, scopes)
+         VALUES ($1, 'ghl', 'cross-tenant', ARRAY[]::text[])`,
+        [tenantA],
+      ),
+    );
+    assert.equal(
+      (await client.query("UPDATE public.integrations SET health_state = 'degraded' WHERE id = $1", [integrationId])).rowCount,
+      0,
+    );
+    assert.equal(
+      (await client.query("DELETE FROM public.raw_webhooks WHERE tenant_id = $1", [tenantA])).rowCount,
+      0,
+    );
+  } finally {
+    await client.query("ROLLBACK").catch(() => undefined);
+    client.release();
+    await pool.end();
+  }
 });
