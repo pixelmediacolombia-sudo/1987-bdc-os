@@ -1,0 +1,6 @@
+{
+  "version": "v1",
+  "downPayment": { "min": null, "max": null, "currency": "USD" },
+  "quietHours": { "enabled": false, "start": null, "end": null },
+  "humanHandoff": { "enabled": true, "triggers": [] }
+}

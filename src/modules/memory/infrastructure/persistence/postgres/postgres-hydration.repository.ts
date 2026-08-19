@@ -25,7 +25,7 @@ type TranscriptRow = {
   content: string;
   created_at: Date;
 };
-type FactRow = { fact_key: string; fact_value: string };
+type FactRow = { fact_key: string; fact_value: string | null };
 type ObjectiveRow = { objective_type: string; asked: boolean; answered: boolean; skipped: boolean };
 
 export class PostgresHydrationRepository implements HydrationRepositoryPort {
@@ -66,8 +66,8 @@ export class PostgresHydrationRepository implements HydrationRepositoryPort {
   }
 
   async loadActiveFacts(tenantId: string, contactId: string): Promise<ActiveFact[]> {
-    const rows = await this.readWithTenant<FactRow>(tenantId, `SELECT fact_key, fact_value FROM public.facts WHERE tenant_id = $1 AND contact_id = $2 AND active = true ORDER BY fact_key ASC, updated_at DESC`, [tenantId, contactId]);
-    return rows.map((row) => ({ key: row.fact_key, value: row.fact_value }));
+    const rows = await this.readWithTenant<FactRow>(tenantId, `SELECT key AS fact_key, value AS fact_value FROM public.facts WHERE tenant_id = $1 AND contact_id = $2 AND active = true ORDER BY key ASC, observed_at DESC`, [tenantId, contactId]);
+    return rows.map((row) => ({ key: row.fact_key, value: row.fact_value ?? "" }));
   }
 
   async loadObjectives(tenantId: string, contactId: string): Promise<ObjectiveLedgerEntry[]> {

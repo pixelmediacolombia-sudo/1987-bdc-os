@@ -25,7 +25,7 @@ export type BurstBufferOptions = {
   logger?: BurstBufferLogger;
 };
 
-type StoredMessage = BufferedInboundMessage;
+type StoredMessage = BufferedInboundMessage & { tenantId: string };
 
 const defaultLogger: BurstBufferLogger = {
   info: (message) => console.info(message),
@@ -51,10 +51,12 @@ export class BurstBufferService implements BurstBufferPort {
     this.logger = options.logger ?? defaultLogger;
   }
 
-  async add(message: InboundMessage): Promise<void> {
+  async add(message: InboundMessage, tenantId: string): Promise<void> {
     const contactId = this.requireContactId(message.contactId);
+    const normalizedTenantId = this.requireTenantId(tenantId);
     const storedMessage: StoredMessage = {
       ...message,
+      tenantId: normalizedTenantId,
       receivedAt: new Date().toISOString(),
     };
     const messageKey = this.messageKey(contactId);
@@ -106,7 +108,10 @@ export class BurstBufferService implements BurstBufferPort {
         .sort((left, right) => left.receivedAt.localeCompare(right.receivedAt));
       await this.redis.del(messageKey);
       try {
+        const tenantIds = new Set(messages.map((item) => item.tenantId));
+        if (tenantIds.size !== 1) throw new Error("Burst buffer contains multiple tenant IDs for one contact");
         await this.orchestrator.process({
+          tenantId: messages[0].tenantId,
           contactId,
           messages,
           consolidatedText: messages.map((item) => item.content).join("\n"),
@@ -134,7 +139,7 @@ export class BurstBufferService implements BurstBufferPort {
     }
 
     const message = parsed as Partial<StoredMessage>;
-    if (typeof message.contactId !== "string" || typeof message.content !== "string" || typeof message.receivedAt !== "string") {
+    if (typeof message.contactId !== "string" || typeof message.content !== "string" || typeof message.receivedAt !== "string" || typeof message.tenantId !== "string") {
       throw new Error("Burst buffer message is missing required fields");
     }
     return message as StoredMessage;
@@ -143,6 +148,12 @@ export class BurstBufferService implements BurstBufferPort {
   private requireContactId(contactId: string): string {
     const normalized = contactId.trim();
     if (!normalized) throw new Error("Inbound message contactId cannot be empty");
+    return normalized;
+  }
+
+  private requireTenantId(tenantId: string): string {
+    const normalized = tenantId.trim();
+    if (!normalized) throw new Error("Inbound message tenantId cannot be empty");
     return normalized;
   }
 
