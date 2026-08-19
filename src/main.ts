@@ -16,6 +16,7 @@ import { ProcessGHLWebhookUseCase } from "@/modules/webhooks/application/process
 import { WebhookController } from "@/modules/webhooks/presentation/http/webhook.controller";
 import { ContactMutex } from "@/modules/control/application/contact-mutex";
 import { BurstBufferService } from "@/modules/control/application/burst-buffer.service";
+import { HumanSuppressionService } from "@/modules/control/application/human-suppression.service";
 import { HydratingInboundConversationOrchestrator } from "@/modules/control/application/hydrating-inbound-conversation-orchestrator";
 import { IoredisClient } from "@/modules/control/infrastructure/redis/ioredis-client";
 import { ConversationHydrator } from "@/modules/memory/application/conversation-hydrator";
@@ -44,14 +45,16 @@ async function start(): Promise<void> {
     new PostgresHydrationRepository(pool),
     new LocalPolicyPackProvider(),
   );
+  const contactMutex = new ContactMutex(redis, config.contactMutexTtlMs);
   const burstBuffer = new BurstBufferService(
     redis,
-    new ContactMutex(redis, config.contactMutexTtlMs),
+    contactMutex,
     new HydratingInboundConversationOrchestrator(hydrator),
     { bufferSeconds: config.burstBufferSeconds },
   );
+  const humanSuppression = new HumanSuppressionService(burstBuffer, contactMutex);
   const webhookController = new WebhookController(
-    new ProcessGHLWebhookUseCase(new PostgresWebhookRepository(pool), burstBuffer),
+    new ProcessGHLWebhookUseCase(new PostgresWebhookRepository(pool), burstBuffer, humanSuppression),
   );
   const app = createHttpApp(controller, webhookController);
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));

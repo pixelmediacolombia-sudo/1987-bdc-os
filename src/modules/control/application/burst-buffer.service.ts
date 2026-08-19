@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { InboundMessage } from "@/modules/webhooks/domain/ghl-webhook-event";
 import { ContactMutex } from "@/modules/control/application/contact-mutex";
-import type { BurstBufferPort } from "@/modules/control/application/ports/burst-buffer.port";
+import type {
+  BurstBufferCancellationPort,
+  BurstBufferPort,
+} from "@/modules/control/application/ports/burst-buffer.port";
 import type {
   BufferedInboundMessage,
   InboundConversationOrchestratorPort,
@@ -32,10 +35,11 @@ const defaultLogger: BurstBufferLogger = {
   error: (message) => console.error(message),
 };
 
-export class BurstBufferService implements BurstBufferPort {
+export class BurstBufferService implements BurstBufferPort, BurstBufferCancellationPort {
   private readonly bufferSeconds: number;
   private readonly timerScheduler: BurstBufferTimerScheduler;
   private readonly logger: BurstBufferLogger;
+  private readonly scheduledTimers = new Map<string, Set<BurstBufferTimer>>();
 
   constructor(
     private readonly redis: RedisClientPort,
@@ -73,19 +77,36 @@ export class BurstBufferService implements BurstBufferPort {
     this.schedule(contactId, timerToken, this.bufferSeconds * 1000);
   }
 
+  async cancel(contactId: string): Promise<void> {
+    const normalizedContactId = this.requireContactId(contactId);
+    const timers = this.scheduledTimers.get(normalizedContactId);
+    if (timers) {
+      for (const timer of timers) clearTimeout(timer);
+      this.scheduledTimers.delete(normalizedContactId);
+    }
+
+    await this.redis.del(this.messageKey(normalizedContactId), this.timerKey(normalizedContactId));
+    this.logger.info(`Burst buffer cancelled for contact ${normalizedContactId}`);
+  }
+
   private schedule(contactId: string, timerToken: string, delayMs: number): void {
-    this.timerScheduler(() => {
+    let timer: BurstBufferTimer;
+    timer = this.timerScheduler(() => {
+      this.scheduledTimers.get(contactId)?.delete(timer);
       void this.flushAfterTimer(contactId, timerToken).catch((error: unknown) => {
         this.logger.error(
           `Burst buffer flush failed for contact ${contactId}: ${error instanceof Error ? error.message : "unknown error"}`,
         );
       });
     }, delayMs);
+    const timers = this.scheduledTimers.get(contactId) ?? new Set<BurstBufferTimer>();
+    timers.add(timer);
+    this.scheduledTimers.set(contactId, timers);
   }
 
   private async flushAfterTimer(contactId: string, timerToken: string): Promise<void> {
     const currentTimerToken = await this.redis.get(this.timerKey(contactId));
-    if (currentTimerToken && currentTimerToken !== timerToken) return;
+    if (currentTimerToken !== timerToken) return;
 
     const acquired = await this.mutex.acquire(contactId);
     if (!acquired) {

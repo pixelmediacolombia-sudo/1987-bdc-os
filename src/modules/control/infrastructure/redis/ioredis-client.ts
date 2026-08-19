@@ -38,8 +38,8 @@ export class IoredisClient implements RedisClientPort {
     return this.client.get(key);
   }
 
-  async del(key: string): Promise<number> {
-    return this.client.del(key);
+  async del(...keys: string[]): Promise<number> {
+    return this.client.del(...keys);
   }
 
   async rpush(key: string, ...values: string[]): Promise<number> {

@@ -9,7 +9,7 @@
     "start": "node -r module-alias/register dist/main.js",
     "db:migrate": "npm run build && node -r module-alias/register dist/features/ghl-oauth/infrastructure/persistence/postgres/migrate.js",
     "typecheck": "tsc --noEmit",
-    "test:security": "npm run build && node -r module-alias/register --test dist/modules/webhooks/security-validation.test.js dist/features/ghl-oauth/application/use-cases/ghl-token-refresh.test.js dist/modules/control/burst-buffer.test.js dist/modules/memory/hydration-service.test.js"
+    "test:security": "npm run build && node -r module-alias/register --test dist/modules/webhooks/security-validation.test.js dist/features/ghl-oauth/application/use-cases/ghl-token-refresh.test.js dist/modules/control/burst-buffer.test.js dist/modules/control/human-suppression.test.js dist/modules/memory/hydration-service.test.js"
   },
   "keywords": [],
   "author": "",

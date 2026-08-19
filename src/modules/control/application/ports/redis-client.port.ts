@@ -9,7 +9,7 @@ export interface RedisClientPort {
     ttl: number,
   ): Promise<RedisSetResult>;
   get(key: string): Promise<string | null>;
-  del(key: string): Promise<number>;
+  del(...keys: string[]): Promise<number>;
   rpush(key: string, ...values: string[]): Promise<number>;
   lpush(key: string, ...values: string[]): Promise<number>;
   lrange(key: string, start: number, stop: number): Promise<string[]>;

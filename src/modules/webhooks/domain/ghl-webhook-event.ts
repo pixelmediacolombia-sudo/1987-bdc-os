@@ -11,6 +11,17 @@ export type InboundMessage = {
   semanticHash: string;
 };
 
+export type HumanInterruptionTrigger = "staff_message" | "control_tag";
+
+export type HumanInterruption = {
+  trigger: HumanInterruptionTrigger;
+  contactId: string;
+  conversationId?: string;
+  ownerId?: string;
+  controlTag?: string;
+  staffMessage?: InboundMessage;
+};
+
 export type GhlWebhookEvent = {
   externalId: string;
   eventType: string;
@@ -18,6 +29,9 @@ export type GhlWebhookEvent = {
   signature: string;
   rawBody: Buffer;
   payload: JsonObject;
+  contactId?: string;
+  conversationId?: string;
+  humanInterruption?: HumanInterruption;
   inboundMessage?: InboundMessage;
 };
 
