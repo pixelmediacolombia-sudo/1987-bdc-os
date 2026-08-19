@@ -100,14 +100,19 @@ export class PostgresWebhookRepository implements WebhookRepository {
       throw new Error("GHL contact was not persisted");
     }
 
-    const conversation = await this.findOrCreateConversation(client, contact.rows[0].id, message.channel);
+    const conversation = await this.findOrCreateConversation(
+      client,
+      tenantId,
+      contact.rows[0].id,
+      message.channel,
+    );
 
     await client.query(
       `INSERT INTO public.messages
-         (conversation_id, external_id, direction, sender_type, content, semantic_hash, status)
-       VALUES ($1, $2, 'inbound', 'client', $3, $4, 'received')
+         (tenant_id, conversation_id, external_id, direction, sender_type, content, semantic_hash, status)
+       VALUES ($1, $2, $3, 'inbound', 'client', $4, $5, 'received')
        ON CONFLICT DO NOTHING`,
-      [conversation.id, message.externalId, message.content, message.semanticHash],
+      [tenantId, conversation.id, message.externalId, message.content, message.semanticHash],
     );
 
     await client.query(
@@ -120,25 +125,26 @@ export class PostgresWebhookRepository implements WebhookRepository {
 
   private async findOrCreateConversation(
     client: PoolClient,
+    tenantId: string,
     contactId: string,
     channel: string,
   ): Promise<ConversationRow> {
     const existing = await client.query<ConversationRow>(
       `SELECT id
          FROM public.conversations
-        WHERE contact_id = $1 AND channel = $2
+        WHERE tenant_id = $1 AND contact_id = $2 AND channel = $3
         ORDER BY last_activity DESC NULLS LAST
         LIMIT 1
         FOR UPDATE`,
-      [contactId, channel],
+      [tenantId, contactId, channel],
     );
     if (existing.rowCount === 1 && existing.rows[0]) return existing.rows[0];
 
     const created = await client.query<ConversationRow>(
-      `INSERT INTO public.conversations (contact_id, channel, owner, state, last_activity)
-       VALUES ($1, $2, 'ghl', 'open', now())
+      `INSERT INTO public.conversations (tenant_id, contact_id, channel, owner, state, last_activity)
+       VALUES ($1, $2, $3, 'ghl', 'open', now())
        RETURNING id`,
-      [contactId, channel],
+      [tenantId, contactId, channel],
     );
     if (created.rowCount !== 1 || !created.rows[0]) {
       throw new Error("GHL conversation was not persisted");
