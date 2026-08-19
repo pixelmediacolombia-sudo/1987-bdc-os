@@ -9,13 +9,17 @@ import type {
   WebhookProcessResult,
   WebhookRepository,
 } from "@/modules/webhooks/application/ports/webhook-repository.port";
+import type { OutboundMessageRegistryPort } from "@/modules/control/application/ports/outbound-message-registry.port";
 
 type TenantRow = { tenant_id: string };
 type ContactRow = { id: string };
 type ConversationRow = { id: string };
 
 export class PostgresWebhookRepository implements WebhookRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly outboundRegistry?: OutboundMessageRegistryPort,
+  ) {}
 
   async process(event: GhlWebhookEvent): Promise<WebhookProcessResult> {
     const client = await this.pool.connect();
@@ -52,9 +56,9 @@ export class PostgresWebhookRepository implements WebhookRepository {
         await this.persistInboundMessage(client, tenantId, event.inboundMessage);
       }
 
-      if (event.humanInterruption) {
-        await this.persistHumanInterruption(client, tenantId, event.humanInterruption);
-      }
+      const suppressAi = event.humanInterruption
+        ? await this.persistHumanInterruption(client, tenantId, event.humanInterruption)
+        : undefined;
 
       await client.query(
         `UPDATE public.raw_webhooks
@@ -63,7 +67,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
         [rawEvent.rows[0].id],
       );
       await client.query("COMMIT");
-      return { duplicate: false, tenantId };
+      return { duplicate: false, tenantId, suppressAi };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       if (tenantId) await this.recordFailedEvent(event, tenantId, error);
@@ -168,7 +172,18 @@ export class PostgresWebhookRepository implements WebhookRepository {
     client: PoolClient,
     tenantId: string,
     interruption: HumanInterruption,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const automationOutbound = Boolean(
+      interruption.trigger === "staff_message" &&
+      interruption.staffMessage &&
+      this.outboundRegistry &&
+      await this.outboundRegistry.wasIssuedBy1987({
+        tenantId,
+        contactId: interruption.contactId,
+        semanticHash: interruption.staffMessage.semanticHash,
+        providerMessageId: interruption.staffMessage.externalId,
+      }),
+    );
     const contact = await client.query<ContactRow>(
       `INSERT INTO public.contacts AS c
          (tenant_id, ghl_contact_id, phone, email, preferred_language, consent_state)
@@ -203,13 +218,13 @@ export class PostgresWebhookRepository implements WebhookRepository {
       await client.query(
         `INSERT INTO public.messages
            (tenant_id, conversation_id, external_id, direction, sender_type, content, semantic_hash, status)
-         VALUES ($1, $2, $3, 'outbound', 'staff', $4, $5, 'received')
+         VALUES ($1, $2, $3, 'outbound', $4, $5, $6, 'received')
          ON CONFLICT DO NOTHING`,
-        [tenantId, conversation.id, interruption.staffMessage.externalId, interruption.staffMessage.content, interruption.staffMessage.semanticHash],
+        [tenantId, conversation.id, interruption.staffMessage.externalId, automationOutbound ? "assistant" : "staff", interruption.staffMessage.content, interruption.staffMessage.semanticHash],
       );
     }
 
-    if (conversation) {
+    if (conversation && !automationOutbound) {
       await client.query(
         `UPDATE public.conversations
             SET state = 'paused', owner = $2, last_activity = now()
@@ -218,7 +233,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
       );
     }
 
-    await client.query(
+    if (!automationOutbound) await client.query(
       `INSERT INTO public.decision_logs
          (tenant_id, contact_id, input_version, allowed_actions, selected_action, reason, model_trace)
        VALUES ($1, $2, 'control-v1', '[]'::jsonb, 'pause_ai', $3, $4::jsonb)`,
@@ -229,6 +244,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
         JSON.stringify({ trigger: interruption.trigger, controlTag: interruption.controlTag ?? null, conversationId: conversation?.id ?? null }),
       ],
     );
+    return !automationOutbound;
   }
 
   private async findHumanConversation(

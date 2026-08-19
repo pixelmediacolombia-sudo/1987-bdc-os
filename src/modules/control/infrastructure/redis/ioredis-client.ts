@@ -59,6 +59,18 @@ export class IoredisClient implements RedisClientPort {
     return keys;
   }
 
+  async zadd(key: string, score: number, member: string): Promise<number> {
+    return this.client.zadd(key, score, member);
+  }
+
+  async zrangebyscore(key: string, min: number, max: number): Promise<string[]> {
+    return this.client.zrangebyscore(key, min, max);
+  }
+
+  async zrem(key: string, member: string): Promise<number> {
+    return this.client.zrem(key, member);
+  }
+
   async del(...keys: string[]): Promise<number> {
     return this.client.del(...keys);
   }

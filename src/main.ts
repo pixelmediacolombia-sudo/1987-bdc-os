@@ -19,10 +19,12 @@ import { BurstBufferService } from "@/modules/control/application/burst-buffer.s
 import { HumanSuppressionService } from "@/modules/control/application/human-suppression.service";
 import { HydratingInboundConversationOrchestrator } from "@/modules/control/application/hydrating-inbound-conversation-orchestrator";
 import { IoredisClient } from "@/modules/control/infrastructure/redis/ioredis-client";
+import { RedisBurstFlushQueue } from "@/modules/control/infrastructure/redis/redis-burst-flush-queue";
 import { ConversationHydrator } from "@/modules/memory/application/conversation-hydrator";
 import { LocalPolicyPackProvider } from "@/modules/memory/infrastructure/policies/local-policy-pack.provider";
 import { ensureMemoryTables } from "@/modules/memory/infrastructure/persistence/postgres/memory.migration";
 import { PostgresHydrationRepository } from "@/modules/memory/infrastructure/persistence/postgres/postgres-hydration.repository";
+import { PostgresOutboundMessageRegistry } from "@/modules/control/infrastructure/persistence/postgres/postgres-outbound-message-registry";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -50,19 +52,24 @@ async function start(): Promise<void> {
     redis,
     contactMutex,
     new HydratingInboundConversationOrchestrator(hydrator),
-    { bufferSeconds: config.burstBufferSeconds, controlTtlSeconds: config.burstBufferControlTtlSeconds },
+    {
+      bufferSeconds: config.burstBufferSeconds,
+      controlTtlSeconds: config.burstBufferControlTtlSeconds,
+      durableQueue: new RedisBurstFlushQueue(redis),
+    },
   );
   await burstBuffer.recoverPendingTimers();
+  await burstBuffer.start();
   const humanSuppression = new HumanSuppressionService(burstBuffer, contactMutex);
   const webhookController = new WebhookController(
-    new ProcessGHLWebhookUseCase(new PostgresWebhookRepository(pool), burstBuffer, humanSuppression),
+    new ProcessGHLWebhookUseCase(new PostgresWebhookRepository(pool, new PostgresOutboundMessageRegistry(pool)), burstBuffer, humanSuppression),
   );
   const app = createHttpApp(controller, webhookController);
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
   const shutdown = (signal: string) => {
     console.log(`Received ${signal}; shutting down`);
-    server.close(() => void Promise.all([pool.end(), redis.close()]));
+    server.close(() => void Promise.all([burstBuffer.stop(), pool.end(), redis.close()]));
   };
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));

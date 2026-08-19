@@ -35,7 +35,10 @@ class FakeRedis implements RedisClientPort {
   }
 
   async ttl(key: string): Promise<number> { return this.values.has(key) ? 90 : -2; }
-  async scan(match: string): Promise<string[]> { return [...this.values.keys()].filter((key) => key.startsWith(match.replace("*", ""))); }
+  async scan(match: string): Promise<string[]> { return [...this.values.keys()].filter((key) => key.startsWith(match.split("*")[0] ?? match)); }
+  async zadd(): Promise<number> { return 1; }
+  async zrangebyscore(): Promise<string[]> { return []; }
+  async zrem(): Promise<number> { return 1; }
 
   async del(key: string): Promise<number> {
     let deleted = this.lists.delete(key) ? 1 : 0;
@@ -81,9 +84,11 @@ class FakeRedis implements RedisClientPort {
 
 class CapturingOrchestrator implements InboundConversationOrchestratorPort {
   result?: ConsolidatedInboundConversation;
+  calls = 0;
   resolve?: () => void;
 
   async process(input: ConsolidatedInboundConversation): Promise<void> {
+    this.calls += 1;
     this.result = input;
     this.resolve?.();
   }
@@ -129,7 +134,7 @@ test("consolida tres fragmentos después de un búfer exacto de 15 segundos", as
   await service.add(createMessage("message-3", "¿La tienen manual?"), "tenant-42");
 
   assert.equal(redis.lists.get("buffer:messages:tenant:tenant-42:contact:contact-42")?.length, 3);
-  assert.equal(scheduledDelayMs, 15_000);
+  assert.ok(scheduledDelayMs >= 14_900 && scheduledDelayMs <= 15_000, `buffer delay=${scheduledDelayMs}ms`);
   assert.equal(redis.setCalls.find((call) => call.key === "buffer:timer:tenant:tenant-42:contact:contact-42")?.ttl, 90);
   assert.match(logs.join("\n"), /count=3/);
   assert.match(logs.join("\n"), /delay=15s/);
@@ -165,4 +170,72 @@ test("el mutex solo libera el token que lo adquirió", async () => {
   await first.release("tenant-42", "contact-42");
   assert.equal(await second.acquire("tenant-42", "contact-42"), true);
   assert.equal(await first.acquire("tenant-43", "contact-42"), true);
+});
+
+test("recupera runAt tras reinicio y hace un único flush al segundo 15", async () => {
+  const redis = new FakeRedis();
+  const mutex = new ContactMutex(redis, 30_000);
+  const orchestrator = new CapturingOrchestrator();
+  let now = 0;
+  const firstTimers: Array<{ callback: () => void; delayMs: number }> = [];
+  const first = new BurstBufferService(redis, mutex, orchestrator, {
+    bufferSeconds: 15,
+    controlTtlSeconds: 90,
+    clock: () => now,
+    timerScheduler: (callback, delayMs) => {
+      firstTimers.push({ callback, delayMs });
+      return setTimeout(() => undefined, 60_000).unref();
+    },
+  });
+  await first.add(createMessage("restart-1", "Hola"), "tenant-42");
+  assert.equal(firstTimers[0]?.delayMs, 15_000);
+
+  now = 5_000;
+  const recoveredTimers: Array<{ callback: () => void; delayMs: number }> = [];
+  const recovered = new BurstBufferService(redis, mutex, orchestrator, {
+    bufferSeconds: 15,
+    controlTtlSeconds: 90,
+    clock: () => now,
+    timerScheduler: (callback, delayMs) => {
+      recoveredTimers.push({ callback, delayMs });
+      return setTimeout(() => undefined, 60_000).unref();
+    },
+  });
+  await recovered.recoverPendingTimers();
+  assert.equal(recoveredTimers[0]?.delayMs, 10_000);
+
+  now = 15_000;
+  recoveredTimers[0]?.callback();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(orchestrator.calls, 1);
+  assert.equal(redis.lists.get("buffer:messages:tenant:tenant-42:contact:contact-42")?.length ?? 0, 0);
+});
+
+test("al fallar el orquestador reemplaza el token y permite el retry", async () => {
+  const redis = new FakeRedis();
+  const mutex = new ContactMutex(redis, 30_000);
+  let failures = 0;
+  const orchestrator: InboundConversationOrchestratorPort = {
+    process: async () => {
+      failures += 1;
+      if (failures === 1) throw new Error("orchestrator unavailable");
+    },
+  };
+  const timers: Array<() => void> = [];
+  const service = new BurstBufferService(redis, mutex, orchestrator, {
+    bufferSeconds: 1,
+    controlTtlSeconds: 10,
+    timerScheduler: (callback) => {
+      timers.push(callback);
+      return setTimeout(() => undefined, 60_000).unref();
+    },
+  });
+  await service.add(createMessage("retry-1", "Hola"), "tenant-42");
+  timers[0]?.();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(timers.length, 2);
+  timers[1]?.();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(failures, 2);
+  assert.equal(redis.lists.get("buffer:messages:tenant:tenant-42:contact:contact-42")?.length ?? 0, 0);
 });

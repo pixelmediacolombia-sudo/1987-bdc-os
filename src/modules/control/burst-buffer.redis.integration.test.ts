@@ -4,6 +4,7 @@ import { BurstBufferService, scopeSuffix } from "@/modules/control/application/b
 import { ContactMutex } from "@/modules/control/application/contact-mutex";
 import type { ConsolidatedInboundConversation, InboundConversationOrchestratorPort } from "@/modules/control/application/ports/inbound-conversation-orchestrator.port";
 import { IoredisClient } from "@/modules/control/infrastructure/redis/ioredis-client";
+import { RedisBurstFlushQueue } from "@/modules/control/infrastructure/redis/redis-burst-flush-queue";
 
 const enabled = process.env.RUN_REDIS_INTEGRATION_TESTS === "true" && Boolean(process.env.REDIS_URL?.trim());
 
@@ -18,12 +19,16 @@ test("Redis real: expira la ventana y hace flush atómico del búfer", { skip: !
   const redis = new IoredisClient(process.env.REDIS_URL as string);
   const mutex = new ContactMutex(redis, 30_000);
   const orchestrator = new CapturingOrchestrator();
+  const logs: string[] = [];
   const service = new BurstBufferService(redis, mutex, orchestrator, {
     bufferSeconds: 1,
     controlTtlSeconds: 5,
+    durableQueue: new RedisBurstFlushQueue(redis),
+    logger: { info: (message) => logs.push(message), error: (message) => logs.push(`ERROR ${message}`) },
   });
 
   try {
+    await service.start();
     await service.add({
       externalId: `integration-message-${Date.now()}`,
       contactId,
@@ -39,10 +44,12 @@ test("Redis real: expira la ventana y hace flush atómico del búfer", { skip: !
     assert.equal(await redis.lrange(messageKey, 0, -1).then((items) => items.length), 1);
     assert.ok((await redis.ttl(timerKey)) > 1, "el TTL de control debe superar la ventana");
 
-    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
     assert.equal(await redis.lrange(messageKey, 0, -1).then((items) => items.length), 0);
     assert.equal(await redis.get(timerKey), null);
     assert.equal(orchestrator.result?.consolidatedText, "mensaje de integración");
+    assert.match(logs.join("\n"), /mutex acquired/);
+    assert.match(logs.join("\n"), /consolidated 1 messages/);
   } finally {
     await service.cancel(tenantId, contactId).catch(() => undefined);
     await redis.close();

@@ -74,6 +74,11 @@ function extractConversationId(payload: JsonObject, message: JsonObject): string
   ]) ?? stringAt(message, ["conversationId", "conversation_id", "conversation.id"]);
 }
 
+function extractEventContactId(payload: JsonObject, message: JsonObject, eventType: string): string | undefined {
+  return extractContactId(payload, message)
+    ?? (isContactUpdate(eventType) ? stringAt(payload, ["id", "data.id"]) : undefined);
+}
+
 function buildMessage(
   payload: JsonObject,
   eventType: string,
@@ -132,23 +137,26 @@ function isStaffSender(payload: JsonObject): boolean {
 }
 
 function isContactUpdate(eventType: string): boolean {
-  return /contact[._-]?(update|updated)|contactupdate/i.test(eventType);
+  return /contact(?:[._-]?tag)?[._-]?(update|updated)|contacttagupdate/i.test(eventType);
 }
 
 const CONTROL_TAGS = new Set(["human_takeover", "desactivar ia", "stop bot", "stop_ai", "veto"]);
 
 function findControlTag(payload: JsonObject): string | undefined {
-  const tags = stringsAt(payload, ["tags", "contact.tags", "data.tags", "data.contact.tags"]);
+  const tags = [
+    ...stringsAt(payload, ["tags", "contact.tags", "data.tags", "data.contact.tags"]),
+    stringAt(payload, ["tag", "tag.name", "data.tag", "data.tag.name"]),
+  ].filter((tag): tag is string => Boolean(tag));
   return tags.find((tag) => CONTROL_TAGS.has(tag.toLowerCase()));
 }
 
 function buildHumanInterruption(payload: JsonObject, eventType: string, externalId: string): HumanInterruption | undefined {
   const message = objectAt(payload, ["message", "data.message"]) ?? payload;
-  const contactId = extractContactId(payload, message);
+  const contactId = extractEventContactId(payload, message, eventType);
   if (!contactId) return undefined;
   const conversationId = extractConversationId(payload, message);
 
-  if (isOutbound(payload, eventType) && isStaffSender(payload)) {
+  if (isOutbound(payload, eventType)) {
     const staffMessage = buildMessage(payload, eventType, externalId, "outbound");
     return {
       trigger: "staff_message",
@@ -185,23 +193,31 @@ export function parseGhlWebhookPayload(
   if (!object) throw new InvalidGhlWebhookError("Webhook payload must be a JSON object");
 
   const locationId = stringAt(object, ["locationId", "location_id", "location.id", "data.locationId", "data.location_id"]);
-  const externalId = stringAt(object, [
+  const eventType = stringAt(object, ["eventType", "event_type", "type", "event", "data.eventType"]) ?? "unknown";
+  const message = objectAt(object, ["message", "data.message"]) ?? object;
+  const contactId = extractEventContactId(object, message, eventType);
+  const deliveryId = stringAt(object, [
     "eventId",
     "event_id",
+    "webhookId",
+    "webhook_id",
+    "deliveryId",
+    "delivery_id",
+    "requestId",
+    "request_id",
     "messageId",
     "message_id",
     "message.id",
     "data.eventId",
     "data.event_id",
-    "id",
   ]);
-  const eventType = stringAt(object, ["eventType", "event_type", "type", "event", "data.eventType"]) ?? "unknown";
 
   if (!locationId) throw new InvalidGhlWebhookError("Webhook payload is missing locationId");
+  const externalId = deliveryId
+    ?? (isContactUpdate(eventType) && contactId
+      ? `contact-tag:${contactId}:${createHash("sha256").update(rawBody).digest("hex")}`
+      : stringAt(object, ["id"]));
   if (!externalId) throw new InvalidGhlWebhookError("Webhook payload is missing an event or message identifier");
-
-  const message = objectAt(object, ["message", "data.message"]) ?? object;
-  const contactId = extractContactId(object, message);
   const conversationId = extractConversationId(object, message);
   const humanInterruption = buildHumanInterruption(object, eventType, externalId);
 

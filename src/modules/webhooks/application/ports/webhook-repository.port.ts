@@ -3,6 +3,7 @@ import type { GhlWebhookEvent } from "@/modules/webhooks/domain/ghl-webhook-even
 export type WebhookProcessResult = {
   duplicate: boolean;
   tenantId: string;
+  suppressAi?: boolean;
 };
 
 export interface WebhookRepository {

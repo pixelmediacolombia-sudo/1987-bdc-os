@@ -11,6 +11,9 @@ export interface RedisClientPort {
   get(key: string): Promise<string | null>;
   ttl(key: string): Promise<number>;
   scan(match: string): Promise<string[]>;
+  zadd(key: string, score: number, member: string): Promise<number>;
+  zrangebyscore(key: string, min: number, max: number): Promise<string[]>;
+  zrem(key: string, member: string): Promise<number>;
   del(...keys: string[]): Promise<number>;
   rpush(key: string, ...values: string[]): Promise<number>;
   lpush(key: string, ...values: string[]): Promise<number>;

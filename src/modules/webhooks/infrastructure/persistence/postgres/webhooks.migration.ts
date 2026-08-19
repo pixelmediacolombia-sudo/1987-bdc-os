@@ -23,6 +23,20 @@ CREATE INDEX IF NOT EXISTS raw_webhooks_tenant_received_idx
 CREATE INDEX IF NOT EXISTS raw_webhooks_location_idx
   ON public.raw_webhooks (location_id, received_at DESC);
 
+CREATE TABLE IF NOT EXISTS public.outbound_message_registry (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES public.tenants(dealer_id) ON DELETE CASCADE,
+  contact_id TEXT NOT NULL,
+  semantic_hash TEXT NOT NULL,
+  provider_message_id TEXT,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT outbound_registry_semantic_uq UNIQUE (tenant_id, contact_id, semantic_hash)
+);
+
+CREATE INDEX IF NOT EXISTS outbound_registry_provider_idx
+  ON public.outbound_message_registry (tenant_id, contact_id, provider_message_id);
+
 ALTER TABLE public.raw_webhooks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.raw_webhooks FORCE ROW LEVEL SECURITY;
 

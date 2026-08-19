@@ -28,7 +28,10 @@ class FakeRedis implements RedisClientPort {
   }
 
   async ttl(key: string): Promise<number> { return this.values.has(key) ? 90 : -2; }
-  async scan(match: string): Promise<string[]> { return [...this.values.keys()].filter((key) => key.startsWith(match.replace("*", ""))); }
+  async scan(match: string): Promise<string[]> { return [...this.values.keys()].filter((key) => key.startsWith(match.split("*")[0] ?? match)); }
+  async zadd(): Promise<number> { return 1; }
+  async zrangebyscore(): Promise<string[]> { return []; }
+  async zrem(): Promise<number> { return 1; }
 
   async del(...keys: string[]): Promise<number> {
     let deleted = 0;
@@ -180,6 +183,45 @@ test("detecta un mensaje outbound enviado por staff como takeover humano", async
   assert.equal(repository.interruption?.trigger, "staff_message");
   assert.equal(repository.interruption?.staffMessage?.content, "Te atiendo personalmente.");
   assert.equal(repository.state, "paused");
+});
+
+test("outbound oficial sin sender_type pausa por defecto si no existe registro de 1987", async () => {
+  const repository = new RlsAwareWebhookRepository();
+  let suppressions = 0;
+  const suppression = { suppress: async () => { suppressions += 1; } };
+  await new ProcessGHLWebhookUseCase(repository, undefined, suppression).execute({
+    payload: {
+      type: "OutboundMessage",
+      locationId: "location-42",
+      id: "provider-message-unknown",
+      contactId: CONTACT_ID,
+      conversationId: "conversation-42",
+      message: { body: "Mensaje outbound sin registro" },
+    },
+    rawBody: Buffer.from("{}"),
+    signature: "test-signature",
+  });
+  assert.equal(repository.interruption?.trigger, "staff_message");
+  assert.equal(suppressions, 1);
+});
+
+test("un outbound registrado por 1987 no dispara supresión", async () => {
+  const repository: WebhookRepository = {
+    process: async () => ({ duplicate: false, tenantId: TENANT_ID, suppressAi: false }),
+  };
+  let suppressions = 0;
+  await new ProcessGHLWebhookUseCase(repository, undefined, { suppress: async () => { suppressions += 1; } }).execute({
+    payload: {
+      type: "OutboundMessage",
+      locationId: "location-42",
+      id: "provider-message-1987",
+      contactId: CONTACT_ID,
+      message: { body: "Respuesta de 1987" },
+    },
+    rawBody: Buffer.from("{}"),
+    signature: "test-signature",
+  });
+  assert.equal(suppressions, 0);
 });
 
 test("una conversación pausada no reactiva IA con un nuevo inbound", async () => {

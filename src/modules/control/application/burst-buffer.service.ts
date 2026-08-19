@@ -10,6 +10,7 @@ import type {
   InboundConversationOrchestratorPort,
 } from "@/modules/control/application/ports/inbound-conversation-orchestrator.port";
 import type { RedisClientPort } from "@/modules/control/application/ports/redis-client.port";
+import type { BurstFlushQueuePort } from "@/modules/control/application/ports/burst-flush-queue.port";
 
 const MESSAGE_KEY_PREFIX = "buffer:messages:";
 const TIMER_KEY_PREFIX = "buffer:timer:";
@@ -27,10 +28,13 @@ export type BurstBufferOptions = {
   bufferSeconds?: number;
   controlTtlSeconds?: number;
   timerScheduler?: BurstBufferTimerScheduler;
+  durableQueue?: BurstFlushQueuePort;
+  clock?: () => number;
   logger?: BurstBufferLogger;
 };
 
 type StoredMessage = BufferedInboundMessage & { tenantId: string };
+type TimerState = { token: string; runAt: number };
 
 const defaultLogger: BurstBufferLogger = {
   info: (message) => console.info(message),
@@ -41,6 +45,8 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
   private readonly bufferSeconds: number;
   private readonly controlTtlSeconds: number;
   private readonly timerScheduler: BurstBufferTimerScheduler;
+  private readonly durableQueue?: BurstFlushQueuePort;
+  private readonly clock: () => number;
   private readonly logger: BurstBufferLogger;
   private readonly scheduledTimers = new Map<string, Set<BurstBufferTimer>>();
 
@@ -59,7 +65,17 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
       throw new Error("BURST_BUFFER_CONTROL_TTL_SECONDS must be at least twice BURST_BUFFER_SECONDS");
     }
     this.timerScheduler = options.timerScheduler ?? ((callback, delayMs) => setTimeout(callback, delayMs));
+    this.durableQueue = options.durableQueue;
+    this.clock = options.clock ?? (() => Date.now());
     this.logger = options.logger ?? defaultLogger;
+  }
+
+  async start(): Promise<void> {
+    await this.durableQueue?.start((job) => this.flushAfterTimer(job.tenantId, job.contactId, job.timerToken));
+  }
+
+  async stop(): Promise<void> {
+    await this.durableQueue?.stop();
   }
 
   async add(message: InboundMessage, tenantId: string): Promise<void> {
@@ -68,7 +84,7 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
     const storedMessage: StoredMessage = {
       ...message,
       tenantId: normalizedTenantId,
-      receivedAt: new Date().toISOString(),
+      receivedAt: new Date(this.clock()).toISOString(),
     };
     const messageKey = this.messageKey(normalizedTenantId, contactId);
     const timerKey = this.timerKey(normalizedTenantId, contactId);
@@ -77,11 +93,13 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
     this.logger.info(`Burst buffer accumulated message for contact ${contactId}; count=${count}`);
 
     const timerToken = randomUUID();
-    const timerCreated = await this.redis.set(timerKey, timerToken, "NX", "EX", this.controlTtlSeconds);
+    const runAt = this.clock() + this.bufferSeconds * 1000;
+    const timerValue = serializeTimer({ token: timerToken, runAt });
+    const timerCreated = await this.redis.set(timerKey, timerValue, "NX", "EX", this.controlTtlSeconds);
     if (timerCreated !== "OK") return;
 
     this.logger.info(`Burst buffer timer scheduled for tenant ${normalizedTenantId}, contact ${contactId}; delay=${this.bufferSeconds}s controlTtl=${this.controlTtlSeconds}s`);
-    this.schedule(normalizedTenantId, contactId, timerToken, this.bufferSeconds * 1000);
+    await this.scheduleTimer(normalizedTenantId, contactId, timerToken, runAt);
   }
 
   async cancel(tenantId: string, contactId: string): Promise<void> {
@@ -103,12 +121,20 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
     for (const timerKey of timerKeys) {
       const parsed = parseScopedKey(timerKey, TIMER_KEY_PREFIX);
       if (!parsed) continue;
-      const token = await this.redis.get(timerKey);
-      const ttl = await this.redis.ttl(timerKey);
-      if (!token || ttl <= 0) continue;
-      this.schedule(parsed.tenantId, parsed.contactId, token, ttl * 1000);
-      this.logger.info(`Burst buffer timer recovered after restart for tenant ${parsed.tenantId}, contact ${parsed.contactId}; remaining=${ttl}s`);
+      const rawState = await this.redis.get(timerKey);
+      const state = rawState ? parseTimer(rawState) : undefined;
+      if (!state) continue;
+      await this.scheduleTimer(parsed.tenantId, parsed.contactId, state.token, state.runAt);
+      this.logger.info(`Burst buffer timer recovered after restart for tenant ${parsed.tenantId}, contact ${parsed.contactId}; remaining=${Math.max(0, state.runAt - this.clock())}ms`);
     }
+  }
+
+  private async scheduleTimer(tenantId: string, contactId: string, timerToken: string, runAt: number): Promise<void> {
+    if (this.durableQueue) {
+      await this.durableQueue.schedule({ tenantId, contactId, timerToken, runAt });
+      return;
+    }
+    this.schedule(tenantId, contactId, timerToken, Math.max(0, runAt - this.clock()));
   }
 
   private schedule(tenantId: string, contactId: string, timerToken: string, delayMs: number): void {
@@ -128,13 +154,21 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
   }
 
   private async flushAfterTimer(tenantId: string, contactId: string, timerToken: string): Promise<void> {
-    const currentTimerToken = await this.redis.get(this.timerKey(tenantId, contactId));
-    if (currentTimerToken !== timerToken) return;
+    const currentTimerValue = await this.redis.get(this.timerKey(tenantId, contactId));
+    const currentTimer = currentTimerValue ? parseTimer(currentTimerValue) : undefined;
+    if (!currentTimer || currentTimer.token !== timerToken) return;
 
     const acquired = await this.mutex.acquire(tenantId, contactId);
     if (!acquired) {
       this.logger.info(`Burst buffer mutex busy for tenant ${tenantId}, contact ${contactId}; retrying in ${RETRY_DELAY_MS}ms`);
-      this.schedule(tenantId, contactId, timerToken, RETRY_DELAY_MS);
+      const retryRunAt = this.clock() + RETRY_DELAY_MS;
+      const currentValue = serializeTimer(currentTimer);
+      const retryValue = serializeTimer({ token: timerToken, runAt: retryRunAt });
+      if (await this.redis.deleteIfValue(this.timerKey(tenantId, contactId), currentValue)) {
+        if (await this.redis.set(this.timerKey(tenantId, contactId), retryValue, "NX", "EX", this.controlTtlSeconds) === "OK") {
+          await this.scheduleTimer(tenantId, contactId, timerToken, retryRunAt);
+        }
+      }
       return;
     }
     this.logger.info(`Burst buffer mutex acquired for tenant ${tenantId}, contact ${contactId}`);
@@ -143,7 +177,7 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
       const messageKey = this.messageKey(tenantId, contactId);
       const serializedMessages = await this.redis.drainList(messageKey);
       if (serializedMessages.length === 0) {
-        await this.redis.deleteIfValue(this.timerKey(tenantId, contactId), timerToken);
+        await this.redis.deleteIfValue(this.timerKey(tenantId, contactId), serializeTimer(currentTimer));
         return;
       }
 
@@ -162,19 +196,23 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
         });
       } catch (error) {
         await this.redis.lpush(messageKey, ...serializedMessages.reverse());
+        await this.redis.deleteIfValue(this.timerKey(tenantId, contactId), serializeTimer(currentTimer));
         const retryToken = randomUUID();
-        if (await this.redis.set(this.timerKey(tenantId, contactId), retryToken, "NX", "EX", this.controlTtlSeconds) === "OK") {
-          this.schedule(tenantId, contactId, retryToken, this.bufferSeconds * 1000);
+        const retryRunAt = this.clock() + this.bufferSeconds * 1000;
+        const retryValue = serializeTimer({ token: retryToken, runAt: retryRunAt });
+        if (await this.redis.set(this.timerKey(tenantId, contactId), retryValue, "NX", "EX", this.controlTtlSeconds) === "OK") {
+          await this.scheduleTimer(tenantId, contactId, retryToken, retryRunAt);
         }
         throw error;
       }
 
-      await this.redis.deleteIfValue(this.timerKey(tenantId, contactId), timerToken);
+      await this.redis.deleteIfValue(this.timerKey(tenantId, contactId), serializeTimer(currentTimer));
       const pending = await this.redis.lrange(messageKey, 0, 0);
       if (pending.length > 0) {
         const nextToken = randomUUID();
-        if (await this.redis.set(this.timerKey(tenantId, contactId), nextToken, "NX", "EX", this.controlTtlSeconds) === "OK") {
-          this.schedule(tenantId, contactId, nextToken, this.bufferSeconds * 1000);
+        const nextRunAt = this.clock() + this.bufferSeconds * 1000;
+        if (await this.redis.set(this.timerKey(tenantId, contactId), serializeTimer({ token: nextToken, runAt: nextRunAt }), "NX", "EX", this.controlTtlSeconds) === "OK") {
+          await this.scheduleTimer(tenantId, contactId, nextToken, nextRunAt);
         }
       }
       this.logger.info(`Burst buffer consolidated ${messages.length} messages for tenant ${tenantId}, contact ${contactId}`);
@@ -237,4 +275,20 @@ function readPositiveNumberEnv(name: string, fallback: number): number {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number`);
   return value;
+}
+
+function serializeTimer(state: TimerState): string {
+  return JSON.stringify(state);
+}
+
+function parseTimer(value: string): TimerState | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const state = parsed as Partial<TimerState>;
+    if (typeof state.token !== "string" || !state.token || typeof state.runAt !== "number" || !Number.isFinite(state.runAt)) return undefined;
+    return { token: state.token, runAt: state.runAt };
+  } catch {
+    return undefined;
+  }
 }

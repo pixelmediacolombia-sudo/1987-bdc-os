@@ -17,7 +17,7 @@ export class ProcessGHLWebhookUseCase {
   }): Promise<{ duplicate: boolean; tenantId: string; externalId: string }> {
     const event = parseGhlWebhookPayload(input.payload, input.rawBody, input.signature);
     const result = await this.repository.process(event);
-    if (!result.duplicate && event.humanInterruption && this.humanSuppression) {
+    if (!result.duplicate && result.suppressAi !== false && event.humanInterruption && this.humanSuppression) {
       await this.humanSuppression.suppress({
         tenantId: result.tenantId,
         contactId: event.humanInterruption.contactId,
