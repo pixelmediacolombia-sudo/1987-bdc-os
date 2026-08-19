@@ -7,6 +7,7 @@ export type AppConfig = {
   pgSsl: boolean;
   redisUrl: string;
   burstBufferSeconds: number;
+  burstBufferControlTtlSeconds: number;
   contactMutexTtlMs: number;
   ghlClientId: string;
   ghlClientSecret: string;
@@ -50,6 +51,7 @@ export function loadAppConfig(): AppConfig {
     pgSsl: booleanEnv("PGSSL", false),
     redisUrl: required("REDIS_URL"),
     burstBufferSeconds: positiveNumberEnv("BURST_BUFFER_SECONDS", 15),
+    burstBufferControlTtlSeconds: positiveNumberEnv("BURST_BUFFER_CONTROL_TTL_SECONDS", 90),
     contactMutexTtlMs: positiveNumberEnv("CONTACT_MUTEX_TTL_SECONDS", 30) * 1000,
     ghlClientId: required("GHL_CLIENT_ID"),
     ghlClientSecret: required("GHL_CLIENT_SECRET"),

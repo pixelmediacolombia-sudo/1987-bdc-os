@@ -9,6 +9,8 @@ export interface RedisClientPort {
     ttl: number,
   ): Promise<RedisSetResult>;
   get(key: string): Promise<string | null>;
+  ttl(key: string): Promise<number>;
+  scan(match: string): Promise<string[]>;
   del(...keys: string[]): Promise<number>;
   rpush(key: string, ...values: string[]): Promise<number>;
   lpush(key: string, ...values: string[]): Promise<number>;

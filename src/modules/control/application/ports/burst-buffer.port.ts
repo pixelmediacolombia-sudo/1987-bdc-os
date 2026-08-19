@@ -5,5 +5,5 @@ export interface BurstBufferPort {
 }
 
 export interface BurstBufferCancellationPort {
-  cancel(contactId: string): Promise<void>;
+  cancel(tenantId: string, contactId: string): Promise<void>;
 }

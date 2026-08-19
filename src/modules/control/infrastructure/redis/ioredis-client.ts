@@ -38,6 +38,21 @@ export class IoredisClient implements RedisClientPort {
     return this.client.get(key);
   }
 
+  async ttl(key: string): Promise<number> {
+    return this.client.ttl(key);
+  }
+
+  async scan(match: string): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor = "0";
+    do {
+      const [nextCursor, batch] = await this.client.scan(cursor, "MATCH", match, "COUNT", 100);
+      cursor = nextCursor;
+      keys.push(...batch);
+    } while (cursor !== "0");
+    return keys;
+  }
+
   async del(...keys: string[]): Promise<number> {
     return this.client.del(...keys);
   }

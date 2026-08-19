@@ -3,6 +3,14 @@ import type { RedisClientPort } from "@/modules/control/application/ports/redis-
 
 const LOCK_KEY_PREFIX = "lock:contact:";
 
+function scopedKey(tenantId: string, contactId: string): string {
+  const tenant = tenantId.trim();
+  const contact = contactId.trim();
+  if (!tenant) throw new Error("Contact mutex tenantId cannot be empty");
+  if (!contact) throw new Error("Contact mutex contactId cannot be empty");
+  return `${LOCK_KEY_PREFIX}tenant:${encodeURIComponent(tenant)}:contact:${encodeURIComponent(contact)}`;
+}
+
 export class ContactMutex {
   private readonly ownershipTokens = new Map<string, string>();
 
@@ -15,10 +23,10 @@ export class ContactMutex {
     }
   }
 
-  async acquire(contactId: string): Promise<boolean> {
+  async acquire(tenantId: string, contactId: string): Promise<boolean> {
     const token = randomUUID();
     const acquired = await this.redis.set(
-      this.key(contactId),
+      scopedKey(tenantId, contactId),
       token,
       "NX",
       "PX",
@@ -26,22 +34,19 @@ export class ContactMutex {
     );
 
     if (acquired !== "OK") return false;
-    this.ownershipTokens.set(contactId, token);
+    this.ownershipTokens.set(scopedKey(tenantId, contactId), token);
     return true;
   }
 
-  async release(contactId: string): Promise<void> {
-    const token = this.ownershipTokens.get(contactId);
+  async release(tenantId: string, contactId: string): Promise<void> {
+    const key = scopedKey(tenantId, contactId);
+    const token = this.ownershipTokens.get(key);
     if (!token) return;
 
     try {
-      await this.redis.deleteIfValue(this.key(contactId), token);
+      await this.redis.deleteIfValue(key, token);
     } finally {
-      this.ownershipTokens.delete(contactId);
+      this.ownershipTokens.delete(key);
     }
-  }
-
-  private key(contactId: string): string {
-    return `${LOCK_KEY_PREFIX}${contactId}`;
   }
 }

@@ -21,11 +21,13 @@ export class HumanSuppressionService implements HumanSuppressionPort {
   ) {}
 
   async suppress(input: HumanSuppressionInput): Promise<void> {
+    const tenantId = input.tenantId.trim();
     const contactId = input.contactId.trim();
+    if (!tenantId) throw new Error("Human suppression tenantId cannot be empty");
     if (!contactId) throw new Error("Human suppression contactId cannot be empty");
 
-    await this.burstBuffer.cancel(contactId);
-    await this.mutex.release(contactId);
-    this.logger.info(`Human suppression completed for contact ${contactId}; trigger=${input.trigger}`);
+    await this.burstBuffer.cancel(tenantId, contactId);
+    await this.mutex.release(tenantId, contactId);
+    this.logger.info(`Human suppression completed for tenant ${tenantId}, contact ${contactId}; trigger=${input.trigger}`);
   }
 }

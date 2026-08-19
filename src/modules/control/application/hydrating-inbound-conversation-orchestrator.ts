@@ -9,6 +9,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
   constructor(private readonly hydrator: ConversationHydrator) {}
 
   async process(input: ConsolidatedInboundConversation): Promise<void> {
-    await this.hydrator.hydrate(input.tenantId, input.contactId);
+    const context = await this.hydrator.hydrate(input.tenantId, input.contactId);
+    if (context.conversation.state === "paused") return;
   }
 }

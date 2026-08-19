@@ -34,8 +34,13 @@ class FakeRedis implements RedisClientPort {
     return this.values.get(key) ?? null;
   }
 
+  async ttl(key: string): Promise<number> { return this.values.has(key) ? 90 : -2; }
+  async scan(match: string): Promise<string[]> { return [...this.values.keys()].filter((key) => key.startsWith(match.replace("*", ""))); }
+
   async del(key: string): Promise<number> {
-    return this.lists.delete(key) ? 1 : 0;
+    let deleted = this.lists.delete(key) ? 1 : 0;
+    if (this.values.delete(key)) deleted += 1;
+    return deleted;
   }
 
   async rpush(key: string, ...values: string[]): Promise<number> {
@@ -108,6 +113,7 @@ test("consolida tres fragmentos después de un búfer exacto de 15 segundos", as
   let scheduledDelayMs = 0;
   const service = new BurstBufferService(redis, mutex, orchestrator, {
     bufferSeconds: 15,
+    controlTtlSeconds: 90,
     logger,
     timerScheduler: (callback, delayMs) => {
       scheduledCallback = callback;
@@ -122,9 +128,9 @@ test("consolida tres fragmentos después de un búfer exacto de 15 segundos", as
   await new Promise((resolve) => setTimeout(resolve, 2_000));
   await service.add(createMessage("message-3", "¿La tienen manual?"), "tenant-42");
 
-  assert.equal(redis.lists.get("buffer:messages:contact-42")?.length, 3);
+  assert.equal(redis.lists.get("buffer:messages:tenant:tenant-42:contact:contact-42")?.length, 3);
   assert.equal(scheduledDelayMs, 15_000);
-  assert.equal(redis.setCalls.find((call) => call.key === "buffer:timer:contact-42")?.ttl, 15);
+  assert.equal(redis.setCalls.find((call) => call.key === "buffer:timer:tenant:tenant-42:contact:contact-42")?.ttl, 90);
   assert.match(logs.join("\n"), /count=3/);
   assert.match(logs.join("\n"), /delay=15s/);
 
@@ -152,10 +158,11 @@ test("el mutex solo libera el token que lo adquirió", async () => {
   const first = new ContactMutex(redis, 30_000);
   const second = new ContactMutex(redis, 30_000);
 
-  assert.equal(await first.acquire("contact-42"), true);
-  assert.equal(await second.acquire("contact-42"), false);
-  await second.release("contact-42");
-  assert.equal(await second.acquire("contact-42"), false);
-  await first.release("contact-42");
-  assert.equal(await second.acquire("contact-42"), true);
+  assert.equal(await first.acquire("tenant-42", "contact-42"), true);
+  assert.equal(await second.acquire("tenant-42", "contact-42"), false);
+  await second.release("tenant-42", "contact-42");
+  assert.equal(await second.acquire("tenant-42", "contact-42"), false);
+  await first.release("tenant-42", "contact-42");
+  assert.equal(await second.acquire("tenant-42", "contact-42"), true);
+  assert.equal(await first.acquire("tenant-43", "contact-42"), true);
 });

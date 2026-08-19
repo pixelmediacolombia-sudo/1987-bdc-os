@@ -50,8 +50,9 @@ async function start(): Promise<void> {
     redis,
     contactMutex,
     new HydratingInboundConversationOrchestrator(hydrator),
-    { bufferSeconds: config.burstBufferSeconds },
+    { bufferSeconds: config.burstBufferSeconds, controlTtlSeconds: config.burstBufferControlTtlSeconds },
   );
+  await burstBuffer.recoverPendingTimers();
   const humanSuppression = new HumanSuppressionService(burstBuffer, contactMutex);
   const webhookController = new WebhookController(
     new ProcessGHLWebhookUseCase(new PostgresWebhookRepository(pool), burstBuffer, humanSuppression),

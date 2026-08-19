@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { BurstBufferService, type BurstBufferLogger } from "@/modules/control/application/burst-buffer.service";
 import { ContactMutex } from "@/modules/control/application/contact-mutex";
 import { HumanSuppressionService } from "@/modules/control/application/human-suppression.service";
+import { HydratingInboundConversationOrchestrator } from "@/modules/control/application/hydrating-inbound-conversation-orchestrator";
 import type { InboundConversationOrchestratorPort } from "@/modules/control/application/ports/inbound-conversation-orchestrator.port";
 import type { RedisClientPort, RedisSetResult } from "@/modules/control/application/ports/redis-client.port";
 import type { WebhookRepository } from "@/modules/webhooks/application/ports/webhook-repository.port";
@@ -25,6 +26,9 @@ class FakeRedis implements RedisClientPort {
   async get(key: string): Promise<string | null> {
     return this.values.get(key) ?? null;
   }
+
+  async ttl(key: string): Promise<number> { return this.values.has(key) ? 90 : -2; }
+  async scan(match: string): Promise<string[]> { return [...this.values.keys()].filter((key) => key.startsWith(match.replace("*", ""))); }
 
   async del(...keys: string[]): Promise<number> {
     let deleted = 0;
@@ -103,6 +107,7 @@ test("cancela el búfer, temporizador y flujo IA cuando aparece human_takeover",
   let scheduledCallback: (() => void) | undefined;
   const burstBuffer = new BurstBufferService(redis, mutex, orchestrator, {
     bufferSeconds: 15,
+    controlTtlSeconds: 90,
     logger,
     timerScheduler: (callback) => {
       scheduledCallback = callback;
@@ -119,8 +124,8 @@ test("cancela el búfer, temporizador y flujo IA cuando aparece human_takeover",
     semanticHash: "hash-inbound-1",
   }, TENANT_ID);
   assert.ok(scheduledCallback);
-  assert.equal(redis.lists.get(`buffer:messages:${CONTACT_ID}`)?.length, 1);
-  assert.ok(redis.values.has(`buffer:timer:${CONTACT_ID}`));
+  assert.equal(redis.lists.get(`buffer:messages:tenant:${TENANT_ID}:contact:${CONTACT_ID}`)?.length, 1);
+  assert.ok(redis.values.has(`buffer:timer:tenant:${TENANT_ID}:contact:${CONTACT_ID}`));
 
   const repository = new RlsAwareWebhookRepository();
   const suppression = new HumanSuppressionService(burstBuffer, mutex, { info: (message) => logs.push(message) });
@@ -175,4 +180,25 @@ test("detecta un mensaje outbound enviado por staff como takeover humano", async
   assert.equal(repository.interruption?.trigger, "staff_message");
   assert.equal(repository.interruption?.staffMessage?.content, "Te atiendo personalmente.");
   assert.equal(repository.state, "paused");
+});
+
+test("una conversación pausada no reactiva IA con un nuevo inbound", async () => {
+  let hydrationCalls = 0;
+  let downstreamCalls = 0;
+  const hydrator = {
+    hydrate: async () => {
+      hydrationCalls += 1;
+      return { conversation: { state: "paused" } } as never;
+    },
+  };
+  const orchestrator = new HydratingInboundConversationOrchestrator(hydrator as never);
+  await orchestrator.process({
+    tenantId: TENANT_ID,
+    contactId: CONTACT_ID,
+    messages: [],
+    consolidatedText: "nuevo mensaje inbound",
+  });
+  void downstreamCalls;
+  assert.equal(hydrationCalls, 1);
+  assert.equal(downstreamCalls, 0);
 });

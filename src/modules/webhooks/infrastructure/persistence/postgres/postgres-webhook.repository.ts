@@ -126,7 +126,8 @@ export class PostgresWebhookRepository implements WebhookRepository {
 
     await client.query(
       `UPDATE public.conversations
-          SET last_activity = now(), state = 'open'
+          SET last_activity = now(),
+              state = CASE WHEN state = 'paused' THEN state ELSE 'open' END
         WHERE id = $1`,
       [conversation.id],
     );

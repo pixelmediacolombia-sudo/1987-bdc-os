@@ -19,6 +19,7 @@ export class ProcessGHLWebhookUseCase {
     const result = await this.repository.process(event);
     if (!result.duplicate && event.humanInterruption && this.humanSuppression) {
       await this.humanSuppression.suppress({
+        tenantId: result.tenantId,
         contactId: event.humanInterruption.contactId,
         trigger: event.humanInterruption.trigger,
       });
