@@ -26,8 +26,11 @@ export class GhlOAuthController {
       return;
     }
 
+    console.log("GHL OAuth callback received");
+
     try {
       const result = await this.service.complete({ code, state });
+      console.log(`GHL OAuth installation persisted for location ${result.locationId}`);
       res.status(200).json({
         ok: true,
         message: "GHL installation completed",

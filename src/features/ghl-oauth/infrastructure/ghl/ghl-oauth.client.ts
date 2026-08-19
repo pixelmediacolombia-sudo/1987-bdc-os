@@ -46,6 +46,7 @@ export class GhlOAuthClientAdapter implements GhlOAuthClient {
         grant_type: "authorization_code",
         code,
         redirect_uri: this.config.ghlRedirectUri,
+        user_type: "Location",
       }).toString(),
       {
         timeout: 15_000,
