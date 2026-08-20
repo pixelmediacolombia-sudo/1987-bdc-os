@@ -31,4 +31,5 @@ test("reconoce OutboundMessage oficial sin sender_type y lo trata como outbound 
   const event = parseGhlWebhookPayload(payload, Buffer.from(JSON.stringify(payload)), "signature");
   assert.equal(event.humanInterruption?.trigger, "staff_message");
   assert.equal(event.humanInterruption?.staffMessage?.content, "Te atiendo personalmente.");
+  assert.equal(event.humanInterruption?.staffMessage?.channel, "other");
 });
