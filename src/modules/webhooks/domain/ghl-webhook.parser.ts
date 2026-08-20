@@ -81,7 +81,6 @@ function extractEventContactId(payload: JsonObject, message: JsonObject, eventTy
 
 function buildMessage(
   payload: JsonObject,
-  eventType: string,
   externalId: string,
   direction: "inbound" | "outbound",
 ): InboundMessage | undefined {
@@ -122,23 +121,6 @@ function isOutbound(payload: JsonObject, eventType: string): boolean {
   return /outbound|outgoing|message[._-]?sent/i.test(eventType);
 }
 
-function isStaffSender(payload: JsonObject): boolean {
-  const senderType = stringAt(payload, [
-    "sender_type",
-    "senderType",
-    "sender.type",
-    "message.sender_type",
-    "message.senderType",
-    "message.sender.type",
-    "data.sender_type",
-    "data.senderType",
-    "data.message.sender_type",
-    "data.message.senderType",
-    "data.message.sender.type",
-  ])?.toLowerCase();
-  return senderType === "staff";
-}
-
 function isContactUpdate(eventType: string): boolean {
   return /contact(?:[._-]?tag)?[._-]?(update|updated)|contacttagupdate/i.test(eventType);
 }
@@ -160,7 +142,7 @@ function buildHumanInterruption(payload: JsonObject, eventType: string, external
   const conversationId = extractConversationId(payload, message);
 
   if (isOutbound(payload, eventType)) {
-    const staffMessage = buildMessage(payload, eventType, externalId, "outbound");
+    const staffMessage = buildMessage(payload, externalId, "outbound");
     return {
       trigger: "staff_message",
       contactId,
@@ -234,6 +216,6 @@ export function parseGhlWebhookPayload(
     ...(contactId ? { contactId } : {}),
     ...(conversationId ? { conversationId } : {}),
     ...(humanInterruption ? { humanInterruption } : {}),
-    inboundMessage: isInbound(object, eventType) ? buildMessage(object, eventType, externalId, "inbound") : undefined,
+    inboundMessage: isInbound(object, eventType) ? buildMessage(object, externalId, "inbound") : undefined,
   };
 }

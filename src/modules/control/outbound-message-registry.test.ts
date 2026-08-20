@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Pool, PoolClient } from "pg";
+import type { Pool } from "pg";
 import { PostgresOutboundMessageRegistry } from "@/modules/control/infrastructure/persistence/postgres/postgres-outbound-message-registry";
 import { RegisteredOutboundMessageSender } from "@/modules/control/application/registered-outbound-message-sender";
 

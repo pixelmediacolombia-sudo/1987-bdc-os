@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
   WebhookQueueHandler,
-  WebhookQueueJob,
   WebhookQueuePort,
 } from "@/modules/webhooks/application/ports/webhook-queue.port";
 import type { RedisClientPort } from "@/modules/control/application/ports/redis-client.port";
