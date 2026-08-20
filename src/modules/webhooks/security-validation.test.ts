@@ -150,13 +150,14 @@ test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and o
     await client.query("SET LOCAL lock_timeout = '2s'");
     await client.query("SET LOCAL statement_timeout = '10s'");
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantA]);
+    const testProvider = `rls-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const integration = await client.query<{ id: string }>(
       `INSERT INTO public.integrations
          (tenant_id, provider, encrypted_access_token, encrypted_refresh_token, scopes)
-       VALUES ($1, 'ghl', 'test-access-a', 'test-refresh-a', ARRAY['contacts.readonly'])
+       VALUES ($1, $2, 'test-access-a', 'test-refresh-a', ARRAY['contacts.readonly'])
        RETURNING id`,
-      [tenantA],
+      [tenantA, testProvider],
     );
     const integrationId = integration.rows[0]?.id;
     assert.ok(integrationId);
