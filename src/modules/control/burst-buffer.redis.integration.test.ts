@@ -28,7 +28,6 @@ test("Redis real: expira la ventana y hace flush atómico del búfer", { skip: !
   });
 
   try {
-    await service.start();
     await service.add({
       externalId: `integration-message-${Date.now()}`,
       contactId,
@@ -43,6 +42,10 @@ test("Redis real: expira la ventana y hace flush atómico del búfer", { skip: !
     const timerKey = `buffer:timer:${suffix}`;
     assert.equal(await redis.lrange(messageKey, 0, -1).then((items) => items.length), 1);
     assert.ok((await redis.ttl(timerKey)) > 1, "el TTL de control debe superar la ventana");
+
+    // Persist the timer and durable job before the worker starts. This proves
+    // a restart-safe handoff instead of depending on the initial poll race.
+    await service.start();
 
     for (let attempt = 0; attempt < 48; attempt += 1) {
       const remainingMessages = await redis.lrange(messageKey, 0, -1);
