@@ -12,6 +12,20 @@ local messages = redis.call('LRANGE', KEYS[1], 0, -1)
 redis.call('DEL', KEYS[1])
 return messages
 `;
+const REPLACE_SORTED_SET_MEMBER_SCRIPT = `
+if redis.call('ZREM', KEYS[1], ARGV[1]) == 1 then
+  redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3])
+  return 1
+end
+return 0
+`;
+const MOVE_SORTED_SET_MEMBER_SCRIPT = `
+if redis.call('ZREM', KEYS[1], ARGV[1]) == 1 then
+  redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
+  return 1
+end
+return 0
+`;
 
 export class IoredisClient implements RedisClientPort {
   private readonly client: Redis;
@@ -69,6 +83,16 @@ export class IoredisClient implements RedisClientPort {
 
   async zrem(key: string, member: string): Promise<number> {
     return this.client.zrem(key, member);
+  }
+
+  async replaceSortedSetMember(key: string, member: string, score: number, replacement: string): Promise<boolean> {
+    const replaced = await this.client.eval(REPLACE_SORTED_SET_MEMBER_SCRIPT, 1, key, member, score, replacement);
+    return Number(replaced) === 1;
+  }
+
+  async moveSortedSetMember(sourceKey: string, destinationKey: string, member: string, score: number, replacement: string): Promise<boolean> {
+    const moved = await this.client.eval(MOVE_SORTED_SET_MEMBER_SCRIPT, 2, sourceKey, destinationKey, member, score, replacement);
+    return Number(moved) === 1;
   }
 
   async del(...keys: string[]): Promise<number> {

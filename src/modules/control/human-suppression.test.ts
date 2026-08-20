@@ -32,6 +32,8 @@ class FakeRedis implements RedisClientPort {
   async zadd(): Promise<number> { return 1; }
   async zrangebyscore(): Promise<string[]> { return []; }
   async zrem(): Promise<number> { return 1; }
+  async replaceSortedSetMember(): Promise<boolean> { return true; }
+  async moveSortedSetMember(): Promise<boolean> { return true; }
 
   async del(...keys: string[]): Promise<number> {
     let deleted = 0;
@@ -243,4 +245,77 @@ test("una conversación pausada no reactiva IA con un nuevo inbound", async () =
   void downstreamCalls;
   assert.equal(hydrationCalls, 1);
   assert.equal(downstreamCalls, 0);
+});
+
+test("la eliminación y reaplicación de human_takeover son eventos independientes del mismo contacto", async () => {
+  const repository = new RlsAwareWebhookRepository();
+  let suppressions = 0;
+  const useCase = new ProcessGHLWebhookUseCase(repository, undefined, {
+    suppress: async () => { suppressions += 1; },
+  });
+
+  await useCase.execute({
+    payload: { eventId: "takeover-apply-1", eventType: "ContactTagUpdate", locationId: "location-42", contactId: CONTACT_ID, tags: ["human_takeover"] },
+    rawBody: Buffer.from("apply-1"),
+    signature: "test-signature",
+  });
+  await useCase.execute({
+    payload: { eventId: "takeover-remove-1", eventType: "ContactTagUpdate", locationId: "location-42", contactId: CONTACT_ID, tags: [] },
+    rawBody: Buffer.from("remove-1"),
+    signature: "test-signature",
+  });
+  await useCase.execute({
+    payload: { eventId: "takeover-apply-2", eventType: "ContactTagUpdate", locationId: "location-42", contactId: CONTACT_ID, tags: [{ name: "human_takeover" }] },
+    rawBody: Buffer.from("apply-2"),
+    signature: "test-signature",
+  });
+
+  assert.equal(suppressions, 2);
+  assert.equal(repository.state, "paused");
+  assert.equal(repository.interruption?.controlTag, "human_takeover");
+});
+
+test("takeover pausa, un nuevo inbound no activa IA y el búfer queda consumido sin downstream", async () => {
+  const redis = new FakeRedis();
+  const repository = new RlsAwareWebhookRepository();
+  const mutex = new ContactMutex(redis, 30_000);
+  let scheduledCallback: (() => void) | undefined;
+  let aiActivations = 0;
+  const burstBuffer = new BurstBufferService(redis, mutex, {
+    process: async () => {
+      if (repository.state !== "paused") aiActivations += 1;
+    },
+  }, {
+    bufferSeconds: 1,
+    controlTtlSeconds: 10,
+    timerScheduler: (callback) => {
+      scheduledCallback = callback;
+      return setTimeout(() => undefined, 60_000).unref();
+    },
+  });
+  const useCase = new ProcessGHLWebhookUseCase(
+    repository,
+    burstBuffer,
+    new HumanSuppressionService(burstBuffer, mutex),
+  );
+
+  await useCase.execute({
+    payload: { eventId: "takeover-sequence-1", eventType: "ContactTagUpdate", locationId: "location-42", contactId: CONTACT_ID, tags: ["human_takeover"] },
+    rawBody: Buffer.from("takeover-sequence-1"),
+    signature: "test-signature",
+  });
+  assert.equal(repository.state, "paused");
+
+  await useCase.execute({
+    payload: { eventId: "inbound-after-takeover-1", eventType: "InboundMessage", direction: "inbound", locationId: "location-42", contactId: CONTACT_ID, content: "Nuevo mensaje después del takeover" },
+    rawBody: Buffer.from("inbound-after-takeover-1"),
+    signature: "test-signature",
+  });
+  assert.ok(scheduledCallback);
+  scheduledCallback();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(aiActivations, 0);
+  assert.equal(redis.lists.get(`buffer:messages:tenant:${TENANT_ID}:contact:${CONTACT_ID}`)?.length ?? 0, 0);
 });

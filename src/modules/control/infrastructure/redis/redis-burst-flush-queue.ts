@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import type {
   BurstFlushHandler,
   BurstFlushJob,
@@ -7,13 +8,29 @@ import type { RedisClientPort } from "@/modules/control/application/ports/redis-
 
 const QUEUE_KEY_PREFIX = "queue:burst-flush:";
 const POLL_MS = 250;
+const CLAIM_KEY_PREFIX = "queue:burst-flush:claim:";
+const CLAIM_TTL_MS = 30_000;
+const RETRY_DELAY_MS = 500;
+
+export type RedisBurstFlushQueueOptions = {
+  claimTtlMs?: number;
+  retryDelayMs?: number;
+  clock?: () => number;
+};
 
 export class RedisBurstFlushQueue implements BurstFlushQueuePort {
   private poller?: ReturnType<typeof setInterval>;
   private handler?: BurstFlushHandler;
   private polling = false;
+  private readonly claimTtlMs: number;
+  private readonly retryDelayMs: number;
+  private readonly clock: () => number;
 
-  constructor(private readonly redis: RedisClientPort) {}
+  constructor(private readonly redis: RedisClientPort, options: RedisBurstFlushQueueOptions = {}) {
+    this.claimTtlMs = options.claimTtlMs ?? CLAIM_TTL_MS;
+    this.retryDelayMs = options.retryDelayMs ?? RETRY_DELAY_MS;
+    this.clock = options.clock ?? (() => Date.now());
+  }
 
   async schedule(job: BurstFlushJob): Promise<void> {
     await this.redis.zadd(queueKey(job.tenantId, job.contactId), job.runAt, encodeJob(job));
@@ -39,13 +56,22 @@ export class RedisBurstFlushQueue implements BurstFlushQueuePort {
     try {
       const queueKeys = await this.redis.scan(`${QUEUE_KEY_PREFIX}tenant:*:contact:*`);
       for (const key of queueKeys) {
-        const members = await this.redis.zrangebyscore(key, 0, Date.now());
+        const members = await this.redis.zrangebyscore(key, 0, this.clock());
         for (const member of members) {
-          if (await this.redis.zrem(key, member) !== 1) continue;
+          const claimToken = randomUUID();
+          const claimKey = claimKeyFor(key, member);
+          if (await this.redis.set(claimKey, claimToken, "NX", "PX", this.claimTtlMs) !== "OK") continue;
           try {
             await this.handler(decodeJob(member));
+            // ACK only after the burst handler completes successfully. Keeping
+            // the member until then makes a crashed worker recoverable.
+            await this.redis.zrem(key, member);
           } catch {
-            // BurstBufferService persists and reschedules its retry before rethrowing.
+            // Keep the job durable and make the next attempt explicit. The
+            // burst service may also have persisted a fresh timer token.
+            await this.redis.replaceSortedSetMember(key, member, this.clock() + this.retryDelayMs, member);
+          } finally {
+            await this.redis.deleteIfValue(claimKey, claimToken);
           }
         }
       }
@@ -64,6 +90,11 @@ function queueKey(tenantId: string, contactId: string): string {
   const contact = contactId.trim();
   if (!tenant || !contact) throw new Error("Redis burst queue scope cannot be empty");
   return `${QUEUE_KEY_PREFIX}tenant:${encodeURIComponent(tenant)}:contact:${encodeURIComponent(contact)}`;
+}
+
+function claimKeyFor(queue: string, member: string): string {
+  const digest = createHash("sha256").update(`${queue}|${member}`, "utf8").digest("hex");
+  return `${CLAIM_KEY_PREFIX}${digest}`;
 }
 
 function decodeJob(member: string): BurstFlushJob {

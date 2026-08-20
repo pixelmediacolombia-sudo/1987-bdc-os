@@ -39,6 +39,8 @@ class FakeRedis implements RedisClientPort {
   async zadd(): Promise<number> { return 1; }
   async zrangebyscore(): Promise<string[]> { return []; }
   async zrem(): Promise<number> { return 1; }
+  async replaceSortedSetMember(): Promise<boolean> { return true; }
+  async moveSortedSetMember(): Promise<boolean> { return true; }
 
   async del(key: string): Promise<number> {
     let deleted = this.lists.delete(key) ? 1 : 0;

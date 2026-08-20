@@ -14,6 +14,8 @@ export interface RedisClientPort {
   zadd(key: string, score: number, member: string): Promise<number>;
   zrangebyscore(key: string, min: number, max: number): Promise<string[]>;
   zrem(key: string, member: string): Promise<number>;
+  replaceSortedSetMember(key: string, member: string, score: number, replacement: string): Promise<boolean>;
+  moveSortedSetMember(sourceKey: string, destinationKey: string, member: string, score: number, replacement: string): Promise<boolean>;
   del(...keys: string[]): Promise<number>;
   rpush(key: string, ...values: string[]): Promise<number>;
   lpush(key: string, ...values: string[]): Promise<number>;

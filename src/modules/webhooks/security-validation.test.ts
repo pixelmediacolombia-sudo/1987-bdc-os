@@ -130,7 +130,7 @@ test("collapses five identical concurrent deliveries to one background task", as
   }
 });
 
-test("RLS cross-tenant matrix isolates integrations, audits, and raw webhooks", {
+test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and outbound registry", {
   skip: !process.env.SECURITY_TEST_DATABASE_URL,
 }, async () => {
   const tenantA = process.env.SECURITY_TEST_TENANT_A;
@@ -172,9 +172,15 @@ test("RLS cross-tenant matrix isolates integrations, audits, and raw webhooks", 
        VALUES ($1, 'rls-test-a', 'ContactCreate', 'rls-location-a', 'test-signature', '{}'::jsonb)`,
       [tenantA],
     );
+    await client.query(
+      `INSERT INTO public.outbound_message_registry
+         (tenant_id, contact_id, semantic_hash, provider_message_id, content)
+       VALUES ($1, 'rls-contact-a', 'rls-hash-a', 'rls-provider-a', 'tenant A')`,
+      [tenantA],
+    );
 
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantB]);
-    for (const table of ["integrations", "integration_token_audits", "raw_webhooks"]) {
+    for (const table of ["integrations", "integration_token_audits", "raw_webhooks", "outbound_message_registry"]) {
       const visible = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM public.${table}`);
       assert.equal(visible.rows[0]?.count, "0", `${table} leaked tenant A rows`);
     }
@@ -199,6 +205,14 @@ test("RLS cross-tenant matrix isolates integrations, audits, and raw webhooks", 
     );
     assert.equal(
       (await client.query("DELETE FROM public.raw_webhooks WHERE tenant_id = $1", [tenantA])).rowCount,
+      0,
+    );
+    assert.equal(
+      (await client.query("UPDATE public.outbound_message_registry SET content = 'cross-tenant' WHERE tenant_id = $1", [tenantA])).rowCount,
+      0,
+    );
+    assert.equal(
+      (await client.query("DELETE FROM public.outbound_message_registry WHERE tenant_id = $1", [tenantA])).rowCount,
       0,
     );
   } finally {

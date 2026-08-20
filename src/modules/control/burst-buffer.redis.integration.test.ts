@@ -52,6 +52,7 @@ test("Redis real: expira la ventana y hace flush atómico del búfer", { skip: !
     assert.match(logs.join("\n"), /consolidated 1 messages/);
   } finally {
     await service.cancel(tenantId, contactId).catch(() => undefined);
+    await service.stop().catch(() => undefined);
     await redis.close();
   }
 });

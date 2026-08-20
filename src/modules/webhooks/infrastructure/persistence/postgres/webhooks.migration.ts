@@ -37,6 +37,17 @@ CREATE TABLE IF NOT EXISTS public.outbound_message_registry (
 CREATE INDEX IF NOT EXISTS outbound_registry_provider_idx
   ON public.outbound_message_registry (tenant_id, contact_id, provider_message_id);
 
+ALTER TABLE public.outbound_message_registry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.outbound_message_registry FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS outbound_registry_tenant_isolation ON public.outbound_message_registry;
+CREATE POLICY outbound_registry_tenant_isolation ON public.outbound_message_registry
+  AS PERMISSIVE
+  FOR ALL
+  TO PUBLIC
+  USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
+  WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
+
 ALTER TABLE public.raw_webhooks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.raw_webhooks FORCE ROW LEVEL SECURITY;
 
