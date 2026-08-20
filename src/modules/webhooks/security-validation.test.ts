@@ -149,11 +149,6 @@ test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and o
     await client.query("BEGIN");
     await client.query("SET LOCAL lock_timeout = '2s'");
     await client.query("SET LOCAL statement_timeout = '10s'");
-    await client.query(
-      `INSERT INTO public.tenants (dealer_id, ghl_location_id)
-       VALUES ($1, $2), ($3, $4)`,
-      [tenantA, `rls-location-a-${Date.now()}`, tenantB, `rls-location-b-${Date.now()}`],
-    );
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantA]);
 
     const integration = await client.query<{ id: string }>(
