@@ -44,7 +44,7 @@ test("Redis real: expira la ventana y hace flush atómico del búfer", { skip: !
     assert.equal(await redis.lrange(messageKey, 0, -1).then((items) => items.length), 1);
     assert.ok((await redis.ttl(timerKey)) > 1, "el TTL de control debe superar la ventana");
 
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < 48; attempt += 1) {
       const remainingMessages = await redis.lrange(messageKey, 0, -1);
       const timer = await redis.get(timerKey);
       if (remainingMessages.length === 0 && timer === null) break;

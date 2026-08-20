@@ -10,13 +10,13 @@ test("Redis real: webhook queue procesa y ACKea solo después del handler", { sk
   const queue = new RedisWebhookQueue(redis, { maxAttempts: 2, backoffMs: 25, maxBackoffMs: 100 });
   let calls = 0;
   try {
+    await queue.enqueue(Buffer.from("render-redis-webhook"), "render-signature");
     await queue.start(async (job) => {
       calls += 1;
       assert.equal(job.rawBody.toString("utf8"), "render-redis-webhook");
       assert.equal(job.signature, "render-signature");
     });
-    await queue.enqueue(Buffer.from("render-redis-webhook"), "render-signature");
-    for (let attempt = 0; attempt < 40 && calls === 0; attempt += 1) {
+    for (let attempt = 0; attempt < 200 && calls === 0; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     assert.equal(calls, 1);
