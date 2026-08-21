@@ -132,6 +132,11 @@ function findControlTag(payload: JsonObject): string | undefined {
     ...stringsAt(payload, ["tags", "contact.tags", "data.tags", "data.contact.tags"]),
     stringAt(payload, ["tag", "tag.name", "data.tag", "data.tag.name"]),
   ].filter((tag): tag is string => Boolean(tag));
+  const normalizedTags = tags.map((tag) => tag.toLowerCase());
+  // A contact can retain a legacy human_takeover tag while stop_ai is added.
+  // Compliance STOP must take precedence over the broader human-control tag.
+  const stopAiIndex = normalizedTags.indexOf("stop_ai");
+  if (stopAiIndex >= 0) return tags[stopAiIndex];
   return tags.find((tag) => CONTROL_TAGS.has(tag.toLowerCase()));
 }
 

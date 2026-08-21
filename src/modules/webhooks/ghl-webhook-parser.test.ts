@@ -19,6 +19,18 @@ test("reconoce ContactTagUpdate oficial sin usar el id del contacto como entrega
   assert.notEqual(first.externalId, "contact-42");
 });
 
+test("prioriza stop_ai cuando convive con human_takeover", () => {
+  const event = parseGhlWebhookPayload({
+    eventId: "stop-priority-1",
+    eventType: "ContactTagUpdate",
+    locationId: "location-1",
+    contactId: "contact-1",
+    tags: ["follow-up", "human_takeover", "stop_ai"],
+  }, Buffer.from("stop-priority-1"), "test-signature");
+
+  assert.equal(event.humanInterruption?.controlTag, "stop_ai");
+});
+
 test("reconoce OutboundMessage oficial sin sender_type y lo trata como outbound desconocido", () => {
   const payload = {
     type: "OutboundMessage",
