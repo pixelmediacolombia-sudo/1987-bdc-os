@@ -28,14 +28,73 @@ CREATE TABLE IF NOT EXISTS public.outbound_message_registry (
   tenant_id UUID NOT NULL REFERENCES public.tenants(dealer_id) ON DELETE CASCADE,
   contact_id TEXT NOT NULL,
   semantic_hash TEXT NOT NULL,
+  attempt_id UUID NOT NULL DEFAULT gen_random_uuid(),
   provider_message_id TEXT,
   content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'reserved'
+    CHECK (status IN ('reserved', 'sent', 'failed', 'expired')),
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '5 minutes'),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT outbound_registry_semantic_uq UNIQUE (tenant_id, contact_id, semantic_hash)
+  CONSTRAINT outbound_registry_attempt_uq UNIQUE (tenant_id, attempt_id)
 );
+
+-- Migrate installations created before outbound attempts became first-class.
+ALTER TABLE public.outbound_message_registry
+  DROP CONSTRAINT IF EXISTS outbound_registry_semantic_uq;
+
+ALTER TABLE public.outbound_message_registry
+  ADD COLUMN IF NOT EXISTS attempt_id UUID;
+UPDATE public.outbound_message_registry
+   SET attempt_id = gen_random_uuid()
+ WHERE attempt_id IS NULL;
+ALTER TABLE public.outbound_message_registry
+  ALTER COLUMN attempt_id SET DEFAULT gen_random_uuid(),
+  ALTER COLUMN attempt_id SET NOT NULL;
+
+ALTER TABLE public.outbound_message_registry
+  ADD COLUMN IF NOT EXISTS status TEXT;
+UPDATE public.outbound_message_registry
+   SET status = CASE WHEN provider_message_id IS NULL THEN 'reserved' ELSE 'sent' END
+ WHERE status IS NULL;
+ALTER TABLE public.outbound_message_registry
+  ALTER COLUMN status SET DEFAULT 'reserved',
+  ALTER COLUMN status SET NOT NULL;
+
+ALTER TABLE public.outbound_message_registry
+  ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+UPDATE public.outbound_message_registry
+   SET expires_at = created_at + interval '5 minutes'
+ WHERE expires_at IS NULL;
+ALTER TABLE public.outbound_message_registry
+  ALTER COLUMN expires_at SET DEFAULT (now() + interval '5 minutes'),
+  ALTER COLUMN expires_at SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'outbound_registry_attempt_uq'
+       AND conrelid = 'public.outbound_message_registry'::regclass
+  ) THEN
+    ALTER TABLE public.outbound_message_registry
+      ADD CONSTRAINT outbound_registry_attempt_uq UNIQUE (tenant_id, attempt_id);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'outbound_registry_status_check'
+       AND conrelid = 'public.outbound_message_registry'::regclass
+  ) THEN
+    ALTER TABLE public.outbound_message_registry
+      ADD CONSTRAINT outbound_registry_status_check
+      CHECK (status IN ('reserved', 'sent', 'failed', 'expired'));
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS outbound_registry_provider_idx
   ON public.outbound_message_registry (tenant_id, contact_id, provider_message_id);
+
+CREATE INDEX IF NOT EXISTS outbound_registry_reservation_idx
+  ON public.outbound_message_registry (tenant_id, contact_id, status, expires_at);
 
 ALTER TABLE public.outbound_message_registry ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.outbound_message_registry FORCE ROW LEVEL SECURITY;
