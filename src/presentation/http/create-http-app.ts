@@ -11,12 +11,15 @@ import {
 import { createWebhookRouter } from "@/modules/webhooks/presentation/http/webhook.routes";
 import type { PolicyDiagnosticController } from "@/modules/decisions/presentation/http/policy-diagnostic.controller";
 import { createPolicyDiagnosticRouter } from "@/modules/decisions/presentation/http/policy-diagnostic.routes";
+import type { RedisDiagnosticController } from "@/presentation/http/redis-diagnostic.controller";
+import { createRedisDiagnosticRouter } from "@/presentation/http/redis-diagnostic.routes";
 
 export function createHttpApp(
   controller: GhlOAuthController,
   webhookController: WebhookController,
   signatureKeys?: GhlSignatureKeys,
   policyDiagnosticController?: PolicyDiagnosticController,
+  redisDiagnosticController?: RedisDiagnosticController,
 ) {
   const app = express();
   app.disable("x-powered-by");
@@ -31,6 +34,9 @@ export function createHttpApp(
   app.use("/webhooks", createWebhookRouter(webhookController));
   if (policyDiagnosticController) {
     app.use("/tests", createPolicyDiagnosticRouter(policyDiagnosticController));
+  }
+  if (redisDiagnosticController) {
+    app.use("/tests", createRedisDiagnosticRouter(redisDiagnosticController));
   }
   app.use((_req, res) => res.status(404).json({ error: "Not found" }));
   return app;

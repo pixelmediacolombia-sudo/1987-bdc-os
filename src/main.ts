@@ -32,6 +32,7 @@ import { PostgresPolicyContextRepository } from "@/modules/decisions/infrastruct
 import { PolicyEngine } from "@/modules/decisions/application/policy-engine";
 import { PolicyEvaluationService } from "@/modules/decisions/application/policy-evaluation.service";
 import { PolicyDiagnosticController } from "@/modules/decisions/presentation/http/policy-diagnostic.controller";
+import { RedisDiagnosticController } from "@/presentation/http/redis-diagnostic.controller";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -91,7 +92,8 @@ async function start(): Promise<void> {
     webhookQueue,
   );
   const policyDiagnosticController = new PolicyDiagnosticController(policyEvaluator, config.policyDiagnosticToken);
-  const app = createHttpApp(controller, webhookController, undefined, policyDiagnosticController);
+  const redisDiagnosticController = new RedisDiagnosticController(redis, config.policyDiagnosticToken);
+  const app = createHttpApp(controller, webhookController, undefined, policyDiagnosticController, redisDiagnosticController);
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
   const shutdown = (signal: string) => {

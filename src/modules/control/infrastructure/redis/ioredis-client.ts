@@ -41,6 +41,14 @@ export class IoredisClient implements RedisClientPort {
     this.client.on("error", () => undefined);
   }
 
+  async ping(): Promise<string> {
+    return this.client.ping();
+  }
+
+  async zcard(key: string): Promise<number> {
+    return this.client.zcard(key);
+  }
+
   async set(
     key: string,
     value: string,
