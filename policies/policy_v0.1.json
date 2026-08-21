@@ -1,0 +1,23 @@
+{
+  "version": "v0.1",
+  "downPayment": {
+    "min": null,
+    "max": null,
+    "currency": "USD"
+  },
+  "quietHours": {
+    "enabled": false,
+    "start": null,
+    "end": null
+  },
+  "humanHandoff": {
+    "enabled": true,
+    "triggers": []
+  },
+  "financialBoundaries": {
+    "disclaimer": {
+      "code": "FINANCING_REVIEW_REQUIRED",
+      "text": "Financing terms are subject to dealer review and lender approval."
+    }
+  }
+}

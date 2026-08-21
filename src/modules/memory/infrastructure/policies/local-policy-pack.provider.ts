@@ -5,6 +5,7 @@ import type { PolicyPack } from "@/modules/memory/domain/hydrated-context";
 
 const POLICY_FILES: Record<string, string> = {
   default_v1: "default_policy_v1.json",
+  "v0.1": "policy_v0.1.json",
   v1: "policy_v1.json",
   koons_policy_v1: "koons_policy_v1.json",
 };
