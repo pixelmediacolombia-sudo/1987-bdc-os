@@ -26,6 +26,12 @@ import { LocalPolicyPackProvider } from "@/modules/memory/infrastructure/policie
 import { ensureMemoryTables } from "@/modules/memory/infrastructure/persistence/postgres/memory.migration";
 import { PostgresHydrationRepository } from "@/modules/memory/infrastructure/persistence/postgres/postgres-hydration.repository";
 import { PostgresOutboundMessageRegistry } from "@/modules/control/infrastructure/persistence/postgres/postgres-outbound-message-registry";
+import { ensureDecisionLogsTable } from "@/modules/decisions/infrastructure/persistence/postgres/decision-logs.migration";
+import { PostgresDecisionLogRepository } from "@/modules/decisions/infrastructure/persistence/postgres/postgres-decision-log.repository";
+import { PostgresPolicyContextRepository } from "@/modules/decisions/infrastructure/persistence/postgres/postgres-policy-context.repository";
+import { PolicyEngine } from "@/modules/decisions/application/policy-engine";
+import { PolicyEvaluationService } from "@/modules/decisions/application/policy-evaluation.service";
+import { PolicyDiagnosticController } from "@/modules/decisions/presentation/http/policy-diagnostic.controller";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -34,6 +40,7 @@ async function start(): Promise<void> {
   await ensureIntegrationsTable(pool);
   await ensureWebhookTables(pool);
   await ensureMemoryTables(pool);
+  await ensureDecisionLogsTable(pool);
 
   const oauthClient = new GhlOAuthClientAdapter(config);
   const stateService = new HmacOAuthStateService(config.oauthStateSecret);
@@ -44,9 +51,15 @@ async function start(): Promise<void> {
     new CompleteGhlOAuthUseCase(oauthClient, stateService, cryptor, repository),
   );
   const controller = new GhlOAuthController(presentationService);
+  const policyPackProvider = new LocalPolicyPackProvider();
   const hydrator = new ConversationHydrator(
     new PostgresHydrationRepository(pool),
-    new LocalPolicyPackProvider(),
+    policyPackProvider,
+  );
+  const policyEvaluator = new PolicyEvaluationService(
+    new PostgresPolicyContextRepository(pool, policyPackProvider),
+    new PolicyEngine(),
+    new PostgresDecisionLogRepository(pool),
   );
   const contactMutex = new ContactMutex(redis, config.contactMutexTtlMs);
   const burstBuffer = new BurstBufferService(
@@ -66,6 +79,7 @@ async function start(): Promise<void> {
     new PostgresWebhookRepository(pool, new PostgresOutboundMessageRegistry(pool)),
     burstBuffer,
     humanSuppression,
+    policyEvaluator,
   );
   const webhookQueue = new RedisWebhookQueue(redis);
   await webhookQueue.start(async (job) => {
@@ -76,7 +90,8 @@ async function start(): Promise<void> {
     processWebhook,
     webhookQueue,
   );
-  const app = createHttpApp(controller, webhookController);
+  const policyDiagnosticController = new PolicyDiagnosticController(policyEvaluator, config.policyDiagnosticToken);
+  const app = createHttpApp(controller, webhookController, undefined, policyDiagnosticController);
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
   const shutdown = (signal: string) => {

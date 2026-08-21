@@ -1,0 +1,23 @@
+{
+  "version": "koons_policy_v1",
+  "downPayment": {
+    "min": null,
+    "max": null,
+    "currency": "USD"
+  },
+  "quietHours": {
+    "enabled": true,
+    "start": "21:00",
+    "end": "08:00"
+  },
+  "humanHandoff": {
+    "enabled": true,
+    "triggers": ["stop_ai", "consent_denied", "financial_boundary"]
+  },
+  "financialBoundaries": {
+    "disclaimer": {
+      "code": "FINANCING_REVIEW_REQUIRED",
+      "text": "Financing terms are subject to dealer review and lender approval."
+    }
+  }
+}

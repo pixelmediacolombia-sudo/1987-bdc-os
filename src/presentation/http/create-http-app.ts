@@ -9,11 +9,14 @@ import {
   validateGhlSignature,
 } from "@/modules/webhooks/presentation/http/validate-ghl-signature.middleware";
 import { createWebhookRouter } from "@/modules/webhooks/presentation/http/webhook.routes";
+import type { PolicyDiagnosticController } from "@/modules/decisions/presentation/http/policy-diagnostic.controller";
+import { createPolicyDiagnosticRouter } from "@/modules/decisions/presentation/http/policy-diagnostic.routes";
 
 export function createHttpApp(
   controller: GhlOAuthController,
   webhookController: WebhookController,
   signatureKeys?: GhlSignatureKeys,
+  policyDiagnosticController?: PolicyDiagnosticController,
 ) {
   const app = express();
   app.disable("x-powered-by");
@@ -26,6 +29,9 @@ export function createHttpApp(
     parseCapturedJsonBody,
   );
   app.use("/webhooks", createWebhookRouter(webhookController));
+  if (policyDiagnosticController) {
+    app.use("/tests", createPolicyDiagnosticRouter(policyDiagnosticController));
+  }
   app.use((_req, res) => res.status(404).json({ error: "Not found" }));
   return app;
 }

@@ -17,6 +17,12 @@ export type PolicyPack = {
     enabled: boolean;
     triggers: string[];
   };
+  financialBoundaries?: {
+    disclaimer?: {
+      code: string;
+      text: string;
+    };
+  };
   [key: string]: unknown;
 };
 

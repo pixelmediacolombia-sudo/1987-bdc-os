@@ -46,3 +46,5 @@ services:
         sync: false
       - key: OAUTH_STATE_SECRET
         sync: false
+      - key: POLICY_DIAGNOSTIC_TOKEN
+        sync: false

@@ -18,6 +18,7 @@ export type AppConfig = {
   ghlScopes: string[];
   encryptionSecret: string;
   oauthStateSecret: string;
+  policyDiagnosticToken?: string;
 };
 
 function required(name: string): string {
@@ -66,6 +67,7 @@ export function loadAppConfig(): AppConfig {
     ghlScopes: scopes,
     encryptionSecret,
     oauthStateSecret,
+    policyDiagnosticToken: process.env.POLICY_DIAGNOSTIC_TOKEN?.trim() || undefined,
   };
 }
 
