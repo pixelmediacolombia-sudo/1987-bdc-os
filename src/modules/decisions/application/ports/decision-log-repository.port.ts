@@ -3,6 +3,7 @@ import type { PolicyDecision } from "@/modules/decisions/application/policy-engi
 export type DecisionLogInput = {
   tenantId: string;
   contactId: string;
+  externalId?: string;
   inputVersion: string;
   decision: PolicyDecision;
   modelTrace: Record<string, unknown>;

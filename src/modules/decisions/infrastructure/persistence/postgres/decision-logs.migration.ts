@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS public.decision_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES public.tenants(dealer_id) ON DELETE CASCADE,
   contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
+  external_id TEXT,
   input_version TEXT NOT NULL,
   allowed_actions JSONB NOT NULL CHECK (jsonb_typeof(allowed_actions) = 'array'),
   selected_action TEXT,
@@ -15,6 +16,13 @@ CREATE TABLE IF NOT EXISTS public.decision_logs (
 
 ALTER TABLE public.decision_logs
   ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+ALTER TABLE public.decision_logs
+  ADD COLUMN IF NOT EXISTS external_id TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS decision_logs_tenant_external_uq
+  ON public.decision_logs (tenant_id, external_id)
+  WHERE external_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS decision_logs_tenant_contact_idx
   ON public.decision_logs (tenant_id, contact_id, created_at DESC);

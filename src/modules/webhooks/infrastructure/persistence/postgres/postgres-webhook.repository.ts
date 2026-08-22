@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type {
   GhlWebhookEvent,
@@ -7,6 +8,8 @@ import type {
 import { GhlTenantNotFoundError } from "@/modules/webhooks/domain/ghl-webhook-event";
 import type {
   WebhookProcessResult,
+  WebhookStage,
+  WebhookStageClaim,
   WebhookRepository,
 } from "@/modules/webhooks/application/ports/webhook-repository.port";
 import type { OutboundMessageRegistryPort } from "@/modules/control/application/ports/outbound-message-registry.port";
@@ -14,6 +17,11 @@ import type { OutboundMessageRegistryPort } from "@/modules/control/application/
 type TenantRow = { tenant_id: string };
 type ContactRow = { id: string };
 type ConversationRow = { id: string };
+type RawWebhookRow = {
+  id: string;
+  status: WebhookStage;
+  suppression_required: boolean;
+};
 
 export class PostgresWebhookRepository implements WebhookRepository {
   constructor(
@@ -30,12 +38,12 @@ export class PostgresWebhookRepository implements WebhookRepository {
       tenantId = await this.resolveTenant(client, event.locationId);
       await this.setTenantContext(client, tenantId);
 
-      const rawEvent = await client.query<{ id: string }>(
+      const rawEvent = await client.query<RawWebhookRow>(
         `INSERT INTO public.raw_webhooks
-           (tenant_id, external_id, event_type, location_id, signature, payload, status)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'received')
+           (tenant_id, external_id, event_type, location_id, signature, payload, status, suppression_required)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'received', false)
          ON CONFLICT (tenant_id, external_id) DO NOTHING
-         RETURNING id`,
+         RETURNING id, status, suppression_required`,
         [
           tenantId,
           event.externalId,
@@ -47,9 +55,34 @@ export class PostgresWebhookRepository implements WebhookRepository {
       );
 
       if (rawEvent.rowCount === 0) {
-        await client.query("COMMIT");
-        console.info(`Duplicate event [${event.externalId}] ignored.`);
-        return { duplicate: true, tenantId };
+        const existing = await client.query<RawWebhookRow>(
+          `SELECT id, status, suppression_required
+             FROM public.raw_webhooks
+            WHERE tenant_id = $1 AND external_id = $2
+            FOR UPDATE`,
+          [tenantId, event.externalId],
+        );
+        const row = existing.rows[0];
+        if (!row) throw new Error("Persisted webhook row was not found after conflict");
+
+        if (row.status !== "failed" && row.status !== "received") {
+          await client.query("COMMIT");
+          console.info(`Webhook event [${event.externalId}] resumed at stage=${row.status}`);
+          return {
+            duplicate: true,
+            tenantId,
+            suppressAi: row.suppression_required,
+            stage: row.status,
+          };
+        }
+
+        await client.query(
+          `UPDATE public.raw_webhooks
+              SET status = 'received', error_message = NULL, stage_claim = NULL, stage_claimed_at = NULL
+            WHERE id = $1`,
+          [row.id],
+        );
+        rawEvent.rows = [row];
       }
 
       if (event.inboundMessage) {
@@ -60,17 +93,107 @@ export class PostgresWebhookRepository implements WebhookRepository {
         ? await this.persistHumanInterruption(client, tenantId, event.humanInterruption)
         : undefined;
 
+      const controlTag = event.humanInterruption?.controlTag?.trim().toLowerCase();
+      const nextStage: WebhookStage = controlTag === "stop_ai" && event.contactId
+        ? "policy_pending"
+        : suppressAi
+          ? "policy_applied"
+          : "processed";
+
       await client.query(
         `UPDATE public.raw_webhooks
-            SET status = 'processed', processed_at = now(), error_message = NULL
+            SET status = $2,
+                suppression_required = $3,
+                processed_at = CASE WHEN $2 = 'processed' THEN now() ELSE NULL END,
+                error_message = NULL,
+                stage_claim = NULL,
+                stage_claimed_at = NULL
           WHERE id = $1`,
-        [rawEvent.rows[0].id],
+        [rawEvent.rows[0]?.id, nextStage, suppressAi ?? false],
       );
       await client.query("COMMIT");
-      return { duplicate: false, tenantId, suppressAi };
+      return { duplicate: rawEvent.rowCount === 0, tenantId, suppressAi, stage: nextStage };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       if (tenantId) await this.recordFailedEvent(event, tenantId, error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async claimStage(input: Omit<WebhookStageClaim, "token">): Promise<WebhookStageClaim | undefined> {
+    const token = randomUUID();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await this.setTenantContext(client, input.tenantId);
+      const result = await client.query(
+        `UPDATE public.raw_webhooks
+            SET stage_claim = $4, stage_claimed_at = now()
+          WHERE tenant_id = $1
+            AND external_id = $2
+            AND status = $3
+            AND (stage_claim IS NULL OR stage_claimed_at < now() - interval '60 seconds')
+          RETURNING id`,
+        [input.tenantId, input.externalId, input.stage, token],
+      );
+      await client.query("COMMIT");
+      if (result.rowCount !== 1) return undefined;
+      return { ...input, token };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async completeStage(input: WebhookStageClaim, nextStage: WebhookStage): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await this.setTenantContext(client, input.tenantId);
+      const result = await client.query(
+        `UPDATE public.raw_webhooks
+            SET status = $5,
+                stage_claim = NULL,
+                stage_claimed_at = NULL,
+                error_message = NULL,
+                processed_at = CASE WHEN $5 = 'processed' THEN now() ELSE processed_at END
+          WHERE tenant_id = $1
+            AND external_id = $2
+            AND status = $3
+            AND stage_claim = $4`,
+        [input.tenantId, input.externalId, input.stage, input.token, nextStage],
+      );
+      if (result.rowCount !== 1) throw new Error(`Webhook stage transition lost for ${input.externalId}`);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async releaseStage(input: WebhookStageClaim): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await this.setTenantContext(client, input.tenantId);
+      await client.query(
+        `UPDATE public.raw_webhooks
+            SET stage_claim = NULL, stage_claimed_at = NULL
+          WHERE tenant_id = $1
+            AND external_id = $2
+            AND status = $3
+            AND stage_claim = $4`,
+        [input.tenantId, input.externalId, input.stage, input.token],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
       throw error;
     } finally {
       client.release();

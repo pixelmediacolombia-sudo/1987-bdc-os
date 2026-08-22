@@ -31,6 +31,7 @@ test("stop_ai is evaluated by the gateway before downstream suppression", async 
   assert.deepEqual(calls, [{
     tenantId: "tenant-1",
     ghlContactId: "ghl-contact-1",
+    externalId: "stop-ai-1",
     controlTag: "stop_ai",
     source: "ghl-stop-ai",
   }]);

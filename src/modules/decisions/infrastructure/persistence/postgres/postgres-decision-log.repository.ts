@@ -11,11 +11,13 @@ export class PostgresDecisionLogRepository implements DecisionLogRepositoryPort 
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [input.tenantId]);
       await client.query(
         `INSERT INTO public.decision_logs
-           (tenant_id, contact_id, input_version, allowed_actions, selected_action, reason, model_trace)
-         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7::jsonb)`,
+           (tenant_id, contact_id, external_id, input_version, allowed_actions, selected_action, reason, model_trace)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb)
+         ON CONFLICT DO NOTHING`,
         [
           input.tenantId,
           input.contactId,
+          input.externalId ?? null,
           input.inputVersion,
           JSON.stringify(input.decision.allowedActions),
           input.decision.selectedAction,

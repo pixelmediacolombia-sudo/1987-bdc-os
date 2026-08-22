@@ -5,6 +5,7 @@ import { PolicyEngine, type PolicyDecision, type PolicyEvaluationOverrides } fro
 export type PolicyEvaluationRequest = PolicyEvaluationOverrides & {
   tenantId: string;
   ghlContactId: string;
+  externalId?: string;
   source: "ghl-stop-ai" | "diagnostic";
 };
 
@@ -30,6 +31,7 @@ export class PolicyEvaluationService implements PolicyEvaluatorPort {
     await this.decisionLogRepository.append({
       tenantId: context.tenant.id,
       contactId: context.contact.id,
+      externalId: input.externalId,
       inputVersion: context.tenant.policies.version,
       decision,
       modelTrace: {

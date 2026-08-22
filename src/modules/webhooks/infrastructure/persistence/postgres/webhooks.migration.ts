@@ -10,12 +10,31 @@ CREATE TABLE IF NOT EXISTS public.raw_webhooks (
   signature TEXT NOT NULL,
   payload JSONB NOT NULL,
   status TEXT NOT NULL DEFAULT 'received'
-    CHECK (status IN ('received', 'processed', 'failed')),
+    CHECK (status IN ('received', 'policy_pending', 'policy_applied', 'suppression_applied', 'processed', 'failed')),
+  suppression_required BOOLEAN NOT NULL DEFAULT false,
+  stage_claim TEXT,
+  stage_claimed_at TIMESTAMPTZ,
   error_message TEXT,
   received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   processed_at TIMESTAMPTZ,
   CONSTRAINT raw_webhooks_tenant_external_uq UNIQUE (tenant_id, external_id)
 );
+
+ALTER TABLE public.raw_webhooks
+  ADD COLUMN IF NOT EXISTS suppression_required BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE public.raw_webhooks
+  ADD COLUMN IF NOT EXISTS stage_claim TEXT;
+
+ALTER TABLE public.raw_webhooks
+  ADD COLUMN IF NOT EXISTS stage_claimed_at TIMESTAMPTZ;
+
+ALTER TABLE public.raw_webhooks
+  DROP CONSTRAINT IF EXISTS raw_webhooks_status_check;
+
+ALTER TABLE public.raw_webhooks
+  ADD CONSTRAINT raw_webhooks_status_check
+  CHECK (status IN ('received', 'policy_pending', 'policy_applied', 'suppression_applied', 'processed', 'failed'));
 
 CREATE INDEX IF NOT EXISTS raw_webhooks_tenant_received_idx
   ON public.raw_webhooks (tenant_id, received_at DESC);
