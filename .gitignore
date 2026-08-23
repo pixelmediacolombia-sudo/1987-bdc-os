@@ -9,3 +9,5 @@ coverage/
 .vscode/
 !.vscode/extensions.json
 *.local
+.ticket8-dist/
+dist-ticket8/
