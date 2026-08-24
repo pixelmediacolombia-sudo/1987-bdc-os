@@ -161,7 +161,7 @@ function nextPushTarget(value: number | undefined): number | undefined {
 function applyPushDecision(facts: SofiaFacts, message: string): void {
   const normalized = message.trim().toLowerCase();
   const target = facts.down_payment_push_target;
-  if (target === undefined) return;
+  if (target === undefined || facts.push_accepted !== undefined) return;
   if (/^(sí|si|yes|claro|puedo|de acuerdo|ok|okay)(?:\s|[.!?,;:]|$)/.test(normalized)) {
     facts.push_accepted = true;
     facts.down_payment_accepted = target;
