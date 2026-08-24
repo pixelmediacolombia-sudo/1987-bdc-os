@@ -9,6 +9,7 @@ export type AppConfig = {
   burstBufferSeconds: number;
   burstBufferControlTtlSeconds: number;
   contactMutexTtlMs: number;
+  qualificationFlowEnabled: boolean;
   ghlClientId: string;
   ghlClientSecret: string;
   ghlAppVersionId: string;
@@ -54,6 +55,7 @@ export function loadAppConfig(): AppConfig {
     burstBufferSeconds: positiveNumberEnv("BURST_BUFFER_SECONDS", 15),
     burstBufferControlTtlSeconds: positiveNumberEnv("BURST_BUFFER_CONTROL_TTL_SECONDS", 90),
     contactMutexTtlMs: positiveNumberEnv("CONTACT_MUTEX_TTL_SECONDS", 30) * 1000,
+    qualificationFlowEnabled: booleanEnv("QUALIFICATION_FLOW_ENABLED", false),
     ghlClientId: required("GHL_CLIENT_ID"),
     ghlClientSecret: required("GHL_CLIENT_SECRET"),
     ghlAppVersionId: required("GHL_APP_VERSION_ID"),

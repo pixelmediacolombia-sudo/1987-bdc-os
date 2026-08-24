@@ -13,6 +13,7 @@
     "src/modules/decisions/application/QuestionLedgerService.ts",
     "src/modules/control/application/SemanticRepetitionValidator.ts",
     "src/modules/control/application/registered-outbound-message-sender.ts",
+    "src/modules/control/infrastructure/composition/inbound-conversation-orchestrator.composer.ts",
     "tests/question-ledger-repetition.test.ts"
   ]
 }

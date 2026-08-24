@@ -18,7 +18,6 @@ import { RedisWebhookQueue } from "@/modules/webhooks/infrastructure/redis/redis
 import { ContactMutex } from "@/modules/control/application/contact-mutex";
 import { BurstBufferService } from "@/modules/control/application/burst-buffer.service";
 import { HumanSuppressionService } from "@/modules/control/application/human-suppression.service";
-import { HydratingInboundConversationOrchestrator } from "@/modules/control/application/hydrating-inbound-conversation-orchestrator";
 import { IoredisClient } from "@/modules/control/infrastructure/redis/ioredis-client";
 import { RedisBurstFlushQueue } from "@/modules/control/infrastructure/redis/redis-burst-flush-queue";
 import { ConversationHydrator } from "@/modules/memory/application/conversation-hydrator";
@@ -26,6 +25,8 @@ import { LocalPolicyPackProvider } from "@/modules/memory/infrastructure/policie
 import { ensureMemoryTables } from "@/modules/memory/infrastructure/persistence/postgres/memory.migration";
 import { PostgresHydrationRepository } from "@/modules/memory/infrastructure/persistence/postgres/postgres-hydration.repository";
 import { PostgresOutboundMessageRegistry } from "@/modules/control/infrastructure/persistence/postgres/postgres-outbound-message-registry";
+import { createQualificationFlow } from "@/modules/control/infrastructure/composition/qualification-flow.composer";
+import { createInboundConversationOrchestrator } from "@/modules/control/infrastructure/composition/inbound-conversation-orchestrator.composer";
 import { ensureDecisionLogsTable } from "@/modules/decisions/infrastructure/persistence/postgres/decision-logs.migration";
 import { PostgresDecisionLogRepository } from "@/modules/decisions/infrastructure/persistence/postgres/postgres-decision-log.repository";
 import { PostgresPolicyContextRepository } from "@/modules/decisions/infrastructure/persistence/postgres/postgres-policy-context.repository";
@@ -64,11 +65,27 @@ async function start(): Promise<void> {
     new PostgresDecisionLogRepository(pool),
     new QuestionLedgerService(pool),
   );
+  const outboundRegistry = new PostgresOutboundMessageRegistry(pool);
+  const qualificationFlow = config.qualificationFlowEnabled
+    ? createQualificationFlow({
+        pool,
+        oauthClient,
+        integrationRepository: repository,
+        cryptor,
+        outboundRegistry,
+        policyEvaluator,
+      })
+    : undefined;
+  const inboundConversationOrchestrator = createInboundConversationOrchestrator({
+    hydrator,
+    qualificationFlowEnabled: config.qualificationFlowEnabled,
+    qualificationFlow,
+  });
   const contactMutex = new ContactMutex(redis, config.contactMutexTtlMs);
   const burstBuffer = new BurstBufferService(
     redis,
     contactMutex,
-    new HydratingInboundConversationOrchestrator(hydrator),
+    inboundConversationOrchestrator,
     {
       bufferSeconds: config.burstBufferSeconds,
       controlTtlSeconds: config.burstBufferControlTtlSeconds,
@@ -79,7 +96,7 @@ async function start(): Promise<void> {
   await burstBuffer.start();
   const humanSuppression = new HumanSuppressionService(burstBuffer, contactMutex);
   const processWebhook = new ProcessGHLWebhookUseCase(
-    new PostgresWebhookRepository(pool, new PostgresOutboundMessageRegistry(pool)),
+    new PostgresWebhookRepository(pool, outboundRegistry),
     burstBuffer,
     humanSuppression,
     policyEvaluator,

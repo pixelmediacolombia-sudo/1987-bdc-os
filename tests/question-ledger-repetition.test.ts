@@ -7,6 +7,7 @@ import { PolicyEngine } from "@/modules/decisions/application/policy-engine";
 import { SemanticRepetitionValidator } from "@/modules/control/application/SemanticRepetitionValidator";
 import { OutboundMessageRejectedError, RegisteredOutboundMessageSender } from "@/modules/control/application/registered-outbound-message-sender";
 import { QualificationFlowService } from "@/modules/control/application/qualification-flow.service";
+import { createInboundConversationOrchestrator } from "@/modules/control/infrastructure/composition/inbound-conversation-orchestrator.composer";
 
 const TENANT_ID = "00000000-0000-0000-0000-000000000001";
 const CONTACT_ID = "00000000-0000-0000-0000-000000000002";
@@ -206,4 +207,52 @@ test("Ticket 8 / rejected candidates do not reach the outbound provider", async 
   assert.deepEqual(providerCalls, []);
   assert.equal(registryCalls, 0);
   assert.equal(pool.client.decisionLogCount, 1);
+});
+
+test("Ticket 8 / enabled composition fails closed without QualificationFlowService", () => {
+  assert.throws(
+    () => createInboundConversationOrchestrator({
+      hydrator: {} as never,
+      qualificationFlowEnabled: true,
+    }),
+    /requires QualificationFlowService composition/,
+  );
+
+  const orchestrator = createInboundConversationOrchestrator({
+    hydrator: {} as never,
+    qualificationFlowEnabled: false,
+  });
+  assert.ok(orchestrator);
+});
+
+test("Ticket 8 / enabled composition passes QualificationFlowService to the orchestrator", async () => {
+  const calls: string[] = [];
+  const qualificationFlow = {
+    evaluateObjective: async () => {
+      calls.push("evaluate");
+      return { selectedAction: "WAIT" };
+    },
+    sendCandidate: async () => {
+      calls.push("send");
+      return { providerMessageId: "provider-message" };
+    },
+  } as never;
+  const orchestrator = createInboundConversationOrchestrator({
+    hydrator: {
+      hydrate: async () => ({ conversation: { state: "active" } }),
+    } as never,
+    qualificationFlowEnabled: true,
+    qualificationFlow,
+  });
+
+  await orchestrator.process({
+    tenantId: TENANT_ID,
+    contactId: CONTACT_ID,
+    messages: [],
+    consolidatedText: "Necesito información",
+    objectiveType: "down_payment",
+    requestedAction: "ASK_OBJECTIVE",
+  });
+
+  assert.deepEqual(calls, ["evaluate"]);
 });
