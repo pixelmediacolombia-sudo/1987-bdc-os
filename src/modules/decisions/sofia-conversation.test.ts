@@ -18,7 +18,7 @@ test("Sofia excludes a known hard-rule failure from the salesperson flow", () =>
 test("Sofia asks for contact after the third turn and does not invent approval", () => {
   const result = new SofiaConversationEngine().processTurn({
     dealerName: "Koons Automotive of Culpeper",
-    latestMessage: "Quiero una SUV y tengo 1000",
+    latestMessage: "Quiero una SUV y tengo 2500",
     priorFacts: {},
     turnCount: 3,
   });
@@ -66,4 +66,24 @@ test("Sofia persists the required enrichment facts and only reaches A after hard
   assert.equal(result.facts.employment_months, 24);
   assert.equal(result.facts.has_income_proof, true);
   assert.equal(result.leadLevel, "A");
+});
+
+test("Sofia does not confuse family use or a phone area code with qualification facts", () => {
+  const engine = new SofiaConversationEngine();
+  const family = engine.processTurn({
+    dealerName: "Koons",
+    latestMessage: "Es para mi familia.",
+    priorFacts: { vehicle_category: "suv" },
+    turnCount: 2,
+  });
+  assert.equal(family.facts.vehicle_use, "familia");
+
+  const phone = engine.processTurn({
+    dealerName: "Koons",
+    latestMessage: "No tengo trade y mi número es 571-555-0134.",
+    priorFacts: { vehicle_category: "suv", vehicle_use: "familia", down_payment_declared: 1500 },
+    turnCount: 4,
+  });
+  assert.equal(phone.facts.down_payment_declared, 1500);
+  assert.equal(phone.facts.contact_value, "5715550134");
 });

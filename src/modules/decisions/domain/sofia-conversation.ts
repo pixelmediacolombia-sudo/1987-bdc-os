@@ -75,14 +75,14 @@ export class SofiaConversationEngine {
 
     if (hardRuleFailure) return makeResult(facts, "C", ["Gracias por compartirlo. Con eso el gerente puede revisar contigo la mejor opción de seguimiento."], "follow_up", contactCaptured, true);
     if (isStrongPurchaseSignal(facts)) return makeResult(facts, leadLevel, ["Perfecto. Ya le paso tu información al gerente para que te ayude con los números exactos."], "handoff", contactCaptured, false);
-    if (input.turnCount >= 3 && !contactCaptured) {
-      return makeResult(facts, leadLevel, ["Para que el gerente pueda ayudarte, ¿me compartes tu número de teléfono?"], "ask", false, false);
-    }
-
     const pushTarget = nextPushTarget(facts.down_payment_declared);
     if (pushTarget !== undefined && facts.push_accepted === undefined) {
       facts.down_payment_push_target = pushTarget;
       return makeResult(facts, "B", [`Para una ${facts.vehicle_category ?? "opción como esa"}, los bancos suelen ver mejor un enganche de $${pushTarget.toLocaleString("en-US")}. ¿Te sería posible llegar a ese monto?`], "ask", contactCaptured, false);
+    }
+
+    if (input.turnCount >= 3 && !contactCaptured) {
+      return makeResult(facts, leadLevel, ["Para que el gerente pueda ayudarte, ¿me compartes tu número de teléfono?"], "ask", false, false);
     }
 
     const question = nextQuestion(input.dealerName, facts);
@@ -174,7 +174,9 @@ function applyPushDecision(facts: SofiaFacts, message: string): void {
 function extractFacts(message: string): SofiaFacts {
   const normalized = message.trim().toLowerCase();
   const facts: SofiaFacts = {};
-  const amount = normalized.match(/(?:\$|usd\s*)?(\d{3,5}(?:[,.]\d{3})*|\d{1,3}(?:[,.]\d{3})+)(?:\s*(?:d[oó]lares|usd))?/i);
+  const phone = message.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/);
+  const normalizedWithoutPhone = phone ? normalized.replace(phone[0].toLowerCase(), " ") : normalized;
+  const amount = normalizedWithoutPhone.match(/(?:\$|usd\s*)?(\d{3,5}(?:[,.]\d{3})*|\d{1,3}(?:[,.]\d{3})+)(?:\s*(?:d[oó]lares|usd))?/i);
   if (amount) {
     const value = Number(amount[1].replace(/[,.]/g, ""));
     if (Number.isFinite(value)) facts.down_payment_declared = value;
@@ -183,7 +185,7 @@ function extractFacts(message: string): SofiaFacts {
   else if (/\b(sedan|carro|auto)\b/.test(normalized)) facts.vehicle_category = "sedan";
   else if (/\b(camion|truck|pickup|trabajo)\b/.test(normalized)) facts.vehicle_category = "work truck";
   else if (/\b(van|minivan)\b/.test(normalized)) facts.vehicle_category = "van";
-  if (/\bpara m[ií]|para m[ií] mismo|solo para m[ií]\b/.test(normalized)) facts.vehicle_use = "solo";
+  if (/\bpara m[ií] mismo\b|\bsolo para m[ií]\b|\bpara m[ií]\b(?!\s+familia)/.test(normalized)) facts.vehicle_use = "solo";
   else if (/\bpara la familia|para mi familia|familia\b/.test(normalized)) facts.vehicle_use = "familia";
   if (/\b(no|ninguno|no tengo)\b.*\b(trade|carro|veh[ií]culo)\b|\bno trade\b/.test(normalized)) facts.has_trade_in = false;
   else if (/\b(trade|parte de pago|dar mi carro|tengo un carro)\b/.test(normalized)) {
@@ -201,7 +203,6 @@ function extractFacts(message: string): SofiaFacts {
   if (/\b(no tengo|sin)\b.*\b(comprobantes?|estados de cuenta|talones?)\b/.test(normalized)) facts.has_income_proof = false;
   else if (/\b(comprobantes?|estados de cuenta|talones?|pay ?stubs?|bank statements?)\b/.test(normalized)) facts.has_income_proof = true;
   if (/\b(quiero ir|quiero visitar|visitar el dealer|hacer una cita|cita|pasar por)\b/.test(normalized)) facts.visit_intent = true;
-  const phone = message.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/);
   if (phone) {
     facts.contact_channel = "phone";
     facts.contact_value = phone[0].replace(/\D/g, "");
