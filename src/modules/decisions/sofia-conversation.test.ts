@@ -46,6 +46,9 @@ test("Sofia evidences the one-step down-payment push for 1000 and 1500", () => {
   const from1500 = engine.processTurn({ dealerName: "Koons", latestMessage: "Tengo 1500", priorFacts: { vehicle_category: "suv", vehicle_use: "solo" }, turnCount: 2 });
   assert.match(from1500.response ?? "", /2,000/);
   assert.equal(from1500.facts.down_payment_push_target, 2000);
+  const accepted = engine.processTurn({ dealerName: "Koons", latestMessage: "Sí.", priorFacts: from1500.facts, turnCount: 3 });
+  assert.equal(accepted.facts.push_accepted, true);
+  assert.equal(accepted.facts.down_payment_accepted, 2000);
 });
 
 test("Sofia persists the required enrichment facts and only reaches A after hard rules", () => {
