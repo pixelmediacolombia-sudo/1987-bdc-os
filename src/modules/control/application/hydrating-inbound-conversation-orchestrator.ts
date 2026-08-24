@@ -29,6 +29,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
           ...(previous?.facts ?? {}),
         },
         turnCount: (previous?.turnCount ?? 0) + 1,
+        isFirstTurn: !previous,
       });
       await this.sofia.repository.save(input.tenantId, input.contactId, {
         turnCount: (previous?.turnCount ?? 0) + 1,
@@ -71,10 +72,10 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
 function factsFromContext(activeFacts: Record<string, string>): SofiaFacts {
   const facts: SofiaFacts = {};
   for (const [key, value] of Object.entries(activeFacts)) {
-    if (key === "down_payment_declared" || key === "down_payment_accepted" || key === "employment_months") {
+    if (key === "down_payment_declared" || key === "down_payment_accepted" || key === "down_payment_push_target" || key === "employment_months") {
       const parsed = Number(value);
       if (Number.isFinite(parsed)) facts[key] = parsed;
-    } else if (key === "push_accepted" || key === "has_trade_in" || key === "first_time_buyer" || key === "has_income_proof" || key === "trade_in_financed") {
+    } else if (key === "push_accepted" || key === "has_trade_in" || key === "first_time_buyer" || key === "has_income_proof" || key === "trade_in_financed" || key === "visit_intent") {
       if (value === "true" || value === "false") facts[key] = value === "true";
     } else if (key in factsFromContextKeys()) {
       facts[key as keyof SofiaFacts] = value as never;
@@ -87,6 +88,7 @@ function factsFromContextKeys(): Record<string, true> {
   return {
     vehicle_category: true,
     vehicle_model_interest: true,
+    vehicle_use: true,
     trade_in_description: true,
     contact_channel: true,
     contact_value: true,

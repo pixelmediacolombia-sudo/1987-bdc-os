@@ -94,7 +94,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
-  SELECT t.dealer_id FROM public.tenants AS t;
+  SELECT route.dealer_id FROM public.tenant_location_routes AS route;
 $$;
 
 REVOKE ALL ON FUNCTION public.list_qualification_signal_dealers() FROM PUBLIC;

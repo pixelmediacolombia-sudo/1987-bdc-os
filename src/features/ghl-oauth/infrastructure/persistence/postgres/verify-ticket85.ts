@@ -30,9 +30,14 @@ async function main(): Promise<void> {
               (SELECT COUNT(*) FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = 'tenants' AND column_name = 'meta_dataset_id')::text AS meta_column`,
     );
-    const dealers = await pool.query<{ dealer_id: string }>(
-      "SELECT dealer_id::text AS dealer_id FROM public.list_qualification_signal_dealers()",
+    // tenants is FORCE RLS and the verifier starts without app.tenant_id.
+    // Enumerate bootstrap routes instead; each route is then checked under
+    // its own tenant context below. The previous SECURITY DEFINER function
+    // returned dealers=0 for a normal bdc role even when routes existed.
+    const routeRows = await pool.query<{ dealer_id: string }>(
+      "SELECT dealer_id::text AS dealer_id FROM public.tenant_location_routes ORDER BY dealer_id",
     );
+    const dealers = { rows: routeRows.rows };
     const checks: DealerCheck[] = [];
     for (const dealer of dealers.rows) {
       const client = await pool.connect();
@@ -81,7 +86,9 @@ async function main(): Promise<void> {
       schema: schema.rows[0],
       dealers: checks.length,
       checks,
-      note: checks.length === 0 ? "No tenant rows were visible to the verification function; schema check is authoritative for this run." : undefined,
+      tenantRouteCount: routeRows.rowCount ?? routeRows.rows.length,
+      enumeration: "tenant_location_routes (bootstrap metadata) followed by app.tenant_id-scoped checks",
+      note: checks.length === 0 ? "No tenant routes were visible; schema check is authoritative for this run." : undefined,
     }));
   } finally {
     await pool.end();

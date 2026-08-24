@@ -169,6 +169,7 @@ AFTER INSERT OR UPDATE OF ghl_location_id ON public.tenants
 FOR EACH ROW EXECUTE FUNCTION public.sync_tenant_location_route();
 
 REVOKE ALL ON TABLE public.tenant_location_routes FROM PUBLIC;
+GRANT SELECT ON TABLE public.tenant_location_routes TO bdc;
 
 CREATE OR REPLACE FUNCTION public.resolve_ghl_tenant_id(p_location_id TEXT)
 RETURNS UUID
