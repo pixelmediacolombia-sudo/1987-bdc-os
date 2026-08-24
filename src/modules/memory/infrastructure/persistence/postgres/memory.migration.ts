@@ -61,11 +61,14 @@ CREATE TABLE IF NOT EXISTS public.sofia_conversation_state (
   push_accepted BOOLEAN,
   has_trade_in BOOLEAN,
   hard_rule_failure BOOLEAN NOT NULL DEFAULT false,
+  last_response TEXT,
   last_inbound_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT sofia_state_contact_uq UNIQUE (tenant_id, contact_id)
 );
+ALTER TABLE public.sofia_conversation_state
+  ADD COLUMN IF NOT EXISTS last_response TEXT;
 CREATE INDEX IF NOT EXISTS sofia_state_level_idx
   ON public.sofia_conversation_state (tenant_id, lead_level, updated_at DESC);
 ALTER TABLE public.sofia_conversation_state ENABLE ROW LEVEL SECURITY;

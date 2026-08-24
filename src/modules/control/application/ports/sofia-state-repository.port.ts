@@ -7,6 +7,7 @@ export type SofiaConversationState = {
   pushAccepted?: boolean;
   hasTradeIn?: boolean;
   hardRuleFailure: boolean;
+  lastResponse?: string;
 };
 
 export interface SofiaStateRepositoryPort {

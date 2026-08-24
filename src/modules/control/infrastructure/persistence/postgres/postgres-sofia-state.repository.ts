@@ -9,6 +9,7 @@ type SofiaStateRow = {
   push_accepted: boolean | null;
   has_trade_in: boolean | null;
   hard_rule_failure: boolean;
+  last_response: string | null;
 };
 
 export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
@@ -21,7 +22,7 @@ export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
       const result = await client.query<SofiaStateRow>(
         `SELECT state.turn_count, state.fields, state.lead_level, state.push_accepted,
-                state.has_trade_in, state.hard_rule_failure
+                state.has_trade_in, state.hard_rule_failure, state.last_response
            FROM public.sofia_conversation_state AS state
            JOIN public.contacts AS contact ON contact.id = state.contact_id
           WHERE state.tenant_id = $1 AND contact.ghl_contact_id = $2
@@ -38,6 +39,7 @@ export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
             ...(row.push_accepted === null ? {} : { pushAccepted: row.push_accepted }),
             ...(row.has_trade_in === null ? {} : { hasTradeIn: row.has_trade_in }),
             hardRuleFailure: row.hard_rule_failure,
+            ...(row.last_response === null ? {} : { lastResponse: row.last_response }),
           }
         : undefined;
     } catch (error) {
@@ -55,8 +57,8 @@ export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
       await client.query(
         `INSERT INTO public.sofia_conversation_state
-           (tenant_id, contact_id, turn_count, fields, lead_level, push_accepted, has_trade_in, hard_rule_failure, last_inbound_at)
-         SELECT $1, contact.id, $3, $4::jsonb, $5, $6, $7, $8, now()
+           (tenant_id, contact_id, turn_count, fields, lead_level, push_accepted, has_trade_in, hard_rule_failure, last_response, last_inbound_at)
+         SELECT $1, contact.id, $3, $4::jsonb, $5, $6, $7, $8, $9, now()
            FROM public.contacts AS contact
           WHERE contact.tenant_id = $1 AND contact.ghl_contact_id = $2
          ON CONFLICT (tenant_id, contact_id) DO UPDATE SET
@@ -66,9 +68,10 @@ export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
            push_accepted = EXCLUDED.push_accepted,
            has_trade_in = EXCLUDED.has_trade_in,
            hard_rule_failure = EXCLUDED.hard_rule_failure,
+           last_response = EXCLUDED.last_response,
            last_inbound_at = now(),
            updated_at = now()`,
-        [tenantId, contactId, state.turnCount, JSON.stringify(state.facts), state.leadLevel, state.pushAccepted ?? null, state.hasTradeIn ?? null, state.hardRuleFailure],
+        [tenantId, contactId, state.turnCount, JSON.stringify(state.facts), state.leadLevel, state.pushAccepted ?? null, state.hasTradeIn ?? null, state.hardRuleFailure, state.lastResponse ?? null],
       );
       await client.query("COMMIT");
     } catch (error) {

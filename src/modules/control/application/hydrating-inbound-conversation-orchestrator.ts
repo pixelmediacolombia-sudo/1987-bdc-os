@@ -37,6 +37,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
         ...(result.facts.push_accepted === undefined ? {} : { pushAccepted: result.facts.push_accepted }),
         ...(result.facts.has_trade_in === undefined ? {} : { hasTradeIn: result.facts.has_trade_in }),
         hardRuleFailure: result.hardRuleFailure,
+        ...(result.response ? { lastResponse: result.response } : {}),
       });
       // Sofia is deliberately persistence-only in this phase. A response is
       // planned by the domain engine, but no provider is called from here.
