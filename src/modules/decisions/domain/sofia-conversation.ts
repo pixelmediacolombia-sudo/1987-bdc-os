@@ -129,7 +129,7 @@ function nextQuestion(dealerName: string, facts: SofiaFacts): string {
 function extractFacts(message: string): SofiaFacts {
   const normalized = message.trim().toLowerCase();
   const facts: SofiaFacts = {};
-  const amount = normalized.match(/(?:\$|usd\s*)?(\d{1,3}(?:[,.]\d{3})*|\d{3,5})(?:\s*(?:d[oó]lares|usd))?/i);
+  const amount = normalized.match(/(?:\$|usd\s*)?(\d{3,5}(?:[,.]\d{3})*|\d{1,3}(?:[,.]\d{3})+)(?:\s*(?:d[oó]lares|usd))?/i);
   if (amount) {
     const value = Number(amount[1].replace(/[,.]/g, ""));
     if (Number.isFinite(value)) facts.down_payment_declared = value;
