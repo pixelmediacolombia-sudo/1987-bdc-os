@@ -22,6 +22,7 @@ export class RegisteredOutboundMessageSender {
         tenantId: input.tenantId,
         contactId: input.contactId,
         content: input.content,
+        ...(input.externalId ? { externalId: input.externalId } : {}),
       };
       const validation = await this.repetitionGuard.validate(validationInput);
       if (!validation.accepted) {

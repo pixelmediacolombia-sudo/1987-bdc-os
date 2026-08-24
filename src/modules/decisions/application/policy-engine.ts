@@ -11,6 +11,8 @@ export type PolicyEvaluationOverrides = {
   controlTag?: string;
   inboundMessage?: string;
   downPayment?: number;
+  requestedAction?: NextBestAction;
+  objectiveType?: string;
 };
 
 export type PolicyDecision = {

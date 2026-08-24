@@ -31,6 +31,7 @@ import { PostgresDecisionLogRepository } from "@/modules/decisions/infrastructur
 import { PostgresPolicyContextRepository } from "@/modules/decisions/infrastructure/persistence/postgres/postgres-policy-context.repository";
 import { PolicyEngine } from "@/modules/decisions/application/policy-engine";
 import { PolicyEvaluationService } from "@/modules/decisions/application/policy-evaluation.service";
+import { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
 import { PolicyDiagnosticController } from "@/modules/decisions/presentation/http/policy-diagnostic.controller";
 import { RedisDiagnosticController } from "@/presentation/http/redis-diagnostic.controller";
 
@@ -61,6 +62,7 @@ async function start(): Promise<void> {
     new PostgresPolicyContextRepository(pool, policyPackProvider),
     new PolicyEngine(),
     new PostgresDecisionLogRepository(pool),
+    new QuestionLedgerService(pool),
   );
   const contactMutex = new ContactMutex(redis, config.contactMutexTtlMs);
   const burstBuffer = new BurstBufferService(

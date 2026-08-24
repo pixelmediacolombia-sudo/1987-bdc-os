@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PoolClient, QueryResultRow } from "pg";
 import { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
+import { PolicyEvaluationService } from "@/modules/decisions/application/policy-evaluation.service";
+import { PolicyEngine } from "@/modules/decisions/application/policy-engine";
 import { SemanticRepetitionValidator } from "@/modules/control/application/SemanticRepetitionValidator";
 import { OutboundMessageRejectedError, RegisteredOutboundMessageSender } from "@/modules/control/application/registered-outbound-message-sender";
+import { QualificationFlowService } from "@/modules/control/application/qualification-flow.service";
 
 const TENANT_ID = "00000000-0000-0000-0000-000000000001";
 const CONTACT_ID = "00000000-0000-0000-0000-000000000002";
@@ -76,6 +79,55 @@ test("Ticket 8 / Ledger AC-03 blocks ASK_OBJECTIVE after down_payment is answere
   assert.ok(objectiveWriteIndex > setConfigIndex, "RLS tenant context must precede the objective write");
 });
 
+test("Ticket 8 / integrated decision flow logs WAIT when ASK_OBJECTIVE is terminal", async () => {
+  const pool = new Ticket8FakePool();
+  pool.client.objective = { objective_type: "down_payment", asked: true, answered: true, skipped: false };
+  const logged: Array<{ decision: { selectedAction: string | null; reason: string } }> = [];
+  const service = new PolicyEvaluationService(
+    {
+      load: async () => ({
+        tenant: {
+          id: TENANT_ID,
+          timezone: "America/Bogota",
+          policyVersion: "ticket8_v1",
+          status: "active",
+          policies: {
+            version: "ticket8_v1",
+            downPayment: { min: null, max: null, currency: "USD" },
+            quietHours: { enabled: false, start: null, end: null },
+            humanHandoff: { enabled: true, triggers: [] },
+          },
+        },
+        contact: { id: CONTACT_ID, ghlContactId: "ghl-contact-2", consentState: "unknown" },
+        activeFacts: {},
+      }),
+    },
+    new PolicyEngine(),
+    {
+      append: async (input) => {
+        logged.push({ decision: { selectedAction: input.decision.selectedAction, reason: input.decision.reason } });
+        return { rlsEnforced: true };
+      },
+    },
+    new QuestionLedgerService(pool as never),
+  );
+
+  const decision = await service.evaluateForContact({
+    tenantId: TENANT_ID,
+    ghlContactId: CONTACT_ID,
+    objectiveType: "down_payment",
+    requestedAction: "ASK_OBJECTIVE",
+    source: "qualification-flow",
+    externalId: "ticket8-integrated-1",
+  });
+
+  assert.equal(decision.selectedAction, "WAIT");
+  assert.equal(decision.allowedActions.includes("ASK_OBJECTIVE"), false);
+  assert.match(decision.reason, /ASK_OBJECTIVE blocked/);
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0]?.decision.selectedAction, "WAIT");
+});
+
 test("Ticket 8 / semantic filter rejects an almost identical recent follow-up and logs the veto", async () => {
   const pool = new Ticket8FakePool();
   pool.client.recentMessages = [{
@@ -102,10 +154,18 @@ test("Ticket 8 / semantic filter rejects an almost identical recent follow-up an
 });
 
 test("Ticket 8 / rejected candidates do not reach the outbound provider", async () => {
+  const pool = new Ticket8FakePool();
+  pool.client.recentMessages = [{
+    content: "Este será mi último seguimiento por ahora... si ya no le interesa, solo dígamelo",
+  }];
   const providerCalls: string[] = [];
+  let registryCalls = 0;
   const sender = new RegisteredOutboundMessageSender(
     {
-      register: async () => ({ attemptId: "attempt", expiresAt: new Date() }),
+      register: async () => {
+        registryCalls += 1;
+        return { attemptId: "attempt", expiresAt: new Date() };
+      },
       attachProviderMessageId: async () => undefined,
       markFailed: async () => undefined,
       wasIssuedBy1987: async () => false,
@@ -116,20 +176,34 @@ test("Ticket 8 / rejected candidates do not reach the outbound provider", async 
         return { providerMessageId: "provider-message" };
       },
     },
-    {
-      validate: async () => ({
-        accepted: false,
-        action: "HANDOFF",
-        candidateHash: "hash",
-        threshold: 0.8,
-        reason: "repeat",
-      }),
-    },
+    new SemanticRepetitionValidator(pool as never, { threshold: 0.8 }),
   );
 
+  const qualificationFlow = new QualificationFlowService({
+    evaluateForContact: async (input) => {
+      assert.equal(input.source, "qualification-flow");
+      return { selectedAction: "ASK_OBJECTIVE" } as never;
+    },
+  }, sender);
+  const decision = await qualificationFlow.evaluateObjective({
+    tenantId: TENANT_ID,
+    contactId: CONTACT_ID,
+    objectiveType: "down_payment",
+    requestedAction: "ASK_OBJECTIVE",
+  });
+  assert.equal(decision.selectedAction, "ASK_OBJECTIVE");
+
   await assert.rejects(
-    sender.send({ tenantId: TENANT_ID, contactId: CONTACT_ID, content: "repeat", semanticHash: "hash" }),
-    (error: unknown) => error instanceof OutboundMessageRejectedError && error.action === "HANDOFF",
+    qualificationFlow.sendCandidate({
+      tenantId: TENANT_ID,
+      contactId: CONTACT_ID,
+      content: "Este será mi último seguimiento... si ya no le interesa, por favor dígamelo",
+      semanticHash: "hash",
+      externalId: "ticket8-integrated-2",
+    }),
+    (error: unknown) => error instanceof OutboundMessageRejectedError && error.action === "WAIT",
   );
   assert.deepEqual(providerCalls, []);
+  assert.equal(registryCalls, 0);
+  assert.equal(pool.client.decisionLogCount, 1);
 });
