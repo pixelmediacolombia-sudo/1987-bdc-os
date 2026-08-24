@@ -6,6 +6,9 @@ export type InboundMessage = {
   conversationId?: string;
   phone?: string;
   email?: string;
+  ctwaClid?: string;
+  ctwaSourceId?: string;
+  ctwaCapturedAt?: string;
   channel: string;
   content: string;
   semanticHash: string;

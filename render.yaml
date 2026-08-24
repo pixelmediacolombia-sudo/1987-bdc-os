@@ -23,6 +23,10 @@ services:
         value: "30"
       - key: BURST_BUFFER_CONTROL_TTL_SECONDS
         value: "90"
+      - key: QUALIFICATION_SIGNAL_ENABLED
+        value: "false"
+      - key: QUALIFICATION_SIGNAL_POLL_MS
+        value: "5000"
       - key: WEBHOOK_QUEUE_MAX_ATTEMPTS
         value: "5"
       - key: WEBHOOK_QUEUE_BACKOFF_MS

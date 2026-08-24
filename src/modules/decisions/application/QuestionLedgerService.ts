@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import type { NextBestAction } from "@/modules/decisions/domain/next-best-action";
+import type { QualificationCompletionPort } from "@/modules/control/application/ports/qualification-signal.port";
 
 export type ObjectiveState = {
   objectiveType: string;
@@ -8,6 +9,8 @@ export type ObjectiveState = {
   skipped: boolean;
   /** Set only when the buyer explicitly corrects a previously terminal answer. */
   correctionRequested?: boolean;
+  /** Explicit completion boundary supplied by the qualification flow. */
+  qualificationCompleted?: boolean;
 };
 
 export type ObjectiveActionDecision = {
@@ -17,7 +20,10 @@ export type ObjectiveActionDecision = {
 };
 
 export class QuestionLedgerService {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly completionPort?: QualificationCompletionPort,
+  ) {}
 
   async checkObjectiveState(
     tenantId: string,
@@ -83,7 +89,7 @@ export class QuestionLedgerService {
     try {
       await client.query("BEGIN");
       await this.setTenantContext(client, normalizedTenantId);
-      await client.query(
+      const ledgerWrite = await client.query<{ id: string }>(
         `INSERT INTO public.objectives AS objective
            (tenant_id, contact_id, objective_type, asked, answered, skipped)
          VALUES ($1, $2, $3, $4, $5, $6)
@@ -94,7 +100,8 @@ export class QuestionLedgerService {
                            ELSE objective.answered OR EXCLUDED.answered END,
            skipped = CASE WHEN $7::boolean THEN EXCLUDED.skipped
                           ELSE objective.skipped OR EXCLUDED.skipped END,
-           updated_at = now()`,
+           updated_at = now()
+         RETURNING id`,
         [
           normalizedTenantId,
           normalizedContactId,
@@ -105,6 +112,16 @@ export class QuestionLedgerService {
           correctionRequested,
         ],
       );
+      if (fields.qualificationCompleted === true) {
+        const ledgerEntryId = ledgerWrite.rows[0]?.id;
+        if (!ledgerEntryId) throw new Error("Qualification completion did not return a ledger entry id");
+        if (!this.completionPort) throw new Error("Qualification completion signal is not configured");
+        await this.completionPort.enqueueWithinTransaction(client, {
+          tenantId: normalizedTenantId,
+          ghlContactId: normalizedContactId,
+          ledgerEntryId,
+        });
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
@@ -149,7 +166,7 @@ function requiredIdentifier(value: string, name: string): string {
 }
 
 function validateBooleanPatch(fields: Partial<ObjectiveState>): void {
-  for (const key of ["asked", "answered", "skipped", "correctionRequested"] as const) {
+  for (const key of ["asked", "answered", "skipped", "correctionRequested", "qualificationCompleted"] as const) {
     const value = fields[key];
     if (value !== undefined && typeof value !== "boolean") {
       throw new Error(`Objective field ${key} must be boolean`);

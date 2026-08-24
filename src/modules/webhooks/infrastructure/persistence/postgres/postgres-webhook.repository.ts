@@ -221,14 +221,25 @@ export class PostgresWebhookRepository implements WebhookRepository {
   ): Promise<void> {
     const contact = await client.query<ContactRow>(
       `INSERT INTO public.contacts AS c
-         (tenant_id, ghl_contact_id, phone, email, preferred_language, consent_state)
-       VALUES ($1, $2, $3, $4, 'unknown', 'unknown')
+         (tenant_id, ghl_contact_id, phone, email, ctwa_clid, ctwa_source_id, ctwa_captured_at, preferred_language, consent_state)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'unknown', 'unknown')
        ON CONFLICT (tenant_id, ghl_contact_id) DO UPDATE SET
          phone = COALESCE(EXCLUDED.phone, c.phone),
          email = COALESCE(EXCLUDED.email, c.email),
+         ctwa_clid = COALESCE(c.ctwa_clid, EXCLUDED.ctwa_clid),
+         ctwa_source_id = COALESCE(c.ctwa_source_id, EXCLUDED.ctwa_source_id),
+         ctwa_captured_at = COALESCE(c.ctwa_captured_at, EXCLUDED.ctwa_captured_at),
          updated_at = now()
        RETURNING id`,
-      [tenantId, message.contactId, message.phone ?? null, message.email ?? null],
+      [
+        tenantId,
+        message.contactId,
+        message.phone ?? null,
+        message.email ?? null,
+        message.ctwaClid ?? null,
+        message.ctwaSourceId ?? null,
+        message.ctwaCapturedAt ?? null,
+      ],
     );
 
     if (contact.rowCount !== 1 || !contact.rows[0]) {

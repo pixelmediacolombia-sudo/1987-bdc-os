@@ -6,6 +6,7 @@ import type {
   JsonObject,
 } from "@/modules/webhooks/domain/ghl-webhook-event";
 import { InvalidGhlWebhookError } from "@/modules/webhooks/domain/ghl-webhook-event";
+import { extractCtwaAttribution } from "@/modules/webhooks/domain/ctwa-clid";
 
 function asObject(value: unknown): JsonObject | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -99,6 +100,7 @@ function buildMessage(
 
   const phone = stringAt(contact ?? {}, ["phone"]);
   const email = stringAt(contact ?? {}, ["email"]);
+  const ctwa = extractCtwaAttribution(payload);
 
   return {
     externalId,
@@ -106,6 +108,9 @@ function buildMessage(
     ...(conversationId ? { conversationId } : {}),
     ...(phone ? { phone } : {}),
     ...(email ? { email } : {}),
+    ...(ctwa.ctwaClid ? { ctwaClid: ctwa.ctwaClid } : {}),
+    ...(ctwa.sourceId ? { ctwaSourceId: ctwa.sourceId } : {}),
+    ...((ctwa.ctwaClid || ctwa.sourceId) ? { ctwaCapturedAt: new Date().toISOString() } : {}),
     // GHL InternalComment payloads do not include a transport channel. Keep
     // the persisted value inside the database contract instead of inventing
     // an unsupported channel such as `unknown`.

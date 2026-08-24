@@ -35,6 +35,13 @@ import { PolicyEvaluationService } from "@/modules/decisions/application/policy-
 import { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
 import { PolicyDiagnosticController } from "@/modules/decisions/presentation/http/policy-diagnostic.controller";
 import { RedisDiagnosticController } from "@/presentation/http/redis-diagnostic.controller";
+import { ensureQualificationSignalTables } from "@/modules/webhooks/infrastructure/persistence/postgres/qualification-signals.migration";
+import { PostgresQualificationSignalRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-qualification-signal.repository";
+import { QualificationSignalWorker } from "@/modules/control/infrastructure/qualification-signal.worker";
+import { MetaCapiProvider } from "@/modules/control/infrastructure/meta-capi.provider";
+import { GhlTokenRefreshUseCase } from "@/features/ghl-oauth/application/use-cases/ghl-token-refresh.use-case";
+import { GhlApiClient } from "@/features/ghl-oauth/infrastructure/ghl/ghl-api.client";
+import { GhlQualificationTagProvider } from "@/features/ghl-oauth/infrastructure/ghl/ghl-qualification-tag.provider";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -44,6 +51,7 @@ async function start(): Promise<void> {
   await ensureWebhookTables(pool);
   await ensureMemoryTables(pool);
   await ensureDecisionLogsTable(pool);
+  await ensureQualificationSignalTables(pool);
 
   const oauthClient = new GhlOAuthClientAdapter(config);
   const stateService = new HmacOAuthStateService(config.oauthStateSecret);
@@ -59,11 +67,16 @@ async function start(): Promise<void> {
     new PostgresHydrationRepository(pool),
     policyPackProvider,
   );
+  const qualificationSignalRepository = new PostgresQualificationSignalRepository(pool);
+  const questionLedger = new QuestionLedgerService(
+    pool,
+    config.qualificationSignalEnabled ? qualificationSignalRepository : undefined,
+  );
   const policyEvaluator = new PolicyEvaluationService(
     new PostgresPolicyContextRepository(pool, policyPackProvider),
     new PolicyEngine(),
     new PostgresDecisionLogRepository(pool),
-    new QuestionLedgerService(pool),
+    questionLedger,
   );
   const outboundRegistry = new PostgresOutboundMessageRegistry(pool);
   const qualificationFlow = config.qualificationFlowEnabled
@@ -106,6 +119,20 @@ async function start(): Promise<void> {
     const payload: unknown = JSON.parse(job.rawBody.toString("utf8"));
     await processWebhook.execute({ payload, rawBody: job.rawBody, signature: job.signature });
   });
+  let qualificationSignalWorker: QualificationSignalWorker | undefined;
+  if (config.qualificationSignalEnabled) {
+    const signalTokenRefresh = new GhlTokenRefreshUseCase(oauthClient, repository, cryptor);
+    const signalApiClient = new GhlApiClient(signalTokenRefresh);
+    qualificationSignalWorker = new QualificationSignalWorker(
+      qualificationSignalRepository,
+      new MetaCapiProvider(),
+      new GhlQualificationTagProvider(signalApiClient),
+      cryptor,
+      config.nodeEnv,
+      config.qualificationSignalPollMs,
+    );
+    await qualificationSignalWorker.start();
+  }
   const webhookController = new WebhookController(
     processWebhook,
     webhookQueue,
@@ -117,7 +144,13 @@ async function start(): Promise<void> {
 
   const shutdown = (signal: string) => {
     console.log(`Received ${signal}; shutting down`);
-    server.close(() => void Promise.all([webhookQueue.stop(), burstBuffer.stop(), pool.end(), redis.close()]));
+    server.close(() => void Promise.all([
+      webhookQueue.stop(),
+      burstBuffer.stop(),
+      qualificationSignalWorker?.stop(),
+      pool.end(),
+      redis.close(),
+    ]));
   };
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
