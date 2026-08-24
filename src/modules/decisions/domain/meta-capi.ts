@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { SofiaLeadLevel } from "@/modules/decisions/domain/sofia-conversation";
 
 export type MetaCapiPayload = {
   data: Array<{
@@ -12,6 +13,9 @@ export type MetaCapiPayload = {
       dealer: string;
       objectives_answered: number;
       lead_source: "whatsapp_ctwa";
+      lead_level?: SofiaLeadLevel;
+      push_accepted?: boolean;
+      has_trade_in?: boolean;
     };
   }>;
 };
@@ -42,6 +46,9 @@ export function buildMetaCapiPayload(input: {
   email?: string;
   ctwaClid?: string;
   objectivesAnswered: number;
+  leadLevel?: SofiaLeadLevel;
+  pushAccepted?: boolean;
+  hasTradeIn?: boolean;
 }): MetaCapiPayload {
   const userData: Record<string, string> = {
     external_id: sha256(input.contactId),
@@ -64,6 +71,9 @@ export function buildMetaCapiPayload(input: {
         dealer: input.dealer,
         objectives_answered: input.objectivesAnswered,
         lead_source: "whatsapp_ctwa",
+        ...(input.leadLevel ? { lead_level: input.leadLevel } : {}),
+        ...(input.pushAccepted === undefined ? {} : { push_accepted: input.pushAccepted }),
+        ...(input.hasTradeIn === undefined ? {} : { has_trade_in: input.hasTradeIn }),
       },
     }],
   };

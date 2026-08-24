@@ -42,6 +42,7 @@ import { MetaCapiProvider } from "@/modules/control/infrastructure/meta-capi.pro
 import { GhlTokenRefreshUseCase } from "@/features/ghl-oauth/application/use-cases/ghl-token-refresh.use-case";
 import { GhlApiClient } from "@/features/ghl-oauth/infrastructure/ghl/ghl-api.client";
 import { GhlQualificationTagProvider } from "@/features/ghl-oauth/infrastructure/ghl/ghl-qualification-tag.provider";
+import { PostgresSofiaStateRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-sofia-state.repository";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -79,6 +80,7 @@ async function start(): Promise<void> {
     questionLedger,
   );
   const outboundRegistry = new PostgresOutboundMessageRegistry(pool);
+  const sofiaRepository = config.sofiaEnabled ? new PostgresSofiaStateRepository(pool) : undefined;
   const qualificationFlow = config.qualificationFlowEnabled
     ? createQualificationFlow({
         pool,
@@ -93,6 +95,9 @@ async function start(): Promise<void> {
     hydrator,
     qualificationFlowEnabled: config.qualificationFlowEnabled,
     qualificationFlow,
+    sofiaEnabled: config.sofiaEnabled,
+    sofiaRepository,
+    sofiaDealerName: config.sofiaDealerName,
   });
   const contactMutex = new ContactMutex(redis, config.contactMutexTtlMs);
   const burstBuffer = new BurstBufferService(

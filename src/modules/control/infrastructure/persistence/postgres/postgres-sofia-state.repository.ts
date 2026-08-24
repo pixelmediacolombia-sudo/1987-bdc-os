@@ -1,0 +1,81 @@
+import type { Pool } from "pg";
+import type { SofiaFacts, SofiaLeadLevel } from "@/modules/decisions/domain/sofia-conversation";
+import type { SofiaConversationState, SofiaStateRepositoryPort } from "@/modules/control/application/ports/sofia-state-repository.port";
+
+type SofiaStateRow = {
+  turn_count: number;
+  fields: SofiaFacts;
+  lead_level: SofiaLeadLevel;
+  push_accepted: boolean | null;
+  has_trade_in: boolean | null;
+  hard_rule_failure: boolean;
+};
+
+export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
+  constructor(private readonly pool: Pool) {}
+
+  async load(tenantId: string, contactId: string): Promise<SofiaConversationState | undefined> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+      const result = await client.query<SofiaStateRow>(
+        `SELECT state.turn_count, state.fields, state.lead_level, state.push_accepted,
+                state.has_trade_in, state.hard_rule_failure
+           FROM public.sofia_conversation_state AS state
+           JOIN public.contacts AS contact ON contact.id = state.contact_id
+          WHERE state.tenant_id = $1 AND contact.ghl_contact_id = $2
+          LIMIT 1`,
+        [tenantId, contactId],
+      );
+      await client.query("COMMIT");
+      const row = result.rows[0];
+      return row
+        ? {
+            turnCount: row.turn_count,
+            facts: row.fields,
+            leadLevel: row.lead_level,
+            ...(row.push_accepted === null ? {} : { pushAccepted: row.push_accepted }),
+            ...(row.has_trade_in === null ? {} : { hasTradeIn: row.has_trade_in }),
+            hardRuleFailure: row.hard_rule_failure,
+          }
+        : undefined;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async save(tenantId: string, contactId: string, state: SofiaConversationState): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+      await client.query(
+        `INSERT INTO public.sofia_conversation_state
+           (tenant_id, contact_id, turn_count, fields, lead_level, push_accepted, has_trade_in, hard_rule_failure, last_inbound_at)
+         SELECT $1, contact.id, $3, $4::jsonb, $5, $6, $7, $8, now()
+           FROM public.contacts AS contact
+          WHERE contact.tenant_id = $1 AND contact.ghl_contact_id = $2
+         ON CONFLICT (tenant_id, contact_id) DO UPDATE SET
+           turn_count = EXCLUDED.turn_count,
+           fields = EXCLUDED.fields,
+           lead_level = EXCLUDED.lead_level,
+           push_accepted = EXCLUDED.push_accepted,
+           has_trade_in = EXCLUDED.has_trade_in,
+           hard_rule_failure = EXCLUDED.hard_rule_failure,
+           last_inbound_at = now(),
+           updated_at = now()`,
+        [tenantId, contactId, state.turnCount, JSON.stringify(state.facts), state.leadLevel, state.pushAccepted ?? null, state.hasTradeIn ?? null, state.hardRuleFailure],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+}

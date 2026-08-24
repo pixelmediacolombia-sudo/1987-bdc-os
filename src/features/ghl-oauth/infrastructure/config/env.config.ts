@@ -12,6 +12,8 @@ export type AppConfig = {
   qualificationFlowEnabled: boolean;
   qualificationSignalEnabled: boolean;
   qualificationSignalPollMs: number;
+  sofiaEnabled: boolean;
+  sofiaDealerName: string;
   ghlClientId: string;
   ghlClientSecret: string;
   ghlAppVersionId: string;
@@ -60,6 +62,8 @@ export function loadAppConfig(): AppConfig {
     qualificationFlowEnabled: booleanEnv("QUALIFICATION_FLOW_ENABLED", false),
     qualificationSignalEnabled: booleanEnv("QUALIFICATION_SIGNAL_ENABLED", false),
     qualificationSignalPollMs: positiveNumberEnv("QUALIFICATION_SIGNAL_POLL_MS", 5000),
+    sofiaEnabled: booleanEnv("SOFIA_ENABLED", false),
+    sofiaDealerName: process.env.SOFIA_DEALER_NAME?.trim() || "el dealer",
     ghlClientId: required("GHL_CLIENT_ID"),
     ghlClientSecret: required("GHL_CLIENT_SECRET"),
     ghlAppVersionId: required("GHL_APP_VERSION_ID"),

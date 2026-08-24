@@ -22,6 +22,11 @@ type DealerMetaRow = {
   meta_event_name: string | null;
   meta_test_event_code: string | null;
 };
+type SofiaSignalRow = {
+  lead_level: "A" | "B" | "C";
+  push_accepted: boolean | null;
+  has_trade_in: boolean | null;
+};
 
 export class PostgresQualificationSignalRepository implements QualificationCompletionPort, QualificationSignalRepository {
   constructor(private readonly pool: Pool) {}
@@ -47,6 +52,18 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
     const dealerRow = dealer.rows[0];
     if (!dealerRow) throw new Error("Qualification completion dealer was not found");
 
+    const sofia = await client.query<SofiaSignalRow>(
+      `SELECT lead_level, push_accepted, has_trade_in
+         FROM public.sofia_conversation_state
+        WHERE tenant_id = $1 AND contact_id = $2
+        LIMIT 1`,
+      [input.tenantId, contactRow.id],
+    );
+    // Sofia level C is intentionally excluded from both the qualification
+    // signal and its operational tag. A missing Sofia row preserves the
+    // existing Ticket 8.5 compatibility path until Sofia is enabled.
+    if (sofia.rows[0]?.lead_level === "C") return;
+
     const answered = await client.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count
          FROM public.objectives
@@ -64,6 +81,9 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
       email: contactRow.email ?? undefined,
       ctwaClid: contactRow.ctwa_clid ?? undefined,
       objectivesAnswered: Number.parseInt(answered.rows[0]?.count ?? "0", 10),
+      ...(sofia.rows[0]?.lead_level ? { leadLevel: sofia.rows[0].lead_level } : {}),
+      ...(sofia.rows[0]?.push_accepted === null || sofia.rows[0]?.push_accepted === undefined ? {} : { pushAccepted: sofia.rows[0].push_accepted }),
+      ...(sofia.rows[0]?.has_trade_in === null || sofia.rows[0]?.has_trade_in === undefined ? {} : { hasTradeIn: sofia.rows[0].has_trade_in }),
     });
 
     await client.query(

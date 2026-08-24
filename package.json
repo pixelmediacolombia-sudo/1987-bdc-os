@@ -11,7 +11,7 @@
     "db:verify:ticket85": "npm run build && node -r module-alias/register dist/features/ghl-oauth/infrastructure/persistence/postgres/verify-ticket85.js",
     "typecheck": "tsc --noEmit",
     "test:ticket8": "tsc -p tsconfig.ticket8.json && node tests/run-ticket8.cjs",
-    "test:ticket85": "npm run build && node -r module-alias/register --test dist/modules/webhooks/ctwa-clid.test.js dist/modules/decisions/meta-capi.test.js",
+    "test:ticket85": "npm run build && node -r module-alias/register --test dist/modules/webhooks/ctwa-clid.test.js dist/modules/decisions/meta-capi.test.js dist/modules/decisions/sofia-conversation.test.js",
     "test:security": "npm run build && node -r module-alias/register --test dist/modules/webhooks/security-validation.test.js dist/modules/webhooks/ghl-webhook-parser.test.js dist/modules/webhooks/stop-ai-recovery.test.js dist/features/ghl-oauth/application/use-cases/ghl-token-refresh.test.js dist/modules/control/burst-buffer.test.js dist/modules/control/burst-buffer.redis.integration.test.js dist/modules/control/human-suppression.test.js dist/modules/control/redis-queues.test.js dist/modules/control/outbound-message-registry.test.js dist/modules/webhooks/redis-webhook-queue.redis.integration.test.js dist/modules/memory/hydration-service.test.js dist/modules/decisions/policy-engine.test.js dist/modules/decisions/decision-log-repository.test.js dist/modules/decisions/policy-webhook.integration.test.js dist/presentation/http/redis-diagnostic.controller.test.js",
     "test:redis-integration": "npm run build && node -r dotenv/config -r module-alias/register --test dist/modules/control/burst-buffer.redis.integration.test.js dist/modules/webhooks/redis-webhook-queue.redis.integration.test.js"
   },

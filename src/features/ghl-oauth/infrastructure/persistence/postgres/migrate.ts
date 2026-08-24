@@ -15,7 +15,7 @@ async function main(): Promise<void> {
     await ensureMemoryTables(pool);
     await ensureDecisionLogsTable(pool);
     await ensureQualificationSignalTables(pool);
-    console.log("Database migration completed: integrations, webhooks, facts, objectives, and qualification signals are ready.");
+    console.log("Database migration completed: integrations, webhooks, facts, objectives, Sofia state, and qualification signals are ready.");
   } finally {
     await pool.end();
   }
