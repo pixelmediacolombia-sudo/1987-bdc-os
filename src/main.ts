@@ -6,6 +6,7 @@ import { HmacOAuthStateService } from "@/features/ghl-oauth/infrastructure/oauth
 import { createPostgresPool } from "@/features/ghl-oauth/infrastructure/persistence/postgres/pool";
 import { ensureIntegrationsTable } from "@/features/ghl-oauth/infrastructure/persistence/postgres/integrations.migration";
 import { PostgresTenantIntegrationRepository } from "@/features/ghl-oauth/infrastructure/persistence/postgres/tenant-integration.repository";
+import { PostgresTenantLocationRouteRepository } from "@/features/ghl-oauth/infrastructure/persistence/postgres/tenant-location-route.repository";
 import { CompleteGhlOAuthUseCase } from "@/features/ghl-oauth/application/use-cases/complete-ghl-oauth.use-case";
 import { InitiateGhlOAuthUseCase } from "@/features/ghl-oauth/application/use-cases/initiate-ghl-oauth.use-case";
 import { GhlOAuthController } from "@/features/ghl-oauth/presentation/http/ghl-oauth.controller";
@@ -59,7 +60,7 @@ async function start(): Promise<void> {
   const cryptor = new Aes256GcmTokenCryptor(config.encryptionSecret);
   const repository = new PostgresTenantIntegrationRepository(pool);
   const presentationService = new GhlOAuthPresentationService(
-    new InitiateGhlOAuthUseCase(oauthClient, stateService),
+    new InitiateGhlOAuthUseCase(oauthClient, stateService, new PostgresTenantLocationRouteRepository(pool)),
     new CompleteGhlOAuthUseCase(oauthClient, stateService, cryptor, repository),
   );
   const controller = new GhlOAuthController(presentationService);

@@ -11,7 +11,7 @@ export class GhlOAuthPresentationService {
     private readonly completeUseCase: CompleteGhlOAuthUseCase,
   ) {}
 
-  initiate(input: { tenantId?: string }): { authorizationUrl: string } {
+  initiate(input: { tenantId?: string; locationId?: string }): Promise<{ authorizationUrl: string }> {
     return this.initiateUseCase.execute(input);
   }
 

@@ -8,12 +8,17 @@ export class GhlOAuthController {
 
   initiateHandler = (req: Request, res: Response): void => {
     const tenantId = typeof req.query.tenant_id === "string" ? req.query.tenant_id : undefined;
-    if (!tenantId) {
-      res.status(400).json({ error: "tenant_id is required for OAuth onboarding" });
+    const locationId = typeof req.query.location_id === "string" ? req.query.location_id : undefined;
+    if (!tenantId && !locationId) {
+      res.status(400).json({ error: "tenant_id or location_id is required for OAuth onboarding" });
       return;
     }
-    const result = this.service.initiate({ tenantId });
-    res.redirect(result.authorizationUrl);
+    void this.service.initiate({ ...(tenantId ? { tenantId } : {}), ...(locationId ? { locationId } : {}) })
+      .then((result) => res.redirect(result.authorizationUrl))
+      .catch((error) => {
+        console.error("GHL OAuth initiation failed", error instanceof Error ? error.message : "unknown error");
+        res.status(404).json({ error: "GHL location is not provisioned for OAuth" });
+      });
   };
 
   completeHandler = async (req: Request, res: Response): Promise<void> => {
