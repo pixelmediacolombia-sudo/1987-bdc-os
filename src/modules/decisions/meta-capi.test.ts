@@ -52,11 +52,21 @@ test("Ticket 8.5 loads all seven master-map dataset/token pairs", () => {
     "ARLINGTON",
     "EASTERNS_ES",
   ]);
-  assert.equal(findMetaCapiEnvConfig("{}", config.dealers, "LiaoSID3nvAhad492pNJ")?.key, "OFFLEASE");
-  assert.equal(findMetaCapiEnvConfig("{}", config.dealers, "MyxWNKacThim798E8KC6")?.key, "OFFLEASE");
-  assert.equal(findMetaCapiEnvConfig("{}", config.dealers, "113zMWQlHKKBu5w0YtR")?.key, "EASTERNS_ES");
-  assert.equal(findMetaCapiEnvConfig("{}", config.dealers, "bTNJHpNZ8FaS1PUHkuUq")?.key, "KOONS_CULPEPER");
-  assert.equal(findMetaCapiEnvConfig("{}", config.dealers, "xuH0opT02g5edIuPJRl")?.key, "KOONS_FBURG_ES");
+  const locationExpectations: Array<[string, string]> = [
+    ["k9DePpsNBu9qWT1C6pW0", "COUNTRY_CLUB"],
+    ["LiaoSID3nvAhad49ZpNJ", "OFFLEASE"],
+    ["MyxWNKacThim798E8KC6", "OFFLEASE"],
+    ["bTNJHpNZ8FaS1PUHkuUq", "KOONS_CULPEPER"],
+    ["xuHo0opTO2g5edIuPJRl", "KOONS_FBURG_ES"],
+    ["ZxadcudjvBz7KFCB1od4", "ACTION"],
+    ["9v8zH9Y5eLiiJwZTZDci", "ARLINGTON"],
+    ["MRHcOwdTqaN5cug3eSWW", "EASTERNS_ES"],
+    ["113zMWQlhKKBUu5wOYtR", "EASTERNS_ES"],
+    ["xN2LSSl62okzv9GnOJPU", "EASTERNS_ES"],
+  ];
+  for (const [locationId, expectedKey] of locationExpectations) {
+    assert.equal(findMetaCapiEnvConfig("{}", config.dealers, locationId)?.key, expectedKey);
+  }
   assert.equal(findMetaCapiEnvConfig("Koons Fredericksburg ES", config.dealers)?.key, "KOONS_FBURG_ES");
 });
 
