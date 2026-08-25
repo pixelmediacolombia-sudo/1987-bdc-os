@@ -17,6 +17,7 @@ export type CapiDeliveryEvent = {
   eventName: string;
   payloadSent: Record<string, unknown>;
   datasetId?: string;
+  accessToken?: string;
   encryptedAccessToken?: string;
   testEventCode?: string;
 };

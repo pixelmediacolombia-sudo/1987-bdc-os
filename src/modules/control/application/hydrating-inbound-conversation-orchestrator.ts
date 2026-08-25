@@ -3,6 +3,7 @@ import type { ConsolidatedInboundConversation, InboundConversationOrchestratorPo
 import { QualificationFlowService } from "@/modules/control/application/qualification-flow.service";
 import type { SofiaStateRepositoryPort } from "@/modules/control/application/ports/sofia-state-repository.port";
 import { SofiaConversationEngine, type SofiaFacts } from "@/modules/decisions/domain/sofia-conversation";
+import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
 
 /**
  * Hydrates the current tenant/contact truth without sending messages or
@@ -13,6 +14,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
     private readonly hydrator: ConversationHydrator,
     private readonly qualificationFlow?: QualificationFlowService,
     private readonly sofia?: { engine: SofiaConversationEngine; repository: SofiaStateRepositoryPort; dealerName: string },
+    private readonly qualificationLedger?: QuestionLedgerService,
   ) {}
 
   async process(input: ConsolidatedInboundConversation): Promise<void> {
@@ -40,6 +42,14 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
         hardRuleFailure: result.hardRuleFailure,
         ...(result.response ? { lastResponse: result.response } : {}),
       });
+      if (this.qualificationLedger && result.leadLevel === "A" && !result.hardRuleFailure && result.contactCaptured) {
+        await this.qualificationLedger.updateObjectiveState(
+          input.tenantId,
+          input.contactId,
+          "qualification_completed",
+          { asked: true, answered: true, qualificationCompleted: true },
+        );
+      }
       // Sofia is deliberately persistence-only in this phase. A response is
       // planned by the domain engine, but no provider is called from here.
     }

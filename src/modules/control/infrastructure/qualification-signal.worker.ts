@@ -46,7 +46,15 @@ export class QualificationSignalWorker {
   private async processCapi(dealerId: string): Promise<void> {
     const event = await this.repository.claimNextCapiEvent(dealerId);
     if (!event) return;
-    if (!event.datasetId || !event.encryptedAccessToken) return;
+    if (!event.datasetId || (!event.accessToken && !event.encryptedAccessToken)) {
+      await this.repository.markCapiFailure({
+        dealerId,
+        eventId: event.eventId,
+        error: "Meta CAPI dataset or access token is not configured",
+        retryable: false,
+      });
+      return;
+    }
 
     try {
       if (this.nodeEnv === "production" && event.testEventCode) {
@@ -54,7 +62,7 @@ export class QualificationSignalWorker {
       }
       const result = await this.metaProvider.send({
         datasetId: event.datasetId,
-        accessToken: this.cryptor.decrypt(event.encryptedAccessToken),
+        accessToken: event.accessToken ?? this.cryptor.decrypt(event.encryptedAccessToken!),
         payload: event.payloadSent as unknown as MetaCapiPayload,
         ...(this.nodeEnv === "production" ? {} : event.testEventCode ? { testEventCode: event.testEventCode } : {}),
       });

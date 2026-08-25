@@ -39,10 +39,15 @@ CREATE TABLE IF NOT EXISTS public.objectives (
   asked BOOLEAN NOT NULL DEFAULT false,
   answered BOOLEAN NOT NULL DEFAULT false,
   skipped BOOLEAN NOT NULL DEFAULT false,
+  qualification_completed BOOLEAN NOT NULL DEFAULT false,
+  qualification_completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT objectives_contact_type_uq UNIQUE (tenant_id, contact_id, objective_type)
 );
+ALTER TABLE public.objectives
+  ADD COLUMN IF NOT EXISTS qualification_completed BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS qualification_completed_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS objectives_contact_state_idx ON public.objectives (tenant_id, contact_id, answered, skipped);
 ALTER TABLE public.objectives ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.objectives FORCE ROW LEVEL SECURITY;

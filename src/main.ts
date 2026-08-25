@@ -68,7 +68,11 @@ async function start(): Promise<void> {
     new PostgresHydrationRepository(pool),
     policyPackProvider,
   );
-  const qualificationSignalRepository = new PostgresQualificationSignalRepository(pool);
+  const qualificationSignalRepository = new PostgresQualificationSignalRepository(
+    pool,
+    config.metaCapiDealers,
+    config.metaCapiEventName,
+  );
   const questionLedger = new QuestionLedgerService(
     pool,
     config.qualificationSignalEnabled ? qualificationSignalRepository : undefined,
@@ -98,6 +102,7 @@ async function start(): Promise<void> {
     sofiaEnabled: config.sofiaEnabled,
     sofiaRepository,
     sofiaDealerName: config.sofiaDealerName,
+    qualificationLedger: config.qualificationSignalEnabled ? questionLedger : undefined,
   });
   const contactMutex = new ContactMutex(redis, config.contactMutexTtlMs);
   const burstBuffer = new BurstBufferService(

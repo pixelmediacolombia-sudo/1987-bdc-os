@@ -3,6 +3,7 @@ import { HydratingInboundConversationOrchestrator } from "@/modules/control/appl
 import type { QualificationFlowService } from "@/modules/control/application/qualification-flow.service";
 import type { SofiaStateRepositoryPort } from "@/modules/control/application/ports/sofia-state-repository.port";
 import { SofiaConversationEngine } from "@/modules/decisions/domain/sofia-conversation";
+import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
 
 export type InboundConversationOrchestratorComposition = {
   hydrator: ConversationHydrator;
@@ -11,6 +12,7 @@ export type InboundConversationOrchestratorComposition = {
   sofiaEnabled?: boolean;
   sofiaRepository?: SofiaStateRepositoryPort;
   sofiaDealerName?: string;
+  qualificationLedger?: QuestionLedgerService;
 };
 
 /** Keeps the outbound qualification path fail-closed behind its feature flag. */
@@ -28,5 +30,6 @@ export function createInboundConversationOrchestrator(
     input.sofiaEnabled && input.sofiaRepository
       ? { engine: new SofiaConversationEngine(), repository: input.sofiaRepository, dealerName: input.sofiaDealerName ?? "el dealer" }
       : undefined,
+    input.qualificationLedger,
   );
 }

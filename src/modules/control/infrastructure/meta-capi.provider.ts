@@ -39,6 +39,9 @@ export class MetaCapiProvider {
         body,
         { headers: { Accept: "application/json", "Content-Type": "application/json" } },
       );
+      if (response.data.events_received !== undefined && response.data.events_received < 1) {
+        throw new QualificationDeliveryError("Meta CAPI accepted the request but received no events", 502);
+      }
       return { ...(response.data.fbtrace_id ? { fbtraceId: response.data.fbtrace_id } : {}) };
     } catch (error) {
       if (axios.isAxiosError(error)) {
@@ -46,7 +49,10 @@ export class MetaCapiProvider {
         const responseMessage = typeof error.response?.data === "object" && error.response?.data !== null
           ? JSON.stringify(error.response.data)
           : error.message;
-        throw new QualificationDeliveryError(`Meta CAPI request failed: ${responseMessage}`, status);
+        throw new QualificationDeliveryError(
+          `Meta CAPI request failed: ${responseMessage.replace(input.accessToken, "[REDACTED]")}`,
+          status,
+        );
       }
       throw error;
     }

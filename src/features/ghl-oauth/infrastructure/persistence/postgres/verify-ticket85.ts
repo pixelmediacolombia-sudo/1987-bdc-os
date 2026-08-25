@@ -1,11 +1,24 @@
 import { loadAppConfig } from "@/features/ghl-oauth/infrastructure/config/env.config";
 import { createPostgresPool } from "@/features/ghl-oauth/infrastructure/persistence/postgres/pool";
+import { identifyMetaCapiDealerKey } from "@/modules/control/infrastructure/meta-capi.config";
 
 type DealerCheck = {
+  dealerId: string;
+  dealerKey?: string;
+  ghlLocationId?: string;
+  metaCapiEnabled: boolean;
+  metaDatasetConfigured: boolean;
+  metaTokenConfigured: boolean;
   ctwaCandidates: number;
   contactsWithCtwa: number;
+  rawWebhookTotal: number;
+  rawWebhookOldest?: string;
+  rawWebhookNewest?: string;
+  whatsappWebhookTotal: number;
+  qualificationCompletionsLast7Days: number;
   capiByStatus: Record<string, number>;
   ghlTagByStatus: Record<string, number>;
+  capiPayloadsWithAccessToken: number;
   productionTestCodes: number;
 };
 
@@ -44,8 +57,33 @@ async function main(): Promise<void> {
       try {
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.tenant_id', $1, true)", [dealer.dealer_id]);
-        const audit = await client.query<{ ctwa_candidates: string; contacts_with_ctwa: string }>(
+        const tenant = await client.query<{
+          ghl_location_id: string | null;
+          meta_capi_enabled: boolean;
+          meta_dataset_id: string | null;
+          encrypted_meta_access_token: string | null;
+          tenant_document: string;
+        }>(
+          `SELECT ghl_location_id, meta_capi_enabled, meta_dataset_id,
+                  encrypted_meta_access_token, to_jsonb(t)::text AS tenant_document
+             FROM public.tenants AS t
+            WHERE dealer_id = $1
+            LIMIT 1`,
+          [dealer.dealer_id],
+        );
+        const audit = await client.query<{
+          total: string;
+          oldest: Date | null;
+          newest: Date | null;
+          whatsapp_total: string;
+          ctwa_candidates: string;
+          contacts_with_ctwa: string;
+        }>(
           `SELECT
+             COUNT(*)::text AS total,
+             MIN(received_at) AS oldest,
+             MAX(received_at) AS newest,
+             COUNT(*) FILTER (WHERE payload::text ILIKE '%whatsapp%')::text AS whatsapp_total,
              COUNT(*) FILTER (WHERE payload::text ILIKE '%ctwa%'
                               OR payload::text ILIKE '%referral%'
                               OR payload::text ILIKE '%source_id%')::text AS ctwa_candidates,
@@ -58,15 +96,45 @@ async function main(): Promise<void> {
         const tags = await client.query<{ status: string; count: string }>(
           "SELECT status, COUNT(*)::text AS count FROM public.ghl_qualification_tag_events GROUP BY status",
         );
+        const completions = await client.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count
+             FROM public.objectives AS objective
+            WHERE objective.qualification_completed = true
+              AND objective.qualification_completed_at >= now() - interval '7 days'
+              AND EXISTS (
+                SELECT 1
+                  FROM public.sofia_conversation_state AS sofia
+                 WHERE sofia.tenant_id = objective.tenant_id
+                   AND sofia.contact_id = objective.contact_id
+                   AND sofia.lead_level IN ('A', 'B')
+              )`,
+        );
+        const tokenPayloads = await client.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count
+             FROM public.capi_events
+            WHERE payload_sent::text ILIKE '%access_token%'`,
+        );
         const testCodes = await client.query<{ count: string }>(
           "SELECT COUNT(*)::text AS count FROM public.tenants WHERE meta_test_event_code IS NOT NULL",
         );
         await client.query("COMMIT");
         checks.push({
+          dealerId: dealer.dealer_id,
+          ...(tenant.rows[0]?.tenant_document ? { dealerKey: identifyMetaCapiDealerKey(tenant.rows[0].tenant_document) } : {}),
+          ...(tenant.rows[0]?.ghl_location_id ? { ghlLocationId: tenant.rows[0].ghl_location_id } : {}),
+          metaCapiEnabled: tenant.rows[0]?.meta_capi_enabled ?? false,
+          metaDatasetConfigured: Boolean(tenant.rows[0]?.meta_dataset_id),
+          metaTokenConfigured: Boolean(tenant.rows[0]?.encrypted_meta_access_token),
           ctwaCandidates: Number(audit.rows[0]?.ctwa_candidates ?? 0),
           contactsWithCtwa: Number(audit.rows[0]?.contacts_with_ctwa ?? 0),
+          rawWebhookTotal: Number(audit.rows[0]?.total ?? 0),
+          ...(audit.rows[0]?.oldest ? { rawWebhookOldest: audit.rows[0].oldest.toISOString() } : {}),
+          ...(audit.rows[0]?.newest ? { rawWebhookNewest: audit.rows[0].newest.toISOString() } : {}),
+          whatsappWebhookTotal: Number(audit.rows[0]?.whatsapp_total ?? 0),
+          qualificationCompletionsLast7Days: Number(completions.rows[0]?.count ?? 0),
           capiByStatus: Object.fromEntries(capi.rows.map((row) => [row.status, Number(row.count)])),
           ghlTagByStatus: Object.fromEntries(tags.rows.map((row) => [row.status, Number(row.count)])),
+          capiPayloadsWithAccessToken: Number(tokenPayloads.rows[0]?.count ?? 0),
           productionTestCodes: config.nodeEnv === "production" ? Number(testCodes.rows[0]?.count ?? 0) : 0,
         });
       } catch (error) {

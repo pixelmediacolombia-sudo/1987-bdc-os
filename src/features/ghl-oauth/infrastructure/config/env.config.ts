@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { loadMetaCapiEnvConfig, type MetaCapiTenantConfig } from "@/modules/control/infrastructure/meta-capi.config";
 
 export type AppConfig = {
   nodeEnv: string;
@@ -12,6 +13,8 @@ export type AppConfig = {
   qualificationFlowEnabled: boolean;
   qualificationSignalEnabled: boolean;
   qualificationSignalPollMs: number;
+  metaCapiEventName: string;
+  metaCapiDealers: MetaCapiTenantConfig[];
   sofiaEnabled: boolean;
   sofiaDealerName: string;
   ghlClientId: string;
@@ -42,6 +45,7 @@ export function loadAppConfig(): AppConfig {
   const scopes = required("GHL_SCOPES").split(/[\s,]+/).filter(Boolean);
   const encryptionSecret = required("ENCRYPTION_SECRET");
   const oauthStateSecret = required("OAUTH_STATE_SECRET");
+  const metaCapi = loadMetaCapiEnvConfig();
 
   if (Buffer.byteLength(encryptionSecret, "utf8") < 32) {
     throw new Error("ENCRYPTION_SECRET must contain at least 32 UTF-8 bytes");
@@ -62,6 +66,8 @@ export function loadAppConfig(): AppConfig {
     qualificationFlowEnabled: booleanEnv("QUALIFICATION_FLOW_ENABLED", false),
     qualificationSignalEnabled: booleanEnv("QUALIFICATION_SIGNAL_ENABLED", false),
     qualificationSignalPollMs: positiveNumberEnv("QUALIFICATION_SIGNAL_POLL_MS", 5000),
+    metaCapiEventName: metaCapi.eventName,
+    metaCapiDealers: metaCapi.dealers,
     sofiaEnabled: booleanEnv("SOFIA_ENABLED", false),
     sofiaDealerName: process.env.SOFIA_DEALER_NAME?.trim() || "el dealer",
     ghlClientId: required("GHL_CLIENT_ID"),

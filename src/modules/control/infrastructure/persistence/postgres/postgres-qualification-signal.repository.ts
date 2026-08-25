@@ -8,6 +8,7 @@ import type {
   QualificationSignalRepository,
 } from "@/modules/control/application/ports/qualification-signal.port";
 import { buildMetaCapiPayload } from "@/modules/decisions/domain/meta-capi";
+import { findMetaCapiEnvConfig, type MetaCapiTenantConfig } from "@/modules/control/infrastructure/meta-capi.config";
 
 type ContactSignalRow = {
   id: string;
@@ -17,6 +18,8 @@ type ContactSignalRow = {
 };
 
 type DealerMetaRow = {
+  dealer_document: string;
+  meta_capi_enabled: boolean;
   meta_dataset_id: string | null;
   encrypted_meta_access_token: string | null;
   meta_event_name: string | null;
@@ -29,7 +32,11 @@ type SofiaSignalRow = {
 };
 
 export class PostgresQualificationSignalRepository implements QualificationCompletionPort, QualificationSignalRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly metaCapiDealers: MetaCapiTenantConfig[] = [],
+    private readonly metaCapiEventName = "Lead_Calificado",
+  ) {}
 
   async enqueueWithinTransaction(client: PoolClient, input: QualificationCompletion): Promise<void> {
     const contact = await client.query<ContactSignalRow>(
@@ -70,11 +77,19 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
         WHERE tenant_id = $1 AND contact_id = $2 AND answered = true`,
       [input.tenantId, contactRow.id],
     );
-    const eventName = dealerRow.meta_event_name?.trim() || "Lead_Calificado";
+    const completion = await client.query<{ qualification_completed_at: Date | null }>(
+      `SELECT qualification_completed_at
+         FROM public.objectives
+        WHERE id = $1 AND tenant_id = $2
+        LIMIT 1`,
+      [input.ledgerEntryId, input.tenantId],
+    );
+    const eventTime = completion.rows[0]?.qualification_completed_at ?? new Date();
+    const eventName = this.metaCapiEventName || dealerRow.meta_event_name?.trim() || "Lead_Calificado";
     const payload = buildMetaCapiPayload({
       eventName,
       eventId: input.ledgerEntryId,
-      eventTime: new Date(),
+      eventTime,
       dealer: input.tenantId,
       contactId: contactRow.id,
       phone: contactRow.phone ?? undefined,
@@ -89,9 +104,9 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
     await client.query(
       `INSERT INTO public.capi_events
          (dealer_id, contact_id, ledger_entry_id, event_name, event_id, event_time, payload_sent)
-       VALUES ($1, $2, $3, $4, $5, now(), $6::jsonb)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
        ON CONFLICT (dealer_id, event_id) DO NOTHING`,
-      [input.tenantId, contactRow.id, input.ledgerEntryId, eventName, input.ledgerEntryId, JSON.stringify(payload)],
+      [input.tenantId, contactRow.id, input.ledgerEntryId, eventName, input.ledgerEntryId, eventTime, JSON.stringify(payload)],
     );
     await client.query(
       `INSERT INTO public.ghl_qualification_tag_events
@@ -115,6 +130,39 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
       await client.query("BEGIN");
       await this.setTenantContext(client, dealerId);
       const claimToken = randomUUID();
+      const candidates = await client.query<{
+        id: string;
+        event_id: string;
+        event_name: string;
+        payload_sent: Record<string, unknown>;
+        meta_dataset_id: string | null;
+        encrypted_meta_access_token: string | null;
+        meta_test_event_code: string | null;
+        meta_capi_enabled: boolean;
+        dealer_document: string;
+      }>(
+        `SELECT e.id, e.event_id, e.event_name, e.payload_sent,
+                t.meta_dataset_id, t.encrypted_meta_access_token, t.meta_test_event_code,
+                t.meta_capi_enabled, to_jsonb(t)::text AS dealer_document
+             FROM public.capi_events AS e
+             JOIN public.tenants AS t ON t.dealer_id = e.dealer_id
+            WHERE e.dealer_id = $1
+              AND e.status = 'pending'
+              AND e.next_attempt_at <= now()
+               AND (e.claimed_at IS NULL OR e.claimed_at < now() - interval '60 seconds')
+            ORDER BY e.created_at
+            LIMIT 100
+            FOR UPDATE OF e SKIP LOCKED`,
+        [dealerId],
+      );
+      const selected = candidates.rows
+        .map((candidate) => ({ candidate, env: findMetaCapiEnvConfig(candidate.dealer_document, this.metaCapiDealers) }))
+        .find(({ candidate, env }) => Boolean(env || (candidate.meta_capi_enabled && candidate.meta_dataset_id && candidate.encrypted_meta_access_token)))?.candidate;
+      if (!selected) {
+        await client.query("COMMIT");
+        return undefined;
+      }
+
       const result = await client.query<{
         id: string;
         event_id: string;
@@ -123,41 +171,31 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
         meta_dataset_id: string | null;
         encrypted_meta_access_token: string | null;
         meta_test_event_code: string | null;
+        meta_capi_enabled: boolean;
+        dealer_document: string;
       }>(
-        `WITH candidate AS (
-           SELECT e.id
-             FROM public.capi_events AS e
-             JOIN public.tenants AS t ON t.dealer_id = e.dealer_id
-            WHERE e.dealer_id = $1
-              AND e.status = 'pending'
-              AND e.next_attempt_at <= now()
-              AND t.meta_capi_enabled = true
-              AND t.meta_dataset_id IS NOT NULL
-              AND t.encrypted_meta_access_token IS NOT NULL
-              AND (e.claimed_at IS NULL OR e.claimed_at < now() - interval '60 seconds')
-            ORDER BY e.created_at
-            LIMIT 1
-            FOR UPDATE SKIP LOCKED
-         )
-         UPDATE public.capi_events AS e
+        `UPDATE public.capi_events AS e
             SET claim_token = $2, claimed_at = now(), updated_at = now()
-           FROM candidate, public.tenants AS t
-          WHERE e.id = candidate.id AND t.dealer_id = e.dealer_id
+          FROM public.tenants AS t
+         WHERE e.id = $1 AND t.dealer_id = e.dealer_id
         RETURNING e.id, e.event_id, e.event_name, e.payload_sent,
-                  t.meta_dataset_id, t.encrypted_meta_access_token, t.meta_test_event_code`,
-        [dealerId, claimToken],
+                  t.meta_dataset_id, t.encrypted_meta_access_token, t.meta_test_event_code,
+                  t.meta_capi_enabled, to_jsonb(t)::text AS dealer_document`,
+        [selected.id, claimToken],
       );
       await client.query("COMMIT");
       const row = result.rows[0];
       if (!row) return undefined;
+      const envConfig = findMetaCapiEnvConfig(row.dealer_document, this.metaCapiDealers);
       return {
         id: row.id,
         dealerId,
         eventId: row.event_id,
         eventName: row.event_name,
         payloadSent: row.payload_sent,
-        ...(row.meta_dataset_id ? { datasetId: row.meta_dataset_id } : {}),
-        ...(row.encrypted_meta_access_token ? { encryptedAccessToken: row.encrypted_meta_access_token } : {}),
+        ...(envConfig?.datasetId || row.meta_dataset_id ? { datasetId: envConfig?.datasetId ?? row.meta_dataset_id! } : {}),
+        ...(envConfig?.accessToken ? { accessToken: envConfig.accessToken } : {}),
+        ...(!envConfig && row.encrypted_meta_access_token ? { encryptedAccessToken: row.encrypted_meta_access_token } : {}),
         ...(row.meta_test_event_code ? { testEventCode: row.meta_test_event_code } : {}),
       };
     } catch (error) {
