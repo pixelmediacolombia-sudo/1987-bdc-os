@@ -139,11 +139,12 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
         encrypted_meta_access_token: string | null;
         meta_test_event_code: string | null;
         meta_capi_enabled: boolean;
+        ghl_location_id: string;
         dealer_document: string;
       }>(
         `SELECT e.id, e.event_id, e.event_name, e.payload_sent,
                 t.meta_dataset_id, t.encrypted_meta_access_token, t.meta_test_event_code,
-                t.meta_capi_enabled, to_jsonb(t)::text AS dealer_document
+                t.meta_capi_enabled, t.ghl_location_id, to_jsonb(t)::text AS dealer_document
              FROM public.capi_events AS e
              JOIN public.tenants AS t ON t.dealer_id = e.dealer_id
             WHERE e.dealer_id = $1
@@ -156,7 +157,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
         [dealerId],
       );
       const selected = candidates.rows
-        .map((candidate) => ({ candidate, env: findMetaCapiEnvConfig(candidate.dealer_document, this.metaCapiDealers) }))
+        .map((candidate) => ({ candidate, env: findMetaCapiEnvConfig(candidate.dealer_document, this.metaCapiDealers, candidate.ghl_location_id) }))
         .find(({ candidate, env }) => Boolean(env || (candidate.meta_capi_enabled && candidate.meta_dataset_id && candidate.encrypted_meta_access_token)))?.candidate;
       if (!selected) {
         await client.query("COMMIT");
@@ -172,6 +173,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
         encrypted_meta_access_token: string | null;
         meta_test_event_code: string | null;
         meta_capi_enabled: boolean;
+        ghl_location_id: string;
         dealer_document: string;
       }>(
         `UPDATE public.capi_events AS e
@@ -180,13 +182,13 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
          WHERE e.id = $1 AND t.dealer_id = e.dealer_id
         RETURNING e.id, e.event_id, e.event_name, e.payload_sent,
                   t.meta_dataset_id, t.encrypted_meta_access_token, t.meta_test_event_code,
-                  t.meta_capi_enabled, to_jsonb(t)::text AS dealer_document`,
+                  t.meta_capi_enabled, t.ghl_location_id, to_jsonb(t)::text AS dealer_document`,
         [selected.id, claimToken],
       );
       await client.query("COMMIT");
       const row = result.rows[0];
       if (!row) return undefined;
-      const envConfig = findMetaCapiEnvConfig(row.dealer_document, this.metaCapiDealers);
+      const envConfig = findMetaCapiEnvConfig(row.dealer_document, this.metaCapiDealers, row.ghl_location_id);
       return {
         id: row.id,
         dealerId,

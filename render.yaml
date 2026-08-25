@@ -31,6 +31,36 @@ services:
         value: Koons Automotive of Culpeper
       - key: QUALIFICATION_SIGNAL_POLL_MS
         value: "5000"
+      - key: META_CAPI_EVENT_NAME
+        value: Lead_Calificado
+      - key: META_CAPI_DATASET_COUNTRY_CLUB
+        sync: false
+      - key: META_CAPI_TOKEN_COUNTRY_CLUB
+        sync: false
+      - key: META_CAPI_DATASET_OFFLEASE
+        sync: false
+      - key: META_CAPI_TOKEN_OFFLEASE
+        sync: false
+      - key: META_CAPI_DATASET_KOONS_CULPEPER
+        sync: false
+      - key: META_CAPI_TOKEN_KOONS_CULPEPER
+        sync: false
+      - key: META_CAPI_DATASET_KOONS_FBURG_ES
+        sync: false
+      - key: META_CAPI_TOKEN_KOONS_FBURG_ES
+        sync: false
+      - key: META_CAPI_DATASET_ACTION
+        sync: false
+      - key: META_CAPI_TOKEN_ACTION
+        sync: false
+      - key: META_CAPI_DATASET_ARLINGTON
+        sync: false
+      - key: META_CAPI_TOKEN_ARLINGTON
+        sync: false
+      - key: META_CAPI_DATASET_EASTERNS_ES
+        sync: false
+      - key: META_CAPI_TOKEN_EASTERNS_ES
+        sync: false
       - key: WEBHOOK_QUEUE_MAX_ATTEMPTS
         value: "5"
       - key: WEBHOOK_QUEUE_BACKOFF_MS
