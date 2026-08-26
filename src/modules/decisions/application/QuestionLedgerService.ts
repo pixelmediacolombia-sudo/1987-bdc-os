@@ -41,6 +41,7 @@ export class QuestionLedgerService {
     try {
       await client.query("BEGIN");
       await this.setTenantContext(client, normalizedTenantId);
+      const internalContactId = await this.loadContactId(client, normalizedTenantId, normalizedContactId);
       const result = await client.query<{
         objective_type: string;
         asked: boolean;
@@ -53,7 +54,7 @@ export class QuestionLedgerService {
            FROM public.objectives
           WHERE tenant_id = $1 AND contact_id = $2 AND objective_type = $3
           LIMIT 1`,
-        [normalizedTenantId, normalizedContactId, normalizedObjectiveType],
+        [normalizedTenantId, internalContactId, normalizedObjectiveType],
       );
       await client.query("COMMIT");
       const row = result.rows[0];
@@ -96,6 +97,7 @@ export class QuestionLedgerService {
     try {
       await client.query("BEGIN");
       await this.setTenantContext(client, normalizedTenantId);
+      const internalContactId = await this.loadContactId(client, normalizedTenantId, normalizedContactId);
       const ledgerWrite = await client.query<{ id: string }>(
         `INSERT INTO public.objectives AS objective
            (tenant_id, contact_id, objective_type, asked, answered, skipped, qualification_completed, qualification_completed_at)
@@ -113,7 +115,7 @@ export class QuestionLedgerService {
          RETURNING id`,
         [
           normalizedTenantId,
-          normalizedContactId,
+          internalContactId,
           normalizedObjectiveType,
           fields.asked ?? false,
           fields.answered ?? false,
@@ -165,6 +167,23 @@ export class QuestionLedgerService {
 
   private async setTenantContext(client: { query: (sql: string, values?: unknown[]) => Promise<unknown> }, tenantId: string): Promise<void> {
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+  }
+
+  private async loadContactId(
+    client: { query: <T>(sql: string, values?: unknown[]) => Promise<{ rows: T[] }> },
+    tenantId: string,
+    ghlContactId: string,
+  ): Promise<string> {
+    const result = await client.query<{ id: string }>(
+      `SELECT id::text AS id
+         FROM public.contacts
+        WHERE tenant_id = $1 AND ghl_contact_id = $2
+        LIMIT 1`,
+      [tenantId, ghlContactId],
+    );
+    const contactId = result.rows[0]?.id;
+    if (!contactId) throw new Error(`Question ledger contact ${ghlContactId} was not found`);
+    return contactId;
   }
 }
 

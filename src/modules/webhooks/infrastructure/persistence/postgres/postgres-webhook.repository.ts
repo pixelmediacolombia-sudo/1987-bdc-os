@@ -282,6 +282,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
     ghlConversationId: string,
     channel: string,
   ): Promise<ConversationRow> {
+    const normalizedChannel = normalizeConversationChannel(channel);
     const existing = await client.query<ConversationRow>(
       `SELECT id
          FROM public.conversations
@@ -289,7 +290,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
         ORDER BY last_activity DESC NULLS LAST
         LIMIT 1
         FOR UPDATE`,
-      [tenantId, contactId, channel],
+      [tenantId, contactId, normalizedChannel],
     );
     if (existing.rowCount === 1 && existing.rows[0]) return existing.rows[0];
 
@@ -298,7 +299,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
          (tenant_id, contact_id, ghl_conversation_id, channel, owner, state, last_activity)
        VALUES ($1, $2, $3, $4, 'ghl', 'open', now())
        RETURNING id`,
-      [tenantId, contactId, ghlConversationId, channel],
+      [tenantId, contactId, ghlConversationId, normalizedChannel],
     );
     if (created.rowCount !== 1 || !created.rows[0]) {
       throw new Error("GHL conversation was not persisted");
@@ -434,4 +435,23 @@ export class PostgresWebhookRepository implements WebhookRepository {
       failureClient.release();
     }
   }
+}
+
+function normalizeConversationChannel(channel: string): string {
+  const normalized = channel.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const aliases: Record<string, string> = {
+    whatsapp: "whatsapp",
+    whatsapp_business: "whatsapp",
+    fb: "fb",
+    facebook: "fb",
+    messenger: "fb",
+    facebook_messenger: "fb",
+    fb_messenger: "fb",
+    meta_messenger: "fb",
+    ig: "ig",
+    instagram: "ig",
+    instagram_dm: "ig",
+    instagram_direct: "ig",
+  };
+  return aliases[normalized] ?? normalized;
 }

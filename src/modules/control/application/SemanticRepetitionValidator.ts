@@ -29,6 +29,7 @@ export interface SemanticRepetitionGuard {
 }
 
 type RecentOutboundMessageRow = { content: string };
+type ContactRow = { id: string };
 
 export class SemanticRepetitionValidator implements SemanticRepetitionGuard {
   constructor(
@@ -48,6 +49,15 @@ export class SemanticRepetitionValidator implements SemanticRepetitionGuard {
     try {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+      const contact = await client.query<ContactRow>(
+        `SELECT id::text AS id
+           FROM public.contacts
+          WHERE tenant_id = $1 AND ghl_contact_id = $2
+          LIMIT 1`,
+        [tenantId, contactId],
+      );
+      const contactRow = contact.rows[0];
+      if (!contactRow) throw new Error(`Semantic repetition contact ${contactId} was not found`);
       const recent = await client.query<RecentOutboundMessageRow>(
         `SELECT m.content
            FROM public.messages AS m
@@ -59,7 +69,7 @@ export class SemanticRepetitionValidator implements SemanticRepetitionGuard {
             AND m.sender_type IN ('agent', 'assistant')
           ORDER BY m.created_at DESC, m.id DESC
           LIMIT 5`,
-        [tenantId, contactId],
+        [tenantId, contactRow.id],
       );
 
       const match = findRepeatedMessage(content, recent.rows, threshold);
@@ -81,7 +91,7 @@ export class SemanticRepetitionValidator implements SemanticRepetitionGuard {
          VALUES ($1, $2, $3, 'semantic-repetition-v1', $4::jsonb, $5, $6, $7::jsonb)`,
         [
           tenantId,
-          contactId,
+          contactRow.id,
           input.externalId ?? null,
           JSON.stringify(["WAIT", "HANDOFF"]),
           fallbackAction,
