@@ -283,6 +283,19 @@ export class PostgresWebhookRepository implements WebhookRepository {
     channel: string,
   ): Promise<ConversationRow> {
     const normalizedChannel = normalizeConversationChannel(channel);
+    // GHL retries can arrive with the same conversation id after a restart or
+    // a transient failure. Resolve the provider identity first so a changed
+    // contact/channel projection cannot create a second local conversation.
+    const byGhlId = await client.query<ConversationRow>(
+      `SELECT id
+         FROM public.conversations
+        WHERE tenant_id = $1 AND ghl_conversation_id = $2
+        LIMIT 1
+        FOR UPDATE`,
+      [tenantId, ghlConversationId],
+    );
+    if (byGhlId.rowCount === 1 && byGhlId.rows[0]) return byGhlId.rows[0];
+
     const existing = await client.query<ConversationRow>(
       `SELECT id
          FROM public.conversations
@@ -298,13 +311,22 @@ export class PostgresWebhookRepository implements WebhookRepository {
       `INSERT INTO public.conversations
          (tenant_id, contact_id, ghl_conversation_id, channel, owner, state, last_activity)
        VALUES ($1, $2, $3, $4, 'ghl', 'open', now())
+       ON CONFLICT (tenant_id, ghl_conversation_id) DO NOTHING
        RETURNING id`,
       [tenantId, contactId, ghlConversationId, normalizedChannel],
     );
-    if (created.rowCount !== 1 || !created.rows[0]) {
-      throw new Error("GHL conversation was not persisted");
-    }
-    return created.rows[0];
+    if (created.rowCount === 1 && created.rows[0]) return created.rows[0];
+
+    const conflicted = await client.query<ConversationRow>(
+      `SELECT id
+         FROM public.conversations
+        WHERE tenant_id = $1 AND ghl_conversation_id = $2
+        LIMIT 1
+        FOR UPDATE`,
+      [tenantId, ghlConversationId],
+    );
+    if (conflicted.rowCount === 1 && conflicted.rows[0]) return conflicted.rows[0];
+    throw new Error("GHL conversation was not persisted");
   }
 
   private async persistHumanInterruption(

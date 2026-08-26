@@ -33,7 +33,10 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
 
   async process(input: ConsolidatedInboundConversation): Promise<void> {
     const context = await this.hydrator.hydrate(input.tenantId, input.contactId);
-    if (context.conversation.state === "paused") return;
+    if (context.conversation.state === "paused") {
+      this.logger.info(`Sofia inbound skipped tenant=${input.tenantId} contact=${input.contactId} reason=conversation_paused`);
+      return;
+    }
 
     // Missing flags fail closed for older test doubles or partially migrated
     // records; the production hydrator always returns all three columns.
@@ -62,6 +65,11 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
         turnCount: (previous?.turnCount ?? 0) + 1,
         isFirstTurn: !previous,
       });
+      const inboundChannel = input.messages.at(-1)?.channel ?? "missing";
+      const response = result.response?.trim();
+      this.logger.info(
+        `Sofia decision tenant=${input.tenantId} contact=${input.contactId} channel=${inboundChannel} turn=${(previous?.turnCount ?? 0) + 1} lead=${result.leadLevel} next=${result.nextStep} response=${response ? "yes" : "no"} flags=sofia:${sofiaEnabledForTenant ? "on" : "off"},qualification:${qualificationFlowEnabledForTenant ? "on" : "off"}`,
+      );
       await this.sofia.repository.save(input.tenantId, input.contactId, {
         turnCount: (previous?.turnCount ?? 0) + 1,
         facts: result.facts,
@@ -84,7 +92,6 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
           },
         );
       }
-      const response = result.response?.trim();
       const outboundChannel = toOutboundChannel(input.messages.at(-1)?.channel);
       if (response && outboundChannel && qualificationFlowEnabledForTenant && this.qualificationFlow) {
         try {
@@ -104,6 +111,8 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
         }
       } else if (response && qualificationFlowEnabledForTenant && this.qualificationFlow && !outboundChannel) {
         this.logger.error(`Sofia outbound skipped unsupported channel tenant=${input.tenantId} contact=${input.contactId} channel=${input.messages.at(-1)?.channel ?? "missing"}`);
+      } else if (response && !qualificationFlowEnabledForTenant) {
+        this.logger.error(`Sofia outbound blocked tenant=${input.tenantId} contact=${input.contactId} channel=${inboundChannel} reason=qualification_flow_disabled`);
       }
     }
 
