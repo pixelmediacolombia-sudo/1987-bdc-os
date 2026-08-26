@@ -7,12 +7,23 @@ import type { HumanSuppressionPort } from "@/modules/control/application/ports/h
 import type { PolicyEvaluatorPort } from "@/modules/decisions/application/policy-evaluation.service";
 import { parseGhlWebhookPayload } from "@/modules/webhooks/domain/ghl-webhook.parser";
 
+export type WebhookProcessLogger = {
+  info(message: string): void;
+  error(message: string): void;
+};
+
+const defaultLogger: WebhookProcessLogger = {
+  info: (message) => console.info(message),
+  error: (message) => console.error(message),
+};
+
 export class ProcessGHLWebhookUseCase {
   constructor(
     private readonly repository: WebhookRepository,
     private readonly burstBuffer?: BurstBufferPort,
     private readonly humanSuppression?: HumanSuppressionPort,
     private readonly policyEvaluator?: PolicyEvaluatorPort,
+    private readonly logger: WebhookProcessLogger = defaultLogger,
   ) {}
 
   async execute(input: {
@@ -73,6 +84,35 @@ export class ProcessGHLWebhookUseCase {
   ): Promise<void> {
     let stage = initialStage;
     const requiresPolicy = controlTag === "stop_ai" && Boolean(event.contactId);
+
+    if (stage === "received") {
+      const claim = await this.repository.claimStage!({
+        tenantId,
+        externalId: event.externalId,
+        stage,
+      });
+      if (!claim) {
+        this.logger.info(`GHL webhook buffer stage already claimed tenant=${tenantId} external=${event.externalId}`);
+        return;
+      }
+
+      try {
+        if (!event.inboundMessage) {
+          this.logger.info(`GHL webhook received stage completed without inbound message tenant=${tenantId} external=${event.externalId}`);
+        } else {
+          if (!this.burstBuffer) throw new Error("Burst buffer is unavailable");
+          await this.burstBuffer.add(event.inboundMessage, tenantId);
+          this.logger.info(`GHL webhook handed to burst buffer tenant=${tenantId} contact=${event.inboundMessage.contactId} external=${event.externalId}`);
+        }
+        await this.repository.completeStage!(claim, "processed");
+      } catch (error) {
+        await this.repository.releaseStage!(claim).catch(() => undefined);
+        const detail = error instanceof Error ? error.message : "unknown error";
+        this.logger.error(`GHL webhook buffer handoff failed tenant=${tenantId} external=${event.externalId}: ${detail}`);
+        throw error;
+      }
+      return;
+    }
 
     if (requiresPolicy && stage === "policy_pending") {
       const claim = await this.repository.claimStage!({

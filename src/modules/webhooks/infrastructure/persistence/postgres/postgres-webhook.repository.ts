@@ -94,11 +94,15 @@ export class PostgresWebhookRepository implements WebhookRepository {
         : undefined;
 
       const controlTag = event.humanInterruption?.controlTag?.trim().toLowerCase();
+      // Keep inbound events in the existing durable `received` stage until
+      // the Redis burst buffer acknowledges the downstream handoff.
       const nextStage: WebhookStage = controlTag === "stop_ai" && event.contactId
         ? "policy_pending"
         : suppressAi
           ? "policy_applied"
-          : "processed";
+          : event.inboundMessage
+            ? "received"
+            : "processed";
 
       await client.query(
         `UPDATE public.raw_webhooks

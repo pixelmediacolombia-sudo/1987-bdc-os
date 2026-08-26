@@ -160,6 +160,38 @@ test("consolida tres fragmentos después de un búfer exacto de 15 segundos", as
   assert.match(logs.join("\n"), /consolidated 3 messages/);
 });
 
+test("reintentar el mismo webhook no duplica el mensaje y repara el timer durable", async () => {
+  const redis = new FakeRedis();
+  const mutex = new ContactMutex(redis, 30_000);
+  const orchestrator = new CapturingOrchestrator();
+  const logs: string[] = [];
+  const scheduled: Array<{ callback: () => void; delayMs: number }> = [];
+  const durableJobs: unknown[] = [];
+  const service = new BurstBufferService(redis, mutex, orchestrator, {
+    bufferSeconds: 15,
+    controlTtlSeconds: 90,
+    durableQueue: {
+      schedule: async (job) => { durableJobs.push(job); },
+      start: async () => undefined,
+      stop: async () => undefined,
+    },
+    logger: { info: (message) => logs.push(message), error: (message) => logs.push(`ERROR ${message}`) },
+    timerScheduler: (callback, delayMs) => {
+      scheduled.push({ callback, delayMs });
+      return setTimeout(() => undefined, 60_000).unref();
+    },
+  });
+
+  await service.add(createMessage("retryable-webhook", "Hola"), "tenant-42");
+  await service.add(createMessage("retryable-webhook", "Hola"), "tenant-42");
+
+  assert.equal(redis.lists.get("buffer:messages:tenant:tenant-42:contact:contact-42")?.length, 1);
+  assert.equal(scheduled.length, 0);
+  assert.equal(durableJobs.length, 2);
+  assert.match(logs.join("\n"), /deduplicated message/);
+  assert.match(logs.join("\n"), /ensuring durable schedule/);
+});
+
 test("el mutex solo libera el token que lo adquirió", async () => {
   const redis = new FakeRedis();
   const first = new ContactMutex(redis, 30_000);

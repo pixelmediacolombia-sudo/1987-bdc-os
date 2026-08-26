@@ -39,7 +39,11 @@ export class RedisBurstFlushQueue implements BurstFlushQueuePort {
   async start(handler: BurstFlushHandler): Promise<void> {
     this.handler = handler;
     if (this.poller) return;
-    this.poller = setInterval(() => void this.poll(), POLL_MS);
+    this.poller = setInterval(() => {
+      void this.poll().catch((error: unknown) => {
+        console.error(`Burst flush queue poll failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      });
+    }, POLL_MS);
     this.poller.unref?.();
     await this.poll();
   }

@@ -89,8 +89,27 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
     const messageKey = this.messageKey(normalizedTenantId, contactId);
     const timerKey = this.timerKey(normalizedTenantId, contactId);
 
-    const count = await this.redis.rpush(messageKey, JSON.stringify(storedMessage));
-    this.logger.info(`Burst buffer accumulated message for contact ${contactId}; count=${count}`);
+    const bufferedMessages = await this.redis.lrange(messageKey, 0, -1);
+    const duplicate = bufferedMessages.some((serialized) => hasExternalId(serialized, message.externalId));
+    const count = duplicate
+      ? bufferedMessages.length
+      : await this.redis.rpush(messageKey, JSON.stringify(storedMessage));
+    this.logger.info(
+      duplicate
+        ? `Burst buffer deduplicated message for contact ${contactId}; count=${count}`
+        : `Burst buffer accumulated message for contact ${contactId}; count=${count}`,
+    );
+
+    const existingTimerValue = await this.redis.get(timerKey);
+    if (existingTimerValue) {
+      const existingTimer = parseTimer(existingTimerValue);
+      if (!existingTimer) throw new Error("Burst buffer timer contains an invalid state");
+      if (this.durableQueue) {
+        this.logger.info(`Burst buffer timer already exists for tenant ${normalizedTenantId}, contact ${contactId}; ensuring durable schedule`);
+        await this.scheduleTimer(normalizedTenantId, contactId, existingTimer.token, existingTimer.runAt);
+      }
+      return;
+    }
 
     const timerToken = randomUUID();
     const runAt = this.clock() + this.bufferSeconds * 1000;
@@ -256,6 +275,20 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
 
   private scopeKey(tenantId: string, contactId: string): string {
     return scopeSuffix(tenantId, contactId);
+  }
+}
+
+function hasExternalId(serialized: string, externalId: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(serialized);
+    return Boolean(
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      (parsed as { externalId?: unknown }).externalId === externalId,
+    );
+  } catch {
+    return false;
   }
 }
 
