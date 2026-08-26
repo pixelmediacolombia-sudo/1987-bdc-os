@@ -35,6 +35,7 @@ export type PolicyPack = {
 export interface HydratedContext {
   tenant: {
     id: string;
+    ghlLocationId?: string;
     timezone: string;
     policyVersion: string;
     status: string;

@@ -11,6 +11,7 @@ import type {
 
 type TenantRow = {
   id: string;
+  ghl_location_id: string | null;
   timezone: string;
   policy_version: string;
   status: string;
@@ -41,7 +42,7 @@ export class PostgresHydrationRepository implements HydrationRepositoryPort {
 
   async loadTenant(tenantId: string): Promise<TenantProfile> {
     const rows = await this.readWithTenant<TenantRow>(tenantId, `
-      SELECT dealer_id::text AS id, timezone, policy_version, status,
+      SELECT dealer_id::text AS id, ghl_location_id, timezone, policy_version, status,
              sofia_enabled, qualification_flow_enabled, qualification_signal_enabled
         FROM public.tenants
        WHERE dealer_id = $1
@@ -50,6 +51,7 @@ export class PostgresHydrationRepository implements HydrationRepositoryPort {
     if (!row) throw new HydrationNotFoundError("tenant", tenantId);
     return {
       id: row.id,
+      ...(row.ghl_location_id ? { ghlLocationId: row.ghl_location_id } : {}),
       timezone: row.timezone,
       policyVersion: row.policy_version,
       status: row.status,

@@ -59,7 +59,7 @@ test("Sofia response is sent to the connected dealer using the inbound channel",
   assert.equal(sent[0]?.contactId, "contact-1");
   assert.equal(sent[0]?.channel, "WhatsApp");
   assert.equal(sent[0]?.externalId, "inbound-1");
-  assert.match(String(sent[0]?.content), /Sofía de Test Dealer/);
+  assert.match(String(sent[0]?.content), /Sofía/);
   assert.match(String(sent[0]?.semanticHash), /^[a-f0-9]{64}$/);
 });
 
@@ -133,5 +133,24 @@ test("tenant qualification-flow flag blocks Sofia outbound while allowing state 
   await orchestrator.process(inbound());
 
   assert.equal(saveCount, 1);
+  assert.equal(sendCount, 0);
+});
+
+test("unknown dealer identity stays silent instead of using a global dealer name", async () => {
+  let saveCount = 0;
+  let sendCount = 0;
+  const flow = { sendSofiaResponse: async () => { sendCount += 1; return { providerMessageId: "unused" }; } } as unknown as QualificationFlowService;
+  const repository: SofiaStateRepositoryPort = {
+    load: async () => undefined,
+    save: async () => { saveCount += 1; },
+  };
+  const hydrator = {
+    hydrate: async () => ({ ...context(), tenant: { ...context().tenant, ghlLocationId: "unknown-location" } }),
+  } as unknown as ConversationHydrator;
+  const orchestrator = new HydratingInboundConversationOrchestrator(hydrator, flow, { engine: new SofiaConversationEngine(), repository });
+
+  await orchestrator.process(inbound());
+
+  assert.equal(saveCount, 0);
   assert.equal(sendCount, 0);
 });

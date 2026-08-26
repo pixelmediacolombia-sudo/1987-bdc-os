@@ -2,6 +2,7 @@ import type { MessageDirection, MessageSenderType, TenantFeatureFlags } from "@/
 
 export type TenantProfile = {
   id: string;
+  ghlLocationId?: string;
   timezone: string;
   policyVersion: string;
   status: string;

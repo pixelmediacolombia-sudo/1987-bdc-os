@@ -104,7 +104,6 @@ async function start(): Promise<void> {
     qualificationFlow,
     sofiaEnabled: config.sofiaEnabled,
     sofiaRepository,
-    sofiaDealerName: config.sofiaDealerName,
     qualificationLedger: questionLedger,
     qualificationSignalEnabled: config.qualificationSignalEnabled,
   });

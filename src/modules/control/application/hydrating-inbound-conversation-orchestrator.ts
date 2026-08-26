@@ -5,6 +5,7 @@ import { QualificationFlowService } from "@/modules/control/application/qualific
 import type { SofiaStateRepositoryPort } from "@/modules/control/application/ports/sofia-state-repository.port";
 import type { OutboundMessageChannel } from "@/modules/control/application/ports/outbound-message-sender.port";
 import { SofiaConversationEngine, type SofiaFacts } from "@/modules/decisions/domain/sofia-conversation";
+import { resolveDealerDisplayName } from "@/modules/decisions/domain/dealer-identity";
 import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
 
 export type SofiaConversationLogger = {
@@ -25,7 +26,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
   constructor(
     private readonly hydrator: ConversationHydrator,
     private readonly qualificationFlow?: QualificationFlowService,
-    private readonly sofia?: { engine: SofiaConversationEngine; repository: SofiaStateRepositoryPort; dealerName: string },
+    private readonly sofia?: { engine: SofiaConversationEngine; repository: SofiaStateRepositoryPort; dealerName?: string },
     private readonly qualificationLedger?: QuestionLedgerService,
     private readonly qualificationSignalEnabled = false,
     private readonly logger: SofiaConversationLogger = defaultLogger,
@@ -53,9 +54,17 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
       this.qualificationSignalEnabled && tenantFlags.qualificationSignalEnabled;
 
     if (sofiaEnabledForTenant && this.sofia) {
+      const dealerName = resolveDealerDisplayName({
+        dealerId: context.tenant.id,
+        ghlLocationId: context.tenant.ghlLocationId,
+      }) ?? this.sofia.dealerName;
+      if (!dealerName) {
+        this.logger.info(`Sofia inbound skipped dealer=${context.tenant.id} contact=${input.contactId} reason=dealer_not_identified`);
+        return;
+      }
       const previous = await this.sofia.repository.load(input.tenantId, input.contactId);
       const result = this.sofia.engine.processTurn({
-        dealerName: this.sofia.dealerName,
+        dealerName,
         latestMessage: input.consolidatedText,
         contactChannel: input.messages.at(-1)?.channel,
         priorFacts: {

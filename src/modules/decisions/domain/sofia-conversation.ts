@@ -69,7 +69,7 @@ export class SofiaConversationEngine {
     const leadLevel = classifyLead(facts, this.policy);
 
     if (input.isFirstTurn || (input.turnCount === 1 && Object.keys(input.priorFacts).length === 0)) {
-      const greeting = `Hola! Te saluda Sofía de ${input.dealerName}`;
+      const greeting = `Hola! Te saludamos desde ${input.dealerName}. Soy Sofía.`;
       const reaction = facts.vehicle_category || facts.vehicle_model_interest
         ? "Con gusto te ayudo. ¿Es para ti o para la familia?"
         : "Con gusto te ayudo. ¿Qué carro estás buscando financiar?";

@@ -29,7 +29,7 @@ export function createInboundConversationOrchestrator(
     input.hydrator,
     input.qualificationFlowEnabled ? input.qualificationFlow : undefined,
     input.sofiaEnabled && input.sofiaRepository
-      ? { engine: new SofiaConversationEngine(), repository: input.sofiaRepository, dealerName: input.sofiaDealerName ?? "el dealer" }
+      ? { engine: new SofiaConversationEngine(), repository: input.sofiaRepository, dealerName: input.sofiaDealerName }
       : undefined,
     input.qualificationLedger,
     input.qualificationSignalEnabled ?? false,

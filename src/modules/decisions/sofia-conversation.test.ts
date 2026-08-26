@@ -61,7 +61,7 @@ test("Sofia opens with dealer identity and reacts before asking", () => {
     turnCount: 1,
     isFirstTurn: true,
   });
-  assert.equal(result.response, "Hola! Te saluda Sofía de Koons Automotive of Culpeper\nCon gusto te ayudo. ¿Es para ti o para la familia?");
+  assert.equal(result.response, "Hola! Te saludamos desde Koons Automotive of Culpeper. Soy Sofía.\nCon gusto te ayudo. ¿Es para ti o para la familia?");
 });
 
 test("Sofia evidences the one-step down-payment push for 1000 and 1500", () => {
