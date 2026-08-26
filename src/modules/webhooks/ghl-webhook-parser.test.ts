@@ -94,5 +94,18 @@ test("deja fuera de soporte los canales que la app no utiliza", () => {
     body: "Mensaje de prueba",
   };
   const event = parseGhlWebhookPayload(payload, Buffer.from(JSON.stringify(payload)), "signature");
-  assert.equal(event.inboundMessage?.channel, "SMS");
+  assert.equal(event.inboundMessage, undefined);
+});
+
+test("reconoce WhatsApp cuando GHL lo entrega como proveedor de la conversación", () => {
+  const payload = {
+    type: "InboundMessage",
+    locationId: "location-sandbox",
+    id: "inbound-whatsapp-provider-42",
+    contactId: "contact-42",
+    conversation: { provider: "WhatsApp" },
+    message: { body: "Mensaje de prueba" },
+  };
+  const event = parseGhlWebhookPayload(payload, Buffer.from(JSON.stringify(payload)), "signature");
+  assert.equal(event.inboundMessage?.channel, "whatsapp");
 });

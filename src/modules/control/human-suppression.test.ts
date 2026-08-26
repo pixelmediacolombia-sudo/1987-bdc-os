@@ -307,7 +307,7 @@ test("takeover pausa, un nuevo inbound no activa IA y el búfer queda consumido 
   assert.equal(repository.state, "paused");
 
   await useCase.execute({
-    payload: { eventId: "inbound-after-takeover-1", eventType: "InboundMessage", direction: "inbound", locationId: "location-42", contactId: CONTACT_ID, content: "Nuevo mensaje después del takeover" },
+    payload: { eventId: "inbound-after-takeover-1", eventType: "InboundMessage", direction: "inbound", locationId: "location-42", contactId: CONTACT_ID, messageType: "WhatsApp", content: "Nuevo mensaje después del takeover" },
     rawBody: Buffer.from("inbound-after-takeover-1"),
     signature: "test-signature",
   });

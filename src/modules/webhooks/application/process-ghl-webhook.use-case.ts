@@ -32,6 +32,9 @@ export class ProcessGHLWebhookUseCase {
     signature: string;
   }): Promise<{ duplicate: boolean; tenantId: string; externalId: string }> {
     const event = parseGhlWebhookPayload(input.payload, input.rawBody, input.signature);
+    if (!event.inboundMessage && isInboundEventType(event.eventType)) {
+      this.logger.info(`GHL inbound ignored unsupported or incomplete channel external=${event.externalId} event=${event.eventType}`);
+    }
     const result = await this.repository.process(event);
     const controlTag = event.humanInterruption?.controlTag?.trim().toLowerCase();
 
@@ -174,4 +177,8 @@ export class ProcessGHLWebhookUseCase {
       await this.repository.completeStage!(claim, "processed");
     }
   }
+}
+
+function isInboundEventType(eventType: string): boolean {
+  return /inbound|incoming|received|message[._-]?(created|received)/i.test(eventType);
 }

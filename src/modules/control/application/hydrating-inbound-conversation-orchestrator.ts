@@ -54,6 +54,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
       const result = this.sofia.engine.processTurn({
         dealerName: this.sofia.dealerName,
         latestMessage: input.consolidatedText,
+        contactChannel: input.messages.at(-1)?.channel,
         priorFacts: {
           ...factsFromContext(context.activeFacts),
           ...(previous?.facts ?? {}),

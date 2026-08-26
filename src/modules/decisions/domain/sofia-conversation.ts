@@ -31,6 +31,7 @@ export type SofiaTurnInput = {
   priorFacts: SofiaFacts;
   turnCount: number;
   isFirstTurn?: boolean;
+  contactChannel?: string;
 };
 
 export type SofiaTurnResult = {
@@ -59,8 +60,10 @@ export class SofiaConversationEngine {
 
   processTurn(input: SofiaTurnInput): SofiaTurnResult {
     const facts = mergeFacts(input.priorFacts, extractFacts(input.latestMessage));
+    const contactChannel = normalizeContactChannel(input.contactChannel);
+    if (contactChannel) facts.contact_channel = contactChannel;
     applyPushDecision(facts, input.latestMessage);
-    const contactCaptured = Boolean(facts.contact_value?.trim());
+    const contactCaptured = hasContactPath(facts);
     const hardRuleFailure = hasHardRuleFailure(facts);
     const hardRulesVerified = hasVerifiedHardRules(facts);
     const leadLevel = classifyLead(facts, this.policy);
@@ -112,7 +115,7 @@ function hasVerifiedHardRules(facts: SofiaFacts): boolean {
 }
 
 export function classifyLead(facts: SofiaFacts, policy: SofiaPolicy = DEFAULT_SOFIA_POLICY): SofiaLeadLevel {
-  if (!facts.contact_value?.trim()) return "C";
+  if (!hasContactPath(facts)) return "C";
   if (hasHardRuleFailure(facts)) return "C";
   const range = rangeFor(facts.vehicle_category, policy);
   const acceptedDown = facts.down_payment_accepted ?? facts.down_payment_declared;
@@ -139,7 +142,7 @@ function nextQuestion(dealerName: string, facts: SofiaFacts): string | undefined
   if (!facts.vehicle_use) return "¿Es para ti o para la familia?";
   if (facts.down_payment_declared === undefined) return "¿Con cuánto cuentas para el enganche?";
   if (facts.has_trade_in === undefined) return "¿Tienes algún carro para darlo como parte de pago?";
-  if (!facts.contact_value) return "¿Me compartes tu número para que el gerente pueda ayudarte?";
+  if (!hasContactPath(facts)) return "¿Me compartes tu número para que el gerente pueda ayudarte?";
   if (facts.first_time_buyer === undefined) return "¿Ya has financiado un carro antes en Estados Unidos?";
   if (facts.employment_months === undefined) return "¿Cuánto tiempo llevas trabajando en tu empleo actual?";
   if (facts.has_income_proof === undefined) return "¿Cuentas con estados de cuenta o comprobantes de pago?";
@@ -147,7 +150,18 @@ function nextQuestion(dealerName: string, facts: SofiaFacts): string | undefined
 }
 
 function isStrongPurchaseSignal(facts: SofiaFacts): boolean {
-  return Boolean(facts.contact_value && facts.down_payment_declared !== undefined && facts.visit_intent === true);
+  return Boolean(hasContactPath(facts) && facts.down_payment_declared !== undefined && facts.visit_intent === true);
+}
+
+function normalizeContactChannel(channel: string | undefined): string | undefined {
+  const normalized = channel?.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  return normalized || undefined;
+}
+
+function hasContactPath(facts: SofiaFacts): boolean {
+  if (Boolean(facts.contact_value?.trim())) return true;
+  const channel = normalizeContactChannel(facts.contact_channel);
+  return channel === "whatsapp" || channel === "whatsapp_business";
 }
 
 function nextPushTarget(value: number | undefined): number | undefined {

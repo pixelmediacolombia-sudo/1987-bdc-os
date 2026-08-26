@@ -74,7 +74,7 @@ function normalizeChannel(value: string): string | undefined {
   return CHANNEL_ALIASES[normalized];
 }
 
-function extractChannel(payload: JsonObject): string {
+function extractChannel(payload: JsonObject): string | undefined {
   const candidates = [
     "channel",
     "message.channel",
@@ -84,19 +84,35 @@ function extractChannel(payload: JsonObject): string {
     "conversation.messageType",
     "data.messageType",
     "data.message.messageType",
+    "data.channel",
+    "data.message.channel",
+    "data.message.channelType",
+    "data.conversation.channel",
+    "data.conversation.channelType",
+    "data.conversation.type",
+    "data.conversation.provider",
     "conversationProvider",
+    "conversation.provider",
+    "conversation.providerType",
+    "conversation.integrationType",
+    "message.channelType",
+    "message.type",
+    "message.provider",
     "message.source",
+    "source",
+    "platform",
+    "provider",
     "conversation.source",
   ];
-  let firstRawValue: string | undefined;
   for (const path of candidates) {
     const rawValue = stringAt(payload, [path]);
     if (!rawValue) continue;
-    firstRawValue ??= rawValue;
     const canonical = normalizeChannel(rawValue);
     if (canonical) return canonical;
   }
-  return firstRawValue ?? "other";
+  const ctwa = extractCtwaAttribution(payload);
+  if (ctwa.ctwaClid || ctwa.sourceId) return "whatsapp";
+  return undefined;
 }
 
 function isInbound(payload: JsonObject, eventType: string): boolean {
@@ -146,6 +162,8 @@ function buildMessage(
   const phone = stringAt(contact ?? {}, ["phone"]);
   const email = stringAt(contact ?? {}, ["email"]);
   const ctwa = extractCtwaAttribution(payload);
+  const channel = extractChannel(payload) ?? (direction === "outbound" ? "other" : undefined);
+  if (!channel) return undefined;
 
   return {
     externalId,
@@ -159,7 +177,7 @@ function buildMessage(
     // GHL InternalComment payloads do not include a transport channel. Keep
     // the persisted value inside the database contract instead of inventing
     // an unsupported channel such as `unknown`.
-    channel: extractChannel(payload),
+    channel,
     content,
     semanticHash,
   };

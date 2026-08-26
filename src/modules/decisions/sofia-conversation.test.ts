@@ -27,6 +27,32 @@ test("Sofia asks for contact after the third turn and does not invent approval",
   assert.equal(result.leadLevel, "C");
 });
 
+test("Sofia treats WhatsApp as an existing contact path and skips the phone request", () => {
+  const result = new SofiaConversationEngine().processTurn({
+    dealerName: "Koons Automotive of Culpeper",
+    latestMessage: "Quiero una SUV y tengo 2500",
+    priorFacts: {},
+    turnCount: 3,
+    contactChannel: "WhatsApp",
+  });
+  assert.equal(result.contactCaptured, true);
+  assert.equal(result.facts.contact_channel, "whatsapp");
+  assert.doesNotMatch(result.response ?? "", /número de teléfono/i);
+  assert.match(result.response ?? "", /¿Es para ti o para la familia\?/i);
+});
+
+test("Sofia keeps requesting a phone number on Messenger when it is missing", () => {
+  const result = new SofiaConversationEngine().processTurn({
+    dealerName: "Koons Automotive of Culpeper",
+    latestMessage: "Tengo una SUV y cuento con 2500",
+    priorFacts: {},
+    turnCount: 3,
+    contactChannel: "Messenger",
+  });
+  assert.equal(result.contactCaptured, false);
+  assert.match(result.response ?? "", /número de teléfono/i);
+});
+
 test("Sofia opens with dealer identity and reacts before asking", () => {
   const result = new SofiaConversationEngine().processTurn({
     dealerName: "Koons Automotive of Culpeper",
