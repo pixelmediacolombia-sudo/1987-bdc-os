@@ -7,6 +7,8 @@ function oauthFailureCode(error: unknown): string {
   if (message.includes("OAuth location does not match")) return "location_mismatch";
   if (message.includes("OAuth tenant was not found")) return "tenant_not_found";
   if (message.includes("pre-provisioned tenant")) return "tenant_not_bound";
+  if (message.includes("GHL token exchange failed")) return "ghl_token_exchange_failed";
+  if (message.includes("OAuth installation persistence failed")) return "oauth_persistence_failed";
   return "oauth_installation_failed";
 }
 

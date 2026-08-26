@@ -13,16 +13,29 @@ export class CompleteGhlOAuthUseCase {
 
   async execute(input: { code: string; state: string }): Promise<{ tenantId: string; locationId: string }> {
     const claims = this.stateService.verify(input.state);
-    const tokens = await this.oauthClient.exchangeCode(input.code);
+    let tokens;
+    try {
+      tokens = await this.oauthClient.exchangeCode(input.code);
+    } catch {
+      throw new Error("GHL token exchange failed");
+    }
 
-    const tenantId = await this.repository.saveGhlInstallation({
-      locationId: tokens.locationId,
-      ...(claims.tenantId ? { expectedTenantId: claims.tenantId } : {}),
-      encryptedAccessToken: this.cryptor.encrypt(tokens.accessToken),
-      ...(tokens.refreshToken ? { encryptedRefreshToken: this.cryptor.encrypt(tokens.refreshToken) } : {}),
-      scopes: tokens.scopes,
-      ...(tokens.expiresAt ? { accessTokenExpiresAt: tokens.expiresAt } : {}),
-    });
+    let tenantId: string;
+    try {
+      tenantId = await this.repository.saveGhlInstallation({
+        locationId: tokens.locationId,
+        ...(claims.tenantId ? { expectedTenantId: claims.tenantId } : {}),
+        encryptedAccessToken: this.cryptor.encrypt(tokens.accessToken),
+        ...(tokens.refreshToken ? { encryptedRefreshToken: this.cryptor.encrypt(tokens.refreshToken) } : {}),
+        scopes: tokens.scopes,
+        ...(tokens.expiresAt ? { accessTokenExpiresAt: tokens.expiresAt } : {}),
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message !== "OAuth location does not match the requested tenant") {
+        throw new Error("OAuth installation persistence failed");
+      }
+      throw error;
+    }
 
     return { tenantId, locationId: tokens.locationId };
   }
