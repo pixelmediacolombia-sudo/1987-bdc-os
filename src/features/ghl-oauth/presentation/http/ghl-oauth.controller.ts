@@ -1,6 +1,15 @@
 import type { Request, Response } from "express";
 import type { GhlOAuthPresentationService } from "@/features/ghl-oauth/presentation/services/ghl-oauth.presentation.service";
 
+function oauthFailureCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("GHL response missing")) return "ghl_token_response_invalid";
+  if (message.includes("OAuth location does not match")) return "location_mismatch";
+  if (message.includes("OAuth tenant was not found")) return "tenant_not_found";
+  if (message.includes("pre-provisioned tenant")) return "tenant_not_bound";
+  return "oauth_installation_failed";
+}
+
 export class GhlOAuthController {
   constructor(
     private readonly service: GhlOAuthPresentationService,
@@ -47,8 +56,9 @@ export class GhlOAuthController {
         ghl_location_id: result.locationId,
       });
     } catch (error) {
-      console.error("GHL OAuth callback failed", error instanceof Error ? error.message : "unknown error");
-      res.status(500).json({ error: "GHL OAuth installation failed" });
+      const failureCode = oauthFailureCode(error);
+      console.error("GHL OAuth callback failed", failureCode);
+      res.status(500).json({ error: "GHL OAuth installation failed", error_code: failureCode });
     }
   };
 }
