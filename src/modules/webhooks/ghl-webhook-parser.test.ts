@@ -45,3 +45,17 @@ test("reconoce OutboundMessage oficial sin sender_type y lo trata como outbound 
   assert.equal(event.humanInterruption?.staffMessage?.content, "Te atiendo personalmente.");
   assert.equal(event.humanInterruption?.staffMessage?.channel, "other");
 });
+
+test("reconoce WhatsApp cuando GHL lo entrega como messageType plano", () => {
+  const payload = {
+    type: "OutboundMessage",
+    locationId: "location-sandbox",
+    id: "provider-message-whatsapp-42",
+    contactId: "contact-42",
+    conversationId: "conversation-42",
+    messageType: "WhatsApp",
+    message: { body: "Te atiendo por WhatsApp." },
+  };
+  const event = parseGhlWebhookPayload(payload, Buffer.from(JSON.stringify(payload)), "signature");
+  assert.equal(event.humanInterruption?.staffMessage?.channel, "WhatsApp");
+});

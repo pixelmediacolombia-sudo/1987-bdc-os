@@ -114,7 +114,7 @@ function buildMessage(
     // GHL InternalComment payloads do not include a transport channel. Keep
     // the persisted value inside the database contract instead of inventing
     // an unsupported channel such as `unknown`.
-    channel: stringAt(payload, ["channel", "message.channel", "conversation.channel"]) ?? "other",
+    channel: stringAt(payload, ["channel", "message.channel", "conversation.channel", "messageType"]) ?? "other",
     content,
     semanticHash,
   };
