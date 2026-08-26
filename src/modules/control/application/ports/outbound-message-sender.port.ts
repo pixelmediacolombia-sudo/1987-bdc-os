@@ -1,9 +1,11 @@
 import type { OutboundMessageRegistryEntry } from "@/modules/control/application/ports/outbound-message-registry.port";
 
+export type OutboundMessageChannel = "SMS" | "Email" | "WhatsApp" | "IG" | "FB" | "Custom" | "Live_Chat" | "InternalComment";
+
 export type OutboundMessageRequest = Omit<OutboundMessageRegistryEntry, "providerMessageId"> & {
   providerMessageId?: string;
   externalId?: string;
-  channel?: "SMS" | "Email" | "WhatsApp" | "IG" | "FB" | "Custom" | "Live_Chat" | "InternalComment";
+  channel?: OutboundMessageChannel;
 };
 
 export type ProviderOutboundMessage = {

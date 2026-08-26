@@ -38,4 +38,8 @@ export class QualificationFlowService {
   sendCandidate(input: OutboundMessageRequest): Promise<ProviderOutboundMessage> {
     return this.outboundSender.send(input);
   }
+
+  sendSofiaResponse(input: OutboundMessageRequest): Promise<ProviderOutboundMessage> {
+    return this.outboundSender.send(input);
+  }
 }

@@ -1,13 +1,25 @@
+import { createHash } from "node:crypto";
 import { ConversationHydrator } from "@/modules/memory/application/conversation-hydrator";
 import type { ConsolidatedInboundConversation, InboundConversationOrchestratorPort } from "@/modules/control/application/ports/inbound-conversation-orchestrator.port";
 import { QualificationFlowService } from "@/modules/control/application/qualification-flow.service";
 import type { SofiaStateRepositoryPort } from "@/modules/control/application/ports/sofia-state-repository.port";
+import type { OutboundMessageChannel } from "@/modules/control/application/ports/outbound-message-sender.port";
 import { SofiaConversationEngine, type SofiaFacts } from "@/modules/decisions/domain/sofia-conversation";
 import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
 
+export type SofiaConversationLogger = {
+  info(message: string): void;
+  error(message: string): void;
+};
+
+const defaultLogger: SofiaConversationLogger = {
+  info: (message) => console.info(message),
+  error: (message) => console.error(message),
+};
+
 /**
- * Hydrates the current tenant/contact truth without sending messages or
- * invoking external actions. The outbound orchestrator remains disabled.
+ * Hydrates the current tenant/contact truth and optionally sends the guarded
+ * Sofia response when the qualification flow is explicitly enabled.
  */
 export class HydratingInboundConversationOrchestrator implements InboundConversationOrchestratorPort {
   constructor(
@@ -15,6 +27,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
     private readonly qualificationFlow?: QualificationFlowService,
     private readonly sofia?: { engine: SofiaConversationEngine; repository: SofiaStateRepositoryPort; dealerName: string },
     private readonly qualificationLedger?: QuestionLedgerService,
+    private readonly logger: SofiaConversationLogger = defaultLogger,
   ) {}
 
   async process(input: ConsolidatedInboundConversation): Promise<void> {
@@ -50,8 +63,27 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
           { asked: true, answered: true, qualificationCompleted: true },
         );
       }
-      // Sofia is deliberately persistence-only in this phase. A response is
-      // planned by the domain engine, but no provider is called from here.
+      const response = result.response?.trim();
+      const outboundChannel = toOutboundChannel(input.messages.at(-1)?.channel);
+      if (response && outboundChannel && this.qualificationFlow) {
+        try {
+          await this.qualificationFlow.sendSofiaResponse({
+            tenantId: input.tenantId,
+            contactId: input.contactId,
+            content: response,
+            semanticHash: createHash("sha256").update(response, "utf8").digest("hex"),
+            externalId: input.messages.at(-1)?.externalId,
+            channel: outboundChannel,
+          });
+          this.logger.info(`Sofia outbound sent tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel}`);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "unknown error";
+          this.logger.error(`Sofia outbound failed tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel}: ${detail}`);
+          throw error;
+        }
+      } else if (response && this.qualificationFlow && !outboundChannel) {
+        this.logger.error(`Sofia outbound skipped unsupported channel tenant=${input.tenantId} contact=${input.contactId} channel=${input.messages.at(-1)?.channel ?? "missing"}`);
+      }
     }
 
     // The webhook/buffer path can provide a selected action and candidate once
@@ -77,6 +109,24 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
       }
     }
   }
+}
+
+function toOutboundChannel(channel: string | undefined): OutboundMessageChannel | undefined {
+  const normalized = channel?.trim().toLowerCase().replace(/[ -]/g, "_");
+  const channels: Record<string, OutboundMessageChannel> = {
+    sms: "SMS",
+    text: "SMS",
+    email: "Email",
+    whatsapp: "WhatsApp",
+    ig: "IG",
+    instagram: "IG",
+    fb: "FB",
+    facebook: "FB",
+    custom: "Custom",
+    live_chat: "Live_Chat",
+    livechat: "Live_Chat",
+  };
+  return normalized ? channels[normalized] : undefined;
 }
 
 function factsFromContext(activeFacts: Record<string, string>): SofiaFacts {
