@@ -136,6 +136,17 @@ function extractConversationId(payload: JsonObject, message: JsonObject): string
   ]) ?? stringAt(message, ["conversationId", "conversation_id", "conversation.id"]);
 }
 
+function extractProviderMessageId(payload: JsonObject, message: JsonObject): string | undefined {
+  return stringAt(payload, [
+    "messageId",
+    "message_id",
+    "data.messageId",
+    "data.message_id",
+    "message.id",
+    "data.message.id",
+  ]) ?? stringAt(message, ["messageId", "message_id"]);
+}
+
 function extractEventContactId(payload: JsonObject, message: JsonObject, eventType: string): string | undefined {
   return extractContactId(payload, message)
     ?? (isContactUpdate(eventType) ? stringAt(payload, ["id", "data.id"]) : undefined);
@@ -164,9 +175,13 @@ function buildMessage(
   const ctwa = extractCtwaAttribution(payload);
   const channel = extractChannel(payload) ?? (direction === "outbound" ? "other" : undefined);
   if (!channel) return undefined;
+  const providerMessageId = direction === "outbound"
+    ? extractProviderMessageId(payload, message)
+    : undefined;
 
   return {
     externalId,
+    ...(providerMessageId ? { providerMessageId } : {}),
     contactId,
     ...(conversationId ? { conversationId } : {}),
     ...(phone ? { phone } : {}),

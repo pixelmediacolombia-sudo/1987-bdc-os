@@ -2,6 +2,7 @@ export type JsonObject = Record<string, unknown>;
 
 export type InboundMessage = {
   externalId: string;
+  providerMessageId?: string;
   contactId: string;
   conversationId?: string;
   phone?: string;

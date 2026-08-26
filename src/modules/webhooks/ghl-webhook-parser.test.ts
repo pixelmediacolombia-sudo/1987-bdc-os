@@ -46,6 +46,21 @@ test("reconoce OutboundMessage oficial sin sender_type y lo trata como outbound 
   assert.equal(event.humanInterruption?.staffMessage?.channel, "other");
 });
 
+test("extrae el id del mensaje del proveedor para no confundir la salida de Sofia con un humano", () => {
+  const payload = {
+    eventId: "delivery-42",
+    type: "OutboundMessage",
+    locationId: "location-sandbox",
+    messageId: "provider-message-42",
+    contactId: "contact-42",
+    conversationId: "conversation-42",
+    message: { body: "Respuesta automatizada." },
+  };
+  const event = parseGhlWebhookPayload(payload, Buffer.from(JSON.stringify(payload)), "signature");
+  assert.equal(event.externalId, "delivery-42");
+  assert.equal(event.humanInterruption?.staffMessage?.providerMessageId, "provider-message-42");
+});
+
 test("reconoce WhatsApp cuando GHL lo entrega como messageType plano", () => {
   const payload = {
     type: "OutboundMessage",
