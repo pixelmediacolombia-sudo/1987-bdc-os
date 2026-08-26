@@ -17,6 +17,12 @@ RUN git clone --depth 1 --branch "${WHISPER_VERSION}" https://github.com/ggml-or
     && mkdir -p /out/bin /out/lib /out/models \
     && cp whisper.cpp/build/bin/whisper-cli /out/bin/whisper-cli \
     && find whisper.cpp/build -type f \( -name 'libwhisper.so*' -o -name 'libggml*.so*' \) -exec cp -a {} /out/lib/ \; \
+    && cd /out/lib \
+    && ln -s libwhisper.so.1.8.6 libwhisper.so.1 \
+    && ln -s libggml.so.0.13.1 libggml.so.0 \
+    && ln -s libggml-base.so.0.13.1 libggml-base.so.0 \
+    && ln -s libggml-cpu.so.0.13.1 libggml-cpu.so.0 \
+    && cd /tmp \
     && bash whisper.cpp/models/download-ggml-model.sh base /out/models
 
 FROM node:24-bookworm-slim AS app-build
