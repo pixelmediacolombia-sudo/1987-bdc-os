@@ -24,6 +24,7 @@ Los imports internos utilizan el alias absoluto `@/*`. TypeScript lo resuelve me
 3. Ejecuta `npm run dev`.
 4. Comprueba `GET http://localhost:3000/health`.
 5. Inicia OAuth por subcuenta en `GET /oauth/initiate?location_id=<ghl_location_id>` o, si ya se conoce, `GET /oauth/initiate?tenant_id=<dealer_id>`. El backend resuelve la ruta provisionada y firma el estado antes de redirigir a GHL.
+6. Para migrar el callback a un dominio propio, configura `GHL_REDIRECT_URI` con `https://<dominio-propio>/oauth/return` y registra exactamente esa misma URL en Marketplace. `/oauth/callback` se conserva temporalmente para instalaciones existentes.
 
 La aplicación ejecuta una migración idempotente al iniciar y garantiza que `public.integrations` exista antes de escuchar peticiones. También está disponible `npm run db:migrate` para ejecutarla de forma explícita; esta migración incluye las columnas de atribución, `capi_events` y la bitácora del tag de Ticket 8.5.
 
