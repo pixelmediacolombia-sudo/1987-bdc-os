@@ -27,6 +27,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
     private readonly qualificationFlow?: QualificationFlowService,
     private readonly sofia?: { engine: SofiaConversationEngine; repository: SofiaStateRepositoryPort; dealerName: string },
     private readonly qualificationLedger?: QuestionLedgerService,
+    private readonly qualificationSignalEnabled = false,
     private readonly logger: SofiaConversationLogger = defaultLogger,
   ) {}
 
@@ -34,7 +35,21 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
     const context = await this.hydrator.hydrate(input.tenantId, input.contactId);
     if (context.conversation.state === "paused") return;
 
-    if (this.sofia) {
+    // Missing flags fail closed for older test doubles or partially migrated
+    // records; the production hydrator always returns all three columns.
+    const tenantFlags = context.tenant?.flags ?? {
+      sofiaEnabled: false,
+      qualificationFlowEnabled: false,
+      qualificationSignalEnabled: false,
+    };
+    const sofiaEnabledForTenant = Boolean(this.sofia && tenantFlags.sofiaEnabled);
+    const qualificationFlowEnabledForTenant = Boolean(
+      this.qualificationFlow && tenantFlags.qualificationFlowEnabled,
+    );
+    const qualificationSignalEnabledForTenant =
+      this.qualificationSignalEnabled && tenantFlags.qualificationSignalEnabled;
+
+    if (sofiaEnabledForTenant && this.sofia) {
       const previous = await this.sofia.repository.load(input.tenantId, input.contactId);
       const result = this.sofia.engine.processTurn({
         dealerName: this.sofia.dealerName,
@@ -60,12 +75,17 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
           input.tenantId,
           input.contactId,
           "qualification_completed",
-          { asked: true, answered: true, qualificationCompleted: true },
+          {
+            asked: true,
+            answered: true,
+            qualificationCompleted: true,
+            emitQualificationSignal: qualificationSignalEnabledForTenant,
+          },
         );
       }
       const response = result.response?.trim();
       const outboundChannel = toOutboundChannel(input.messages.at(-1)?.channel);
-      if (response && outboundChannel && this.qualificationFlow) {
+      if (response && outboundChannel && qualificationFlowEnabledForTenant && this.qualificationFlow) {
         try {
           await this.qualificationFlow.sendSofiaResponse({
             tenantId: input.tenantId,
@@ -81,7 +101,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
           this.logger.error(`Sofia outbound failed tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel}: ${detail}`);
           throw error;
         }
-      } else if (response && this.qualificationFlow && !outboundChannel) {
+      } else if (response && qualificationFlowEnabledForTenant && this.qualificationFlow && !outboundChannel) {
         this.logger.error(`Sofia outbound skipped unsupported channel tenant=${input.tenantId} contact=${input.contactId} channel=${input.messages.at(-1)?.channel ?? "missing"}`);
       }
     }
@@ -89,7 +109,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
     // The webhook/buffer path can provide a selected action and candidate once
     // the qualification layer has produced them. Both safeguards remain in
     // this application boundary before any provider call is possible.
-    if (this.qualificationFlow && input.objectiveType && input.requestedAction) {
+    if (qualificationFlowEnabledForTenant && this.qualificationFlow && input.objectiveType && input.requestedAction) {
       const decision = await this.qualificationFlow.evaluateObjective({
         tenantId: input.tenantId,
         contactId: input.contactId,

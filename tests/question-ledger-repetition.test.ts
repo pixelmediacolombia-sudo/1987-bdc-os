@@ -34,7 +34,7 @@ class Ticket8FakeClient {
         answered: Boolean(values[4]),
         skipped: Boolean(values[5]),
       };
-      return { rows: [] as T[], rowCount: 1 };
+      return { rows: [{ id: "ledger-entry-1" }] as unknown as T[], rowCount: 1 };
     }
     if (normalized.includes("FROM public.messages")) {
       return { rows: this.recentMessages as unknown as T[], rowCount: this.recentMessages.length };
@@ -78,6 +78,24 @@ test("Ticket 8 / Ledger AC-03 blocks ASK_OBJECTIVE after down_payment is answere
   const objectiveWriteIndex = pool.client.calls.findIndex((call) => call.startsWith("INSERT INTO public.objectives"));
   assert.ok(setConfigIndex >= 0);
   assert.ok(objectiveWriteIndex > setConfigIndex, "RLS tenant context must precede the objective write");
+});
+
+test("Ticket 8.5 persists completion without enqueueing when the tenant signal flag is off", async () => {
+  const pool = new Ticket8FakePool();
+  let enqueueCount = 0;
+  const ledger = new QuestionLedgerService(pool as never, {
+    enqueueWithinTransaction: async () => { enqueueCount += 1; },
+  });
+
+  await ledger.updateObjectiveState(TENANT_ID, CONTACT_ID, "qualification_completed", {
+    asked: true,
+    answered: true,
+    qualificationCompleted: true,
+    emitQualificationSignal: false,
+  });
+
+  assert.equal(enqueueCount, 0);
+  assert.equal(pool.client.calls.some((call) => call.startsWith("INSERT INTO public.objectives")), true);
 });
 
 test("Ticket 8 / integrated decision flow logs WAIT when ASK_OBJECTIVE is terminal", async () => {
@@ -239,7 +257,14 @@ test("Ticket 8 / enabled composition passes QualificationFlowService to the orch
   } as never;
   const orchestrator = createInboundConversationOrchestrator({
     hydrator: {
-      hydrate: async () => ({ conversation: { state: "active" } }),
+      hydrate: async () => ({
+        tenant: { flags: {
+          sofiaEnabled: false,
+          qualificationFlowEnabled: true,
+          qualificationSignalEnabled: false,
+        } },
+        conversation: { state: "active" },
+      }),
     } as never,
     qualificationFlowEnabled: true,
     qualificationFlow,

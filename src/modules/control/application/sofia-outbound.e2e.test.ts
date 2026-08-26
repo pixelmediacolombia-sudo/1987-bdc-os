@@ -21,7 +21,9 @@ test("application E2E: inbound dealer turn is persisted and delivered through th
     save: async (_tenantId, _contactId, state) => { saved.push(state.lastResponse ?? ""); },
   };
   const hydrated: HydratedContext = {
-    tenant: { id: "dealer-tenant-1", timezone: "America/New_York", policyVersion: "v1", status: "active", policies: {
+    tenant: { id: "dealer-tenant-1", timezone: "America/New_York", policyVersion: "v1", status: "active", flags: {
+      sofiaEnabled: true, qualificationFlowEnabled: true, qualificationSignalEnabled: false,
+    }, policies: {
       version: "v1", downPayment: { min: null, max: null, currency: "USD" },
       quietHours: { enabled: false, start: null, end: null }, humanHandoff: { enabled: true, triggers: [] },
     } },

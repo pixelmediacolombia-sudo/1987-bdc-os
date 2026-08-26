@@ -44,6 +44,7 @@ import { GhlTokenRefreshUseCase } from "@/features/ghl-oauth/application/use-cas
 import { GhlApiClient } from "@/features/ghl-oauth/infrastructure/ghl/ghl-api.client";
 import { GhlQualificationTagProvider } from "@/features/ghl-oauth/infrastructure/ghl/ghl-qualification-tag.provider";
 import { PostgresSofiaStateRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-sofia-state.repository";
+import { ensureTenantFeatureFlags } from "@/modules/control/infrastructure/persistence/postgres/tenant-flags.migration";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -51,6 +52,7 @@ async function start(): Promise<void> {
   const redis = new IoredisClient(config.redisUrl);
   await ensureIntegrationsTable(pool);
   await ensureWebhookTables(pool);
+  await ensureTenantFeatureFlags(pool);
   await ensureMemoryTables(pool);
   await ensureDecisionLogsTable(pool);
   await ensureQualificationSignalTables(pool);
@@ -103,7 +105,8 @@ async function start(): Promise<void> {
     sofiaEnabled: config.sofiaEnabled,
     sofiaRepository,
     sofiaDealerName: config.sofiaDealerName,
-    qualificationLedger: config.qualificationSignalEnabled ? questionLedger : undefined,
+    qualificationLedger: questionLedger,
+    qualificationSignalEnabled: config.qualificationSignalEnabled,
   });
   const contactMutex = new ContactMutex(redis, config.contactMutexTtlMs);
   const burstBuffer = new BurstBufferService(

@@ -13,6 +13,7 @@ export type InboundConversationOrchestratorComposition = {
   sofiaRepository?: SofiaStateRepositoryPort;
   sofiaDealerName?: string;
   qualificationLedger?: QuestionLedgerService;
+  qualificationSignalEnabled?: boolean;
 };
 
 /** Keeps the outbound qualification path fail-closed behind its feature flag. */
@@ -31,5 +32,6 @@ export function createInboundConversationOrchestrator(
       ? { engine: new SofiaConversationEngine(), repository: input.sofiaRepository, dealerName: input.sofiaDealerName ?? "el dealer" }
       : undefined,
     input.qualificationLedger,
+    input.qualificationSignalEnabled ?? false,
   );
 }

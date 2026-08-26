@@ -19,6 +19,7 @@ type ContactSignalRow = {
 
 type DealerMetaRow = {
   dealer_document: string;
+  qualification_signal_enabled: boolean;
   meta_capi_enabled: boolean;
   meta_dataset_id: string | null;
   encrypted_meta_access_token: string | null;
@@ -50,7 +51,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
     if (!contactRow) throw new Error("Qualification completion contact was not found");
 
     const dealer = await client.query<DealerMetaRow>(
-      `SELECT meta_dataset_id, encrypted_meta_access_token, meta_event_name, meta_test_event_code
+      `SELECT qualification_signal_enabled, meta_dataset_id, encrypted_meta_access_token, meta_event_name, meta_test_event_code
          FROM public.tenants
         WHERE dealer_id = $1
         LIMIT 1`,
@@ -58,6 +59,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
     );
     const dealerRow = dealer.rows[0];
     if (!dealerRow) throw new Error("Qualification completion dealer was not found");
+    if (!dealerRow.qualification_signal_enabled) return;
 
     const sofia = await client.query<SofiaSignalRow>(
       `SELECT lead_level, push_accepted, has_trade_in
@@ -148,6 +150,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
              FROM public.capi_events AS e
              JOIN public.tenants AS t ON t.dealer_id = e.dealer_id
             WHERE e.dealer_id = $1
+              AND t.qualification_signal_enabled = true
               AND e.status = 'pending'
               AND e.next_attempt_at <= now()
                AND (e.claimed_at IS NULL OR e.claimed_at < now() - interval '60 seconds')
@@ -180,6 +183,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
             SET claim_token = $2, claimed_at = now(), updated_at = now()
           FROM public.tenants AS t
          WHERE e.id = $1 AND t.dealer_id = e.dealer_id
+           AND t.qualification_signal_enabled = true
         RETURNING e.id, e.event_id, e.event_name, e.payload_sent,
                   t.meta_dataset_id, t.encrypted_meta_access_token, t.meta_test_event_code,
                   t.meta_capi_enabled, t.ghl_location_id, to_jsonb(t)::text AS dealer_document`,
@@ -251,15 +255,24 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
         ledger_entry_id: string;
       }>(
         `WITH candidate AS (
-           SELECT id FROM public.ghl_qualification_tag_events
-            WHERE dealer_id = $1 AND status = 'pending' AND next_attempt_at <= now()
-              AND (claimed_at IS NULL OR claimed_at < now() - interval '60 seconds')
-            ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+           SELECT event.id
+             FROM public.ghl_qualification_tag_events AS event
+             JOIN public.tenants AS tenant ON tenant.dealer_id = event.dealer_id
+            WHERE event.dealer_id = $1
+              AND tenant.qualification_signal_enabled = true
+              AND event.status = 'pending' AND event.next_attempt_at <= now()
+              AND (event.claimed_at IS NULL OR event.claimed_at < now() - interval '60 seconds')
+            ORDER BY event.created_at LIMIT 1 FOR UPDATE OF event SKIP LOCKED
          )
          UPDATE public.ghl_qualification_tag_events AS e
             SET claim_token = $2, claimed_at = now(), updated_at = now()
            FROM candidate
           WHERE e.id = candidate.id
+            AND EXISTS (
+              SELECT 1 FROM public.tenants AS tenant
+               WHERE tenant.dealer_id = e.dealer_id
+                 AND tenant.qualification_signal_enabled = true
+            )
         RETURNING e.id, e.ghl_contact_id, e.ledger_entry_id`,
         [dealerId, randomUUID()],
       );

@@ -9,7 +9,15 @@ import type {
   TenantProfile,
 } from "@/modules/memory/application/ports/hydration-repository.port";
 
-type TenantRow = { id: string; timezone: string; policy_version: string; status: string };
+type TenantRow = {
+  id: string;
+  timezone: string;
+  policy_version: string;
+  status: string;
+  sofia_enabled: boolean;
+  qualification_flow_enabled: boolean;
+  qualification_signal_enabled: boolean;
+};
 type ContactConversationRow = {
   contact_id: string;
   ghl_contact_id: string;
@@ -32,10 +40,25 @@ export class PostgresHydrationRepository implements HydrationRepositoryPort {
   constructor(private readonly pool: Pool) {}
 
   async loadTenant(tenantId: string): Promise<TenantProfile> {
-    const rows = await this.readWithTenant<TenantRow>(tenantId, `SELECT dealer_id::text AS id, timezone, policy_version, status FROM public.tenants WHERE dealer_id = $1 LIMIT 1`, [tenantId]);
+    const rows = await this.readWithTenant<TenantRow>(tenantId, `
+      SELECT dealer_id::text AS id, timezone, policy_version, status,
+             sofia_enabled, qualification_flow_enabled, qualification_signal_enabled
+        FROM public.tenants
+       WHERE dealer_id = $1
+       LIMIT 1`, [tenantId]);
     const row = rows[0];
     if (!row) throw new HydrationNotFoundError("tenant", tenantId);
-    return { id: row.id, timezone: row.timezone, policyVersion: row.policy_version, status: row.status };
+    return {
+      id: row.id,
+      timezone: row.timezone,
+      policyVersion: row.policy_version,
+      status: row.status,
+      flags: {
+        sofiaEnabled: row.sofia_enabled,
+        qualificationFlowEnabled: row.qualification_flow_enabled,
+        qualificationSignalEnabled: row.qualification_signal_enabled,
+      },
+    };
   }
 
   async loadContactConversation(tenantId: string, ghlContactId: string): Promise<ContactConversation> {

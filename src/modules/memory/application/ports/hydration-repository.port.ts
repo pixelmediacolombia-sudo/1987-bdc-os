@@ -1,10 +1,11 @@
-import type { MessageDirection, MessageSenderType } from "@/modules/memory/domain/hydrated-context";
+import type { MessageDirection, MessageSenderType, TenantFeatureFlags } from "@/modules/memory/domain/hydrated-context";
 
 export type TenantProfile = {
   id: string;
   timezone: string;
   policyVersion: string;
   status: string;
+  flags: TenantFeatureFlags;
 };
 
 export type ContactConversation = {

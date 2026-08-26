@@ -12,6 +12,8 @@ export type ObjectiveState = {
   /** Explicit completion boundary supplied by the qualification flow. */
   qualificationCompleted?: boolean;
   qualificationCompletedAt?: Date;
+  /** Allows tenant-level signal flags to persist completion without enqueueing delivery. */
+  emitQualificationSignal?: boolean;
 };
 
 export type ObjectiveActionDecision = {
@@ -124,12 +126,14 @@ export class QuestionLedgerService {
       if (fields.qualificationCompleted === true) {
         const ledgerEntryId = ledgerWrite.rows[0]?.id;
         if (!ledgerEntryId) throw new Error("Qualification completion did not return a ledger entry id");
-        if (!this.completionPort) throw new Error("Qualification completion signal is not configured");
-        await this.completionPort.enqueueWithinTransaction(client, {
-          tenantId: normalizedTenantId,
-          ghlContactId: normalizedContactId,
-          ledgerEntryId,
-        });
+        if (fields.emitQualificationSignal !== false) {
+          if (!this.completionPort) throw new Error("Qualification completion signal is not configured");
+          await this.completionPort.enqueueWithinTransaction(client, {
+            tenantId: normalizedTenantId,
+            ghlContactId: normalizedContactId,
+            ledgerEntryId,
+          });
+        }
       }
       await client.query("COMMIT");
     } catch (error) {
@@ -175,7 +179,7 @@ function requiredIdentifier(value: string, name: string): string {
 }
 
 function validateBooleanPatch(fields: Partial<ObjectiveState>): void {
-  for (const key of ["asked", "answered", "skipped", "correctionRequested", "qualificationCompleted"] as const) {
+  for (const key of ["asked", "answered", "skipped", "correctionRequested", "qualificationCompleted", "emitQualificationSignal"] as const) {
     const value = fields[key];
     if (value !== undefined && typeof value !== "boolean") {
       throw new Error(`Objective field ${key} must be boolean`);

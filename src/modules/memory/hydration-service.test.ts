@@ -33,7 +33,15 @@ class FakeClient {
 
     this.trace.push({ clientId: this.clientId, kind: "select" });
     if (normalized.includes("FROM public.tenants")) {
-      return { rows: [{ id: TENANT_ID, timezone: "America/Bogota", policy_version: "default_v1", status: "active" }] as unknown as T[] };
+      return { rows: [{
+        id: TENANT_ID,
+        timezone: "America/Bogota",
+        policy_version: "default_v1",
+        status: "active",
+        sofia_enabled: true,
+        qualification_flow_enabled: true,
+        qualification_signal_enabled: false,
+      }] as unknown as T[] };
     }
     if (normalized.includes("FROM public.contacts")) {
       return { rows: [{
@@ -102,7 +110,13 @@ test("hidrata 12 mensajes cronológicos, hechos activos, ledger y política con 
 
 test("rechaza límites de transcripción fuera del contrato 8..12", () => {
   const repository: HydrationRepositoryPort = {
-    loadTenant: async () => ({ id: TENANT_ID, timezone: "America/Bogota", policyVersion: "default_v1", status: "active" }),
+    loadTenant: async () => ({
+      id: TENANT_ID,
+      timezone: "America/Bogota",
+      policyVersion: "default_v1",
+      status: "active",
+      flags: { sofiaEnabled: false, qualificationFlowEnabled: false, qualificationSignalEnabled: false },
+    }),
     loadContactConversation: async () => ({
       contact: { id: CONTACT_ID, ghlContactId: GHL_CONTACT_ID, preferredLanguage: "es", consentState: "unknown" },
       conversation: { id: CONVERSATION_ID, channel: "sms", state: "open" },

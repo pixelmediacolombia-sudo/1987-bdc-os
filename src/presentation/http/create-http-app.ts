@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type Express } from "express";
 import type { GhlOAuthController } from "@/features/ghl-oauth/presentation/http/ghl-oauth.controller";
 import { createGhlOAuthRouter } from "@/features/ghl-oauth/presentation/http/ghl-oauth.routes";
 import type { WebhookController } from "@/modules/webhooks/presentation/http/webhook.controller";
@@ -20,7 +20,7 @@ export function createHttpApp(
   signatureKeys?: GhlSignatureKeys,
   policyDiagnosticController?: PolicyDiagnosticController,
   redisDiagnosticController?: RedisDiagnosticController,
-) {
+): Express {
   const app = express();
   app.disable("x-powered-by");
   app.get("/health", (_req, res) => res.status(200).json({ ok: true }));

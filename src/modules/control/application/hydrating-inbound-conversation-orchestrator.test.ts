@@ -10,7 +10,9 @@ import { SofiaConversationEngine } from "@/modules/decisions/domain/sofia-conver
 
 function context(state: string = "open"): HydratedContext {
   return {
-    tenant: { id: "tenant-1", timezone: "America/New_York", policyVersion: "v1", status: "active", policies: {
+    tenant: { id: "tenant-1", timezone: "America/New_York", policyVersion: "v1", status: "active", flags: {
+      sofiaEnabled: true, qualificationFlowEnabled: true, qualificationSignalEnabled: false,
+    }, policies: {
       version: "v1", downPayment: { min: null, max: null, currency: "USD" },
       quietHours: { enabled: false, start: null, end: null }, humanHandoff: { enabled: true, triggers: [] },
     } },
@@ -70,5 +72,48 @@ test("Sofia does not send when human takeover has paused the conversation", asyn
 
   await orchestrator.process(inbound());
 
+  assert.equal(sendCount, 0);
+});
+
+test("tenant Sofia flag disables state persistence and outbound delivery", async () => {
+  let saveCount = 0;
+  let sendCount = 0;
+  const flow = { sendSofiaResponse: async () => { sendCount += 1; return { providerMessageId: "unused" }; } } as unknown as QualificationFlowService;
+  const repository: SofiaStateRepositoryPort = {
+    load: async () => undefined,
+    save: async () => { saveCount += 1; },
+  };
+  const hydrator = {
+    hydrate: async () => ({ ...context(), tenant: { ...context().tenant, flags: {
+      sofiaEnabled: false, qualificationFlowEnabled: true, qualificationSignalEnabled: false,
+    } } }),
+  } as unknown as ConversationHydrator;
+  const orchestrator = new HydratingInboundConversationOrchestrator(hydrator, flow, { engine: new SofiaConversationEngine(), repository, dealerName: "Test Dealer" });
+
+  await orchestrator.process(inbound());
+
+  assert.equal(saveCount, 0);
+  assert.equal(sendCount, 0);
+});
+
+test("tenant qualification-flow flag blocks Sofia outbound while allowing state persistence", async () => {
+  let saveCount = 0;
+  let sendCount = 0;
+  const flow = { sendSofiaResponse: async () => { sendCount += 1; return { providerMessageId: "unused" }; } } as unknown as QualificationFlowService;
+  const repository: SofiaStateRepositoryPort = {
+    load: async () => undefined,
+    save: async () => { saveCount += 1; },
+  };
+  const base = context();
+  const hydrator = {
+    hydrate: async () => ({ ...base, tenant: { ...base.tenant, flags: {
+      sofiaEnabled: true, qualificationFlowEnabled: false, qualificationSignalEnabled: false,
+    } } }),
+  } as unknown as ConversationHydrator;
+  const orchestrator = new HydratingInboundConversationOrchestrator(hydrator, flow, { engine: new SofiaConversationEngine(), repository, dealerName: "Test Dealer" });
+
+  await orchestrator.process(inbound());
+
+  assert.equal(saveCount, 1);
   assert.equal(sendCount, 0);
 });

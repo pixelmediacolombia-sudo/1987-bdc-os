@@ -1,6 +1,12 @@
 export type MessageDirection = "inbound" | "outbound";
 export type MessageSenderType = "agent" | "client" | "staff";
 
+export type TenantFeatureFlags = {
+  sofiaEnabled: boolean;
+  qualificationFlowEnabled: boolean;
+  qualificationSignalEnabled: boolean;
+};
+
 export type PolicyPack = {
   version: string;
   downPayment: {
@@ -32,6 +38,7 @@ export interface HydratedContext {
     timezone: string;
     policyVersion: string;
     status: string;
+    flags: TenantFeatureFlags;
     policies: PolicyPack;
   };
   contact: {
