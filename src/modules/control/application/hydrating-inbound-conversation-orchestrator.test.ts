@@ -63,6 +63,24 @@ test("Sofia response is sent to the connected dealer using the inbound channel",
   assert.match(String(sent[0]?.semanticHash), /^[a-f0-9]{64}$/);
 });
 
+test("Sofia routes Messenger and Instagram to the supported GHL channel types", async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  const flow = {
+    sendSofiaResponse: async (input: Record<string, unknown>) => { sent.push(input); return { providerMessageId: "ghl-message-1" }; },
+  } as unknown as QualificationFlowService;
+  const repository: SofiaStateRepositoryPort = { load: async () => undefined, save: async () => undefined };
+  const hydrator = { hydrate: async () => context() } as unknown as ConversationHydrator;
+  const orchestrator = new HydratingInboundConversationOrchestrator(hydrator, flow, { engine: new SofiaConversationEngine(), repository, dealerName: "Test Dealer" });
+
+  for (const [channel, expectedChannel] of [["messenger", "FB"], ["instagram", "IG"]] as const) {
+    await orchestrator.process({
+      ...inbound(),
+      messages: [{ ...inbound().messages[0], externalId: `inbound-${channel}`, channel }],
+    });
+    assert.equal(sent.at(-1)?.channel, expectedChannel);
+  }
+});
+
 test("Sofia does not send when human takeover has paused the conversation", async () => {
   let sendCount = 0;
   const flow = { sendSofiaResponse: async () => { sendCount += 1; return { providerMessageId: "unused" }; } } as unknown as QualificationFlowService;

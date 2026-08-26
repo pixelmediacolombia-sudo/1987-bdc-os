@@ -132,19 +132,20 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
 }
 
 function toOutboundChannel(channel: string | undefined): OutboundMessageChannel | undefined {
-  const normalized = channel?.trim().toLowerCase().replace(/[ -]/g, "_");
+  const normalized = channel?.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
   const channels: Record<string, OutboundMessageChannel> = {
-    sms: "SMS",
-    text: "SMS",
-    email: "Email",
     whatsapp: "WhatsApp",
+    whatsapp_business: "WhatsApp",
     ig: "IG",
     instagram: "IG",
+    instagram_dm: "IG",
+    instagram_direct: "IG",
     fb: "FB",
     facebook: "FB",
-    custom: "Custom",
-    live_chat: "Live_Chat",
-    livechat: "Live_Chat",
+    messenger: "FB",
+    facebook_messenger: "FB",
+    fb_messenger: "FB",
+    meta_messenger: "FB",
   };
   return normalized ? channels[normalized] : undefined;
 }

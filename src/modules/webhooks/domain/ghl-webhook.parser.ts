@@ -54,6 +54,51 @@ function objectAt(payload: JsonObject, paths: string[]): JsonObject | undefined 
   return undefined;
 }
 
+const CHANNEL_ALIASES: Record<string, string> = {
+  whatsapp: "WhatsApp",
+  whatsapp_business: "WhatsApp",
+  fb: "FB",
+  facebook: "FB",
+  messenger: "FB",
+  facebook_messenger: "FB",
+  fb_messenger: "FB",
+  meta_messenger: "FB",
+  ig: "IG",
+  instagram: "IG",
+  instagram_dm: "IG",
+  instagram_direct: "IG",
+};
+
+function normalizeChannel(value: string): string | undefined {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  return CHANNEL_ALIASES[normalized];
+}
+
+function extractChannel(payload: JsonObject): string {
+  const candidates = [
+    "channel",
+    "message.channel",
+    "conversation.channel",
+    "messageType",
+    "message.messageType",
+    "conversation.messageType",
+    "data.messageType",
+    "data.message.messageType",
+    "conversationProvider",
+    "message.source",
+    "conversation.source",
+  ];
+  let firstRawValue: string | undefined;
+  for (const path of candidates) {
+    const rawValue = stringAt(payload, [path]);
+    if (!rawValue) continue;
+    firstRawValue ??= rawValue;
+    const canonical = normalizeChannel(rawValue);
+    if (canonical) return canonical;
+  }
+  return firstRawValue ?? "other";
+}
+
 function isInbound(payload: JsonObject, eventType: string): boolean {
   const direction = stringAt(payload, ["direction", "message.direction"])?.toLowerCase();
   if (direction) return direction === "inbound" || direction === "incoming" || direction === "received";
@@ -114,7 +159,7 @@ function buildMessage(
     // GHL InternalComment payloads do not include a transport channel. Keep
     // the persisted value inside the database contract instead of inventing
     // an unsupported channel such as `unknown`.
-    channel: stringAt(payload, ["channel", "message.channel", "conversation.channel", "messageType"]) ?? "other",
+    channel: extractChannel(payload),
     content,
     semanticHash,
   };
