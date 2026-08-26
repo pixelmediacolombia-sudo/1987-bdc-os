@@ -55,18 +55,18 @@ function objectAt(payload: JsonObject, paths: string[]): JsonObject | undefined 
 }
 
 const CHANNEL_ALIASES: Record<string, string> = {
-  whatsapp: "WhatsApp",
-  whatsapp_business: "WhatsApp",
-  fb: "FB",
-  facebook: "FB",
-  messenger: "FB",
-  facebook_messenger: "FB",
-  fb_messenger: "FB",
-  meta_messenger: "FB",
-  ig: "IG",
-  instagram: "IG",
-  instagram_dm: "IG",
-  instagram_direct: "IG",
+  whatsapp: "whatsapp",
+  whatsapp_business: "whatsapp",
+  fb: "fb",
+  facebook: "fb",
+  messenger: "fb",
+  facebook_messenger: "fb",
+  fb_messenger: "fb",
+  meta_messenger: "fb",
+  ig: "ig",
+  instagram: "ig",
+  instagram_dm: "ig",
+  instagram_direct: "ig",
 };
 
 function normalizeChannel(value: string): string | undefined {

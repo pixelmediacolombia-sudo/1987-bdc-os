@@ -57,17 +57,17 @@ test("reconoce WhatsApp cuando GHL lo entrega como messageType plano", () => {
     message: { body: "Te atiendo por WhatsApp." },
   };
   const event = parseGhlWebhookPayload(payload, Buffer.from(JSON.stringify(payload)), "signature");
-  assert.equal(event.humanInterruption?.staffMessage?.channel, "WhatsApp");
+  assert.equal(event.humanInterruption?.staffMessage?.channel, "whatsapp");
 });
 
 test("normaliza los canales de mensajería compatibles con GHL", () => {
   const cases = [
-    ["Messenger", "FB"],
-    ["Facebook Messenger", "FB"],
-    ["Facebook", "FB"],
-    ["Instagram DM", "IG"],
-    ["Instagram", "IG"],
-    ["WhatsApp", "WhatsApp"],
+    ["Messenger", "fb"],
+    ["Facebook Messenger", "fb"],
+    ["Facebook", "fb"],
+    ["Instagram DM", "ig"],
+    ["Instagram", "ig"],
+    ["WhatsApp", "whatsapp"],
   ] as const;
 
   for (const [messageType, expectedChannel] of cases) {
