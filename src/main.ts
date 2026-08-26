@@ -45,6 +45,7 @@ import { GhlApiClient } from "@/features/ghl-oauth/infrastructure/ghl/ghl-api.cl
 import { GhlQualificationTagProvider } from "@/features/ghl-oauth/infrastructure/ghl/ghl-qualification-tag.provider";
 import { PostgresSofiaStateRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-sofia-state.repository";
 import { ensureTenantFeatureFlags } from "@/modules/control/infrastructure/persistence/postgres/tenant-flags.migration";
+import { LocalMediaUnderstandingAdapter } from "@/modules/media/infrastructure/local-media-understanding.adapter";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -121,11 +122,20 @@ async function start(): Promise<void> {
   await burstBuffer.recoverPendingTimers();
   await burstBuffer.start();
   const humanSuppression = new HumanSuppressionService(burstBuffer, contactMutex);
+  const mediaUnderstanding = config.mediaUnderstandingEnabled
+    ? new LocalMediaUnderstandingAdapter({
+        whisperExecutable: config.whisperCliPath,
+        whisperModelPath: config.whisperModelPath,
+        tesseractExecutable: config.tesseractCliPath,
+      })
+    : undefined;
   const processWebhook = new ProcessGHLWebhookUseCase(
     new PostgresWebhookRepository(pool, outboundRegistry),
     burstBuffer,
     humanSuppression,
     policyEvaluator,
+    undefined,
+    mediaUnderstanding,
   );
   const webhookQueue = new RedisWebhookQueue(redis);
   await webhookQueue.start(async (job) => {

@@ -17,6 +17,10 @@ export type AppConfig = {
   metaCapiDealers: MetaCapiTenantConfig[];
   sofiaEnabled: boolean;
   sofiaDealerName: string;
+  mediaUnderstandingEnabled: boolean;
+  whisperCliPath?: string;
+  whisperModelPath?: string;
+  tesseractCliPath?: string;
   ghlClientId: string;
   ghlClientSecret: string;
   ghlAppVersionId: string;
@@ -70,6 +74,10 @@ export function loadAppConfig(): AppConfig {
     metaCapiDealers: metaCapi.dealers,
     sofiaEnabled: booleanEnv("SOFIA_ENABLED", false),
     sofiaDealerName: process.env.SOFIA_DEALER_NAME?.trim() || "el dealer",
+    mediaUnderstandingEnabled: booleanEnv("MEDIA_UNDERSTANDING_ENABLED", false),
+    whisperCliPath: process.env.WHISPER_CLI_PATH?.trim() || undefined,
+    whisperModelPath: process.env.WHISPER_MODEL_PATH?.trim() || undefined,
+    tesseractCliPath: process.env.TESSERACT_CLI_PATH?.trim() || undefined,
     ghlClientId: required("GHL_CLIENT_ID"),
     ghlClientSecret: required("GHL_CLIENT_SECRET"),
     ghlAppVersionId: required("GHL_APP_VERSION_ID"),

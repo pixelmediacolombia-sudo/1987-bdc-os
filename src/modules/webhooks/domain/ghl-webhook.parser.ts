@@ -3,6 +3,8 @@ import type {
   GhlWebhookEvent,
   HumanInterruption,
   InboundMessage,
+  MediaAttachment,
+  MediaAttachmentKind,
   JsonObject,
 } from "@/modules/webhooks/domain/ghl-webhook-event";
 import { InvalidGhlWebhookError } from "@/modules/webhooks/domain/ghl-webhook-event";
@@ -147,6 +149,65 @@ function extractProviderMessageId(payload: JsonObject, message: JsonObject): str
   ]) ?? stringAt(message, ["messageId", "message_id"]);
 }
 
+function mediaKind(value: string | undefined): MediaAttachmentKind | undefined {
+  if (!value) return undefined;
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  if (normalized.startsWith("audio_") || ["audio", "voice", "voicenote", "voice_note"].includes(normalized)) return "audio";
+  if (normalized.startsWith("image_") || ["image", "photo", "picture"].includes(normalized)) return "image";
+  return undefined;
+}
+
+function extractMediaAttachments(payload: JsonObject, message: JsonObject): MediaAttachment[] {
+  const candidates = [
+    valueAt(message, "attachments"),
+    valueAt(message, "media"),
+    valueAt(message, "attachment"),
+    valueAt(payload, "attachments"),
+    valueAt(payload, "media"),
+    valueAt(payload, "attachment"),
+    valueAt(payload, "data.attachments"),
+    valueAt(payload, "data.media"),
+    valueAt(payload, "data.message.attachments"),
+    valueAt(payload, "data.message.media"),
+  ];
+
+  for (const candidate of candidates) {
+    const items = Array.isArray(candidate) ? candidate : [candidate];
+    const attachments = items.flatMap((item): MediaAttachment[] => {
+      const object = asObject(item);
+      if (!object) return [];
+      const mimeType = stringAt(object, ["mimeType", "mime_type", "contentType", "content_type", "type"]);
+      const filename = stringAt(object, ["filename", "fileName", "file_name", "name"]);
+      const url = stringAt(object, ["url", "downloadUrl", "download_url", "mediaUrl", "media_url", "fileUrl", "file_url"]);
+      const localPath = stringAt(object, ["localPath", "local_path"]);
+      const caption = stringAt(object, ["caption", "text", "description"]);
+      const kind = mediaKind(mimeType) ?? mediaKind(stringAt(object, ["kind", "mediaType", "media_type"]));
+      if (!kind || (!url && !localPath)) return [];
+      return [{
+        kind,
+        ...(mimeType ? { mimeType } : {}),
+        ...(filename ? { filename } : {}),
+        ...(url ? { url } : {}),
+        ...(localPath ? { localPath } : {}),
+        ...(caption ? { caption } : {}),
+      }];
+    });
+    if (attachments.length > 0) return attachments;
+  }
+  const directUrl = stringAt(message, ["url", "downloadUrl", "download_url", "mediaUrl", "media_url", "fileUrl", "file_url"]);
+  const directKind = mediaKind(stringAt(message, ["mimeType", "mime_type", "contentType", "content_type", "mediaType", "media_type", "attachmentType", "attachment_type", "type"]));
+  if (directUrl && directKind) {
+    return [{
+      kind: directKind,
+      ...(stringAt(message, ["mimeType", "mime_type", "contentType", "content_type"]) ? { mimeType: stringAt(message, ["mimeType", "mime_type", "contentType", "content_type"]) } : {}),
+      ...(stringAt(message, ["filename", "fileName", "file_name", "name"]) ? { filename: stringAt(message, ["filename", "fileName", "file_name", "name"]) } : {}),
+      url: directUrl,
+      ...(stringAt(message, ["caption", "description"]) ? { caption: stringAt(message, ["caption", "description"]) } : {}),
+    }];
+  }
+  return [];
+}
+
 function extractEventContactId(payload: JsonObject, message: JsonObject, eventType: string): string | undefined {
   return extractContactId(payload, message)
     ?? (isContactUpdate(eventType) ? stringAt(payload, ["id", "data.id"]) : undefined);
@@ -160,7 +221,11 @@ function buildMessage(
   const message = objectAt(payload, ["message", "data.message"]) ?? payload;
   const contact = objectAt(payload, ["contact", "data.contact"]);
   const contactId = extractContactId(payload, message);
-  const content = stringAt(message, ["content", "body", "text", "message"]) ?? stringAt(payload, ["content", "body", "text"]);
+  const attachments = extractMediaAttachments(payload, message);
+  const content = stringAt(message, ["content", "body", "text", "message"])
+    ?? stringAt(payload, ["content", "body", "text"])
+    ?? attachments.map((attachment) => attachment.caption).find((caption): caption is string => Boolean(caption))
+    ?? (attachments.length > 0 ? attachments.map((attachment) => `Adjunto de ${attachment.kind}`).join("; ") : undefined);
 
   if (!contactId || !content) return undefined;
 
@@ -195,6 +260,7 @@ function buildMessage(
     channel,
     content,
     semanticHash,
+    ...(attachments.length > 0 ? { attachments } : {}),
   };
 }
 

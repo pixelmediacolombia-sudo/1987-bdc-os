@@ -31,6 +31,14 @@ services:
         value: "true"
       - key: SOFIA_DEALER_NAME
         value: Koons Automotive of Culpeper
+      - key: MEDIA_UNDERSTANDING_ENABLED
+        value: "false"
+      - key: WHISPER_CLI_PATH
+        sync: false
+      - key: WHISPER_MODEL_PATH
+        sync: false
+      - key: TESSERACT_CLI_PATH
+        sync: false
       - key: QUALIFICATION_SIGNAL_POLL_MS
         value: "5000"
       - key: META_CAPI_EVENT_NAME

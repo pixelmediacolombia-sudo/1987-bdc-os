@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500">
+  <rect width="1200" height="500" fill="#f7f3ea"/>
+  <rect x="35" y="35" width="1130" height="430" rx="20" fill="#ffffff" stroke="#1d3557" stroke-width="6"/>
+  <text x="80" y="145" font-family="Arial, sans-serif" font-size="52" font-weight="700" fill="#1d3557">Solicitud de vehículo</text>
+  <text x="80" y="240" font-family="Arial, sans-serif" font-size="42" fill="#111111">Busco una SUV para mi familia</text>
+  <text x="80" y="320" font-family="Arial, sans-serif" font-size="42" fill="#111111">Enganche disponible: 2500 USD</text>
+  <text x="80" y="400" font-family="Arial, sans-serif" font-size="34" fill="#457b9d">Prueba local de lectura de imagen</text>
+</svg>

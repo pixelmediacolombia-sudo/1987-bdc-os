@@ -1,5 +1,16 @@
 export type JsonObject = Record<string, unknown>;
 
+export type MediaAttachmentKind = "audio" | "image";
+
+export type MediaAttachment = {
+  kind: MediaAttachmentKind;
+  mimeType?: string;
+  filename?: string;
+  url?: string;
+  localPath?: string;
+  caption?: string;
+};
+
 export type InboundMessage = {
   externalId: string;
   providerMessageId?: string;
@@ -13,6 +24,7 @@ export type InboundMessage = {
   channel: string;
   content: string;
   semanticHash: string;
+  attachments?: MediaAttachment[];
 };
 
 export type HumanInterruptionTrigger = "staff_message" | "control_tag";

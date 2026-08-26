@@ -6,6 +6,8 @@ import type { BurstBufferPort } from "@/modules/control/application/ports/burst-
 import type { HumanSuppressionPort } from "@/modules/control/application/ports/human-suppression.port";
 import type { PolicyEvaluatorPort } from "@/modules/decisions/application/policy-evaluation.service";
 import { parseGhlWebhookPayload } from "@/modules/webhooks/domain/ghl-webhook.parser";
+import { enrichInboundMedia } from "@/modules/media/application/enrich-inbound-media";
+import type { MediaUnderstandingPort } from "@/modules/media/application/media-understanding.port";
 
 export type WebhookProcessLogger = {
   info(message: string): void;
@@ -24,6 +26,7 @@ export class ProcessGHLWebhookUseCase {
     private readonly humanSuppression?: HumanSuppressionPort,
     private readonly policyEvaluator?: PolicyEvaluatorPort,
     private readonly logger: WebhookProcessLogger = defaultLogger,
+    private readonly mediaUnderstanding?: MediaUnderstandingPort,
   ) {}
 
   async execute(input: {
@@ -31,7 +34,8 @@ export class ProcessGHLWebhookUseCase {
     rawBody: Buffer;
     signature: string;
   }): Promise<{ duplicate: boolean; tenantId: string; externalId: string }> {
-    const event = parseGhlWebhookPayload(input.payload, input.rawBody, input.signature);
+    const parsedEvent = parseGhlWebhookPayload(input.payload, input.rawBody, input.signature);
+    const event = await enrichInboundMedia(parsedEvent, this.mediaUnderstanding, this.logger);
     if (!event.inboundMessage && isInboundEventType(event.eventType)) {
       this.logger.info(`GHL inbound ignored unsupported or incomplete channel external=${event.externalId} event=${event.eventType}`);
     }
