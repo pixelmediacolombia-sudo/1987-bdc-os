@@ -381,7 +381,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
            (tenant_id, conversation_id, external_id, direction, sender_type, content, semantic_hash, status)
          VALUES ($1, $2, $3, 'outbound', $4, $5, $6, 'received')
          ON CONFLICT DO NOTHING`,
-        [tenantId, conversation.id, interruption.staffMessage.externalId, automationOutbound ? "assistant" : "staff", interruption.staffMessage.content, interruption.staffMessage.semanticHash],
+        [tenantId, conversation.id, interruption.staffMessage.externalId, automationOutbound ? "agent" : "staff", interruption.staffMessage.content, interruption.staffMessage.semanticHash],
       );
     }
 
@@ -464,16 +464,16 @@ function normalizeConversationChannel(channel: string): string {
   const aliases: Record<string, string> = {
     whatsapp: "whatsapp",
     whatsapp_business: "whatsapp",
-    fb: "fb",
-    facebook: "fb",
-    messenger: "fb",
-    facebook_messenger: "fb",
-    fb_messenger: "fb",
-    meta_messenger: "fb",
-    ig: "ig",
-    instagram: "ig",
-    instagram_dm: "ig",
-    instagram_direct: "ig",
+    fb: "messenger",
+    facebook: "messenger",
+    messenger: "messenger",
+    facebook_messenger: "messenger",
+    fb_messenger: "messenger",
+    meta_messenger: "messenger",
+    ig: "instagram",
+    instagram: "instagram",
+    instagram_dm: "instagram",
+    instagram_direct: "instagram",
   };
   return aliases[normalized] ?? normalized;
 }
