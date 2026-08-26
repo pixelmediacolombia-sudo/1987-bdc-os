@@ -14,8 +14,9 @@ RUN git clone --depth 1 --branch "${WHISPER_VERSION}" https://github.com/ggml-or
         -DWHISPER_BUILD_TESTS=OFF \
         -DWHISPER_BUILD_SERVER=OFF \
     && cmake --build whisper.cpp/build --config Release --target whisper-cli -j2 \
-    && mkdir -p /out/bin /out/models \
+    && mkdir -p /out/bin /out/lib /out/models \
     && cp whisper.cpp/build/bin/whisper-cli /out/bin/whisper-cli \
+    && find whisper.cpp/build -type f \( -name 'libwhisper.so*' -o -name 'libggml*.so*' \) -exec cp -a {} /out/lib/ \; \
     && bash whisper.cpp/models/download-ggml-model.sh base /out/models
 
 FROM node:24-bookworm-slim AS app-build
@@ -33,6 +34,7 @@ FROM node:24-bookworm-slim
 
 ENV NODE_ENV=production \
     PORT=3000 \
+    LD_LIBRARY_PATH=/opt/whisper/lib \
     WHISPER_CLI_PATH=/opt/whisper/bin/whisper-cli \
     WHISPER_MODEL_PATH=/opt/whisper/models/ggml-base.bin \
     TESSERACT_CLI_PATH=/usr/bin/tesseract \
@@ -48,6 +50,7 @@ COPY --from=app-build /app/package*.json ./
 COPY --from=app-build /app/node_modules ./node_modules
 COPY --from=app-build /app/dist ./dist
 COPY --from=whisper-build /out/bin/whisper-cli /opt/whisper/bin/whisper-cli
+COPY --from=whisper-build /out/lib/ /opt/whisper/lib/
 COPY --from=whisper-build /out/models/ggml-base.bin /opt/whisper/models/ggml-base.bin
 
 RUN useradd --system --uid 10001 --create-home appuser \
