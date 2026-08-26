@@ -1,10 +1,8 @@
 services:
   - type: web
     name: 1987-bdc-os-backend
-    runtime: node
+    runtime: docker
     plan: free
-    buildCommand: npm ci --include=dev && npm run build
-    startCommand: npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -34,11 +32,11 @@ services:
       - key: MEDIA_UNDERSTANDING_ENABLED
         value: "false"
       - key: WHISPER_CLI_PATH
-        sync: false
+        value: /opt/whisper/bin/whisper-cli
       - key: WHISPER_MODEL_PATH
-        sync: false
+        value: /opt/whisper/models/ggml-base.bin
       - key: TESSERACT_CLI_PATH
-        sync: false
+        value: /usr/bin/tesseract
       - key: QUALIFICATION_SIGNAL_POLL_MS
         value: "5000"
       - key: META_CAPI_EVENT_NAME
