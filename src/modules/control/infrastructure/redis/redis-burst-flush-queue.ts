@@ -65,14 +65,18 @@ export class RedisBurstFlushQueue implements BurstFlushQueuePort {
           const claimToken = randomUUID();
           const claimKey = claimKeyFor(key, member);
           if (await this.redis.set(claimKey, claimToken, "NX", "PX", this.claimTtlMs) !== "OK") continue;
+          const job = decodeJob(member);
           try {
-            await this.handler(decodeJob(member));
+            await this.handler(job);
             // ACK only after the burst handler completes successfully. Keeping
             // the member until then makes a crashed worker recoverable.
             await this.redis.zrem(key, member);
-          } catch {
+          } catch (error) {
             // Keep the job durable and make the next attempt explicit. The
             // burst service may also have persisted a fresh timer token.
+            console.error(
+              `Burst flush job failed for tenant ${job.tenantId}, contact ${job.contactId}: ${error instanceof Error ? error.message : "unknown error"}`,
+            );
             await this.redis.replaceSortedSetMember(key, member, this.clock() + this.retryDelayMs, member);
           } finally {
             await this.redis.deleteIfValue(claimKey, claimToken);
