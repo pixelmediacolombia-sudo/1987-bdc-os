@@ -61,7 +61,55 @@ test("Sofia opens with dealer identity and reacts before asking", () => {
     turnCount: 1,
     isFirstTurn: true,
   });
-  assert.equal(result.response, "Hola! Te saludamos desde Koons Automotive of Culpeper. Soy Sofía.\nCon gusto te ayudo. ¿Es para ti o para la familia?");
+  assert.equal(result.response, "Hola! Te saludamos desde Koons Automotive of Culpeper. Soy Sofía.\nPerfecto, te ayudo con esa SUV. ¿Es para ti o para la familia?");
+});
+
+test("Sofia reacts to each captured answer before asking the next question", () => {
+  const engine = new SofiaConversationEngine();
+  const family = engine.processTurn({ dealerName: "Koons", latestMessage: "Es para mi familia", priorFacts: { vehicle_category: "suv" }, turnCount: 2 });
+  assert.equal(family.response, "Perfecto, para familia la SUV es buena opción.\n¿Con cuánto cuentas para el enganche?");
+  const downPayment = engine.processTurn({ dealerName: "Koons", latestMessage: "Cuento con $2,500", priorFacts: family.facts, turnCount: 3, contactChannel: "WhatsApp" });
+  assert.match(downPayment.response ?? "", /^Va, con eso ya tenemos con qué trabajar\.\n/);
+  assert.match(downPayment.response ?? "", /parte de pago/);
+  const noTrade = engine.processTurn({ dealerName: "Koons", latestMessage: "No tengo carro para darlo como parte de pago", priorFacts: downPayment.facts, turnCount: 4, contactChannel: "WhatsApp" });
+  assert.equal(noTrade.response, "Entendido, seguimos sin vehículo de cambio.\n¿Ya has financiado un carro antes en Estados Unidos?");
+  const firstTime = engine.processTurn({ dealerName: "Koons", latestMessage: "Es la primera vez que financio", priorFacts: noTrade.facts, turnCount: 5, contactChannel: "WhatsApp" });
+  assert.equal(firstTime.response, "Perfecto, muchos empiezan así. Trabajamos con bancos para primera compra.\n¿Cuánto tiempo llevas trabajando en tu empleo actual?");
+});
+
+test("Sofia selects the trade-in wording from the vehicle down-payment range", () => {
+  const engine = new SofiaConversationEngine();
+  const nearMinimum = engine.processTurn({ dealerName: "Koons", latestMessage: "Cuento con $2,500", priorFacts: { vehicle_category: "suv", vehicle_use: "familia" }, turnCount: 3, contactChannel: "WhatsApp" });
+  assert.match(nearMinimum.response ?? "", /Eso te ayudaría bastante con el enganche/);
+  const topOfRange = engine.processTurn({ dealerName: "Koons", latestMessage: "Cuento con $3,000", priorFacts: { vehicle_category: "suv", vehicle_use: "familia" }, turnCount: 3, contactChannel: "WhatsApp" });
+  assert.match(topOfRange.response ?? "", /¿Traes algún carro para dar de cambio\?/);
+});
+
+test("Sofia acknowledges a vehicle photo, records only the trade-in boolean and asks for details", () => {
+  const result = new SofiaConversationEngine().processTurn({
+    dealerName: "Koons",
+    latestMessage: "Adjunto de image",
+    priorFacts: { vehicle_category: "suv", vehicle_use: "familia", down_payment_declared: 2500 },
+    mediaContext: { imageClassifications: ["vehicle_photo"] },
+    turnCount: 4,
+    contactChannel: "WhatsApp",
+  });
+  assert.equal(result.facts.has_trade_in, true);
+  assert.equal(result.facts.trade_in_description, undefined);
+  assert.equal(result.response, "Se ve bien. El gerente lo tasa cuando vengas.\n¿De qué año, marca y modelo es?");
+});
+
+test("Sofia records document classifications as booleans without document contents", () => {
+  const result = new SofiaConversationEngine().processTurn({
+    dealerName: "Koons",
+    latestMessage: "Adjunto de image",
+    priorFacts: { vehicle_category: "suv", vehicle_use: "familia", down_payment_declared: 2500 },
+    mediaContext: { imageClassifications: ["identity_document", "income_proof_document"] },
+    turnCount: 4,
+  });
+  assert.equal(result.facts.has_id_document, true);
+  assert.equal(result.facts.has_income_proof_document, true);
+  assert.equal(Object.keys(result.facts).some((key) => /license|address|income_amount|document_text/i.test(key)), false);
 });
 
 test("Sofia evidences the one-step down-payment push for 1000 and 1500", () => {

@@ -81,7 +81,7 @@ async function postSignedWebhook(useCase: ProcessGHLWebhookUseCase, payload: obj
   }
 }
 
-test("E2E multimodal: audio se transcribe, imagen se lee y Sofía responde dentro del flujo existente", async () => {
+test("E2E multimodal: audio entra al flujo y la imagen no expone OCR", async () => {
   const responses: string[] = [];
   let savedState: Awaited<ReturnType<SofiaStateRepositoryPort["load"]>>;
   const flow = {
@@ -107,6 +107,7 @@ test("E2E multimodal: audio se transcribe, imagen se lee y Sofía responde dentr
         contactId: message.contactId,
         messages: [{ ...message, receivedAt: new Date().toISOString() }],
         consolidatedText: message.content,
+        mediaContext: message.mediaSignals,
       });
     },
   };
@@ -138,12 +139,13 @@ test("E2E multimodal: audio se transcribe, imagen se lee y Sofía responde dentr
 
   assert.equal(repository.persisted.length, 2);
   assert.match(repository.persisted[0] ?? "", new RegExp(AUDIO_TEXT.slice(0, 35).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(repository.persisted[1] ?? "", /Lectura de imagen: Busco una SUV para mi familia/);
+  assert.equal(repository.persisted[1], "Adjunto de image");
+  assert.doesNotMatch(repository.persisted[1] ?? "", /Busco una SUV|Enganche disponible/);
   assert.equal(responses.length, 2);
   assert.ok(responses.every((response) => response.trim().length > 0));
   assert.equal(savedState?.turnCount, 2);
-  assert.equal(responses[0], "Hola! Te saludamos desde Country Club Cars Inc.. Soy Sofía.\nCon gusto te ayudo. ¿Es para ti o para la familia?");
-  assert.equal(responses[1], "¿Tienes algún carro para darlo como parte de pago?");
+  assert.equal(responses[0], "Hola! Te saludamos desde Country Club Cars Inc.. Soy Sofía.\nPerfecto, para familia la SUV es buena opción. ¿Con cuánto cuentas para el enganche?");
+  assert.equal(responses[1], "Gracias por compartirla. Seguimos con la información de tu compra.\n¿Con cuánto cuentas para el enganche?");
   console.log(`MEDIA_E2E_RESPONSES audio=${JSON.stringify(responses[0])} image=${JSON.stringify(responses[1])}`);
   assert.equal(typeof IMAGE_TEXT, "string");
 });

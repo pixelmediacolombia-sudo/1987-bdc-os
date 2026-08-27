@@ -154,3 +154,28 @@ test("unknown dealer identity stays silent instead of using a global dealer name
   assert.equal(saveCount, 0);
   assert.equal(sendCount, 0);
 });
+
+test("accepted push is persisted with the selected one-step target", async () => {
+  let savedState: Awaited<ReturnType<SofiaStateRepositoryPort["load"]>>;
+  const flow = { sendSofiaResponse: async () => ({ providerMessageId: "unused" }) } as unknown as QualificationFlowService;
+  const repository: SofiaStateRepositoryPort = {
+    load: async () => ({
+      turnCount: 1,
+      facts: { vehicle_category: "suv", vehicle_use: "solo", down_payment_declared: 1500, down_payment_push_target: 2000, contact_channel: "whatsapp" },
+      leadLevel: "B",
+      hardRuleFailure: false,
+    }),
+    save: async (_tenantId, _contactId, state) => { savedState = state; },
+  };
+  const hydrator = { hydrate: async () => context() } as unknown as ConversationHydrator;
+  const orchestrator = new HydratingInboundConversationOrchestrator(hydrator, flow, { engine: new SofiaConversationEngine(), repository, dealerName: "Test Dealer" });
+
+  await orchestrator.process({
+    ...inbound(),
+    consolidatedText: "Sí, puedo.",
+    messages: [{ ...inbound().messages[0], content: "Sí, puedo.", externalId: "push-accepted", channel: "whatsapp" }],
+  });
+
+  assert.equal(savedState?.pushAccepted, true);
+  assert.equal(savedState?.facts.down_payment_accepted, 2000);
+});

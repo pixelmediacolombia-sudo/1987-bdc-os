@@ -1,3 +1,5 @@
+import type { MediaClassification } from "@/modules/media/media";
+
 export type JsonObject = Record<string, unknown>;
 
 export type MediaAttachmentKind = "audio" | "image";
@@ -25,6 +27,10 @@ export type InboundMessage = {
   content: string;
   semanticHash: string;
   attachments?: MediaAttachment[];
+  mediaSignals?: {
+    audioTranscriptionFailed?: boolean;
+    imageClassifications?: MediaClassification[];
+  };
 };
 
 export type HumanInterruptionTrigger = "staff_message" | "control_tag";

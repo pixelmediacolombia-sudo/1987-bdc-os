@@ -73,6 +73,21 @@ export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
            updated_at = now()`,
         [tenantId, contactId, state.turnCount, JSON.stringify(state.facts), state.leadLevel, state.pushAccepted ?? null, state.hasTradeIn ?? null, state.hardRuleFailure, state.lastResponse ?? null],
       );
+      for (const [key, value] of Object.entries(state.facts)) {
+        if (!PERSISTED_FACT_KEYS.has(key) || value === undefined) continue;
+        await client.query(
+          `INSERT INTO public.facts
+             (tenant_id, contact_id, key, value, active, observed_at)
+           SELECT $1, contact.id, $3, $4, true, now()
+             FROM public.contacts AS contact
+            WHERE contact.tenant_id = $1 AND contact.ghl_contact_id = $2
+           ON CONFLICT (tenant_id, contact_id, key) WHERE active = true DO UPDATE SET
+             value = EXCLUDED.value,
+             active = true,
+             observed_at = now()`,
+          [tenantId, contactId, key, String(value)],
+        );
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
@@ -82,3 +97,24 @@ export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
     }
   }
 }
+
+const PERSISTED_FACT_KEYS = new Set([
+  "vehicle_category",
+  "vehicle_model_interest",
+  "vehicle_use",
+  "down_payment_declared",
+  "down_payment_accepted",
+  "down_payment_push_target",
+  "push_accepted",
+  "has_trade_in",
+  "trade_in_description",
+  "trade_in_financed",
+  "contact_channel",
+  "contact_value",
+  "first_time_buyer",
+  "employment_months",
+  "has_income_proof",
+  "has_id_document",
+  "has_income_proof_document",
+  "visit_intent",
+]);

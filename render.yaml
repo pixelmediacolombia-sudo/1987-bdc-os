@@ -26,7 +26,7 @@ services:
       - key: QUALIFICATION_SIGNAL_ENABLED
         value: "false"
       - key: SOFIA_ENABLED
-        value: "true"
+        value: "false"
       - key: SOFIA_DEALER_NAME
         value: Koons Automotive of Culpeper
       - key: MEDIA_UNDERSTANDING_ENABLED

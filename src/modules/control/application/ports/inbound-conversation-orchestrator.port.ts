@@ -1,5 +1,6 @@
 import type { InboundMessage } from "@/modules/webhooks/domain/ghl-webhook-event";
 import type { NextBestAction } from "@/modules/decisions/domain/next-best-action";
+import type { SofiaMediaContext } from "@/modules/media/media";
 
 export type BufferedInboundMessage = InboundMessage & {
   receivedAt: string;
@@ -10,6 +11,7 @@ export type ConsolidatedInboundConversation = {
   contactId: string;
   messages: BufferedInboundMessage[];
   consolidatedText: string;
+  mediaContext?: SofiaMediaContext;
   objectiveType?: string;
   requestedAction?: NextBestAction;
   outboundCandidate?: {

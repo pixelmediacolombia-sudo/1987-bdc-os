@@ -16,6 +16,8 @@ export type SofiaFacts = {
   first_time_buyer?: boolean;
   employment_months?: number;
   has_income_proof?: boolean;
+  has_id_document?: boolean;
+  has_income_proof_document?: boolean;
   visit_intent?: boolean;
 };
 
@@ -32,6 +34,10 @@ export type SofiaTurnInput = {
   turnCount: number;
   isFirstTurn?: boolean;
   contactChannel?: string;
+  mediaContext?: {
+    audioTranscriptionFailed?: boolean;
+    imageClassifications?: Array<"identity_document" | "income_proof_document" | "vehicle_photo" | "unrelated" | "unknown">;
+  };
 };
 
 export type SofiaTurnResult = {
@@ -59,7 +65,8 @@ export class SofiaConversationEngine {
   constructor(private readonly policy: SofiaPolicy = DEFAULT_SOFIA_POLICY) {}
 
   processTurn(input: SofiaTurnInput): SofiaTurnResult {
-    const facts = mergeFacts(input.priorFacts, extractFacts(input.latestMessage));
+    const extractedFacts = extractFacts(input.latestMessage);
+    const facts = mergeFacts(input.priorFacts, factsFromMedia(input.mediaContext), extractedFacts);
     const contactChannel = normalizeContactChannel(input.contactChannel);
     if (contactChannel) facts.contact_channel = contactChannel;
     applyPushDecision(facts, input.latestMessage);
@@ -67,31 +74,35 @@ export class SofiaConversationEngine {
     const hardRuleFailure = hasHardRuleFailure(facts);
     const hardRulesVerified = hasVerifiedHardRules(facts);
     const leadLevel = classifyLead(facts, this.policy);
+    const reaction = reactionFor(input, extractedFacts, facts);
+
+    if (input.mediaContext?.audioTranscriptionFailed) {
+      return makeResult(facts, leadLevel, ["No te escuché bien, ¿me lo repites?"], "ask", contactCaptured, hardRuleFailure);
+    }
 
     if (input.isFirstTurn || (input.turnCount === 1 && Object.keys(input.priorFacts).length === 0)) {
       const greeting = `Hola! Te saludamos desde ${input.dealerName}. Soy Sofía.`;
-      const reaction = facts.vehicle_category || facts.vehicle_model_interest
-        ? "Con gusto te ayudo. ¿Es para ti o para la familia?"
-        : "Con gusto te ayudo. ¿Qué carro estás buscando financiar?";
-      return makeResult(facts, leadLevel, [greeting, reaction], "ask", contactCaptured, hardRuleFailure);
+      const question = nextQuestion(input.dealerName, facts, this.policy);
+      const opening = reaction ?? "Con gusto te ayudo.";
+      return makeResult(facts, leadLevel, [greeting, [opening, question].filter(Boolean).join(" ")], "ask", contactCaptured, hardRuleFailure);
     }
 
-    if (hardRuleFailure) return makeResult(facts, "C", ["Gracias por compartirlo. Con eso el gerente puede revisar contigo la mejor opción de seguimiento."], "follow_up", contactCaptured, true);
-    if (isStrongPurchaseSignal(facts)) return makeResult(facts, leadLevel, ["Perfecto. Ya le paso tu información al gerente para que te ayude con los números exactos."], "handoff", contactCaptured, false);
+    if (hardRuleFailure) return makeResult(facts, "C", [reaction ?? "Gracias por compartirlo.", "Con eso el gerente puede revisar contigo la mejor opción de seguimiento."], "follow_up", contactCaptured, true);
+    if (isStrongPurchaseSignal(facts)) return makeResult(facts, leadLevel, [reaction ?? "Perfecto.", "Ya le paso tu información al gerente para que te ayude con los números exactos."], "handoff", contactCaptured, false);
     const pushTarget = nextPushTarget(facts.down_payment_declared);
     if (pushTarget !== undefined && facts.push_accepted === undefined) {
       facts.down_payment_push_target = pushTarget;
-      return makeResult(facts, "B", [`Para una ${facts.vehicle_category ?? "opción como esa"}, los bancos suelen ver mejor un enganche de $${pushTarget.toLocaleString("en-US")}. ¿Te sería posible llegar a ese monto?`], "ask", contactCaptured, false);
+      return makeResult(facts, "B", [reaction ?? "Gracias por compartir tu enganche.", `Para una ${facts.vehicle_category ?? "opción como esa"}, llegar a $${pushTarget.toLocaleString("en-US")} puede ayudar con una mejor aprobación y un pago mensual más cómodo. ¿Te sería posible llegar a ese monto?`], "ask", contactCaptured, false);
     }
 
     if (input.turnCount >= 3 && !contactCaptured) {
-      return makeResult(facts, leadLevel, ["Para que el gerente pueda ayudarte, ¿me compartes tu número de teléfono?"], "ask", false, false);
+      return makeResult(facts, leadLevel, [reaction ?? "Gracias por la información.", "Para que el gerente pueda ayudarte, ¿me compartes tu número de teléfono?"], "ask", false, false);
     }
 
-    const question = nextQuestion(input.dealerName, facts);
-    if (question) return makeResult(facts, leadLevel, [question], "ask", contactCaptured, false);
-    if (leadLevel === "A" && hardRulesVerified && contactCaptured) return makeResult(facts, "A", ["Perfecto. Ya le paso tu información al gerente para que te ayude con los números exactos."], "handoff", true, false);
-    return makeResult(facts, leadLevel, ["Gracias. El gerente puede revisar contigo el siguiente paso y los números exactos."], "follow_up", contactCaptured, false);
+    const question = nextQuestion(input.dealerName, facts, this.policy);
+    if (question) return makeResult(facts, leadLevel, [reaction ?? "Gracias por la información.", question], "ask", contactCaptured, false);
+    if (leadLevel === "A" && hardRulesVerified && contactCaptured) return makeResult(facts, "A", [reaction ?? "Perfecto.", "Ya le paso tu información al gerente para que te ayude con los números exactos."], "handoff", true, false);
+    return makeResult(facts, leadLevel, [reaction ?? "Gracias.", "El gerente puede revisar contigo el siguiente paso y los números exactos."], "follow_up", contactCaptured, false);
   }
 }
 
@@ -111,7 +122,7 @@ function hasHardRuleFailure(facts: SofiaFacts): boolean {
 }
 
 function hasVerifiedHardRules(facts: SofiaFacts): boolean {
-  return facts.employment_months !== undefined && facts.employment_months >= 6 && facts.has_income_proof === true;
+  return facts.employment_months !== undefined && facts.employment_months >= 6 && (facts.has_income_proof === true || facts.has_income_proof_document === true);
 }
 
 export function classifyLead(facts: SofiaFacts, policy: SofiaPolicy = DEFAULT_SOFIA_POLICY): SofiaLeadLevel {
@@ -137,11 +148,12 @@ function rangeFor(category: string | undefined, policy: SofiaPolicy): SofiaDownP
   return policy.downPaymentRanges[normalized] ?? policy.downPaymentRanges.default ?? { min: 1_500 };
 }
 
-function nextQuestion(dealerName: string, facts: SofiaFacts): string | undefined {
+function nextQuestion(dealerName: string, facts: SofiaFacts, policy: SofiaPolicy): string | undefined {
   if (!facts.vehicle_category && !facts.vehicle_model_interest) return `¿Qué carro estás buscando financiar en ${dealerName}?`;
   if (!facts.vehicle_use) return "¿Es para ti o para la familia?";
   if (facts.down_payment_declared === undefined) return "¿Con cuánto cuentas para el enganche?";
-  if (facts.has_trade_in === undefined) return "¿Tienes algún carro para darlo como parte de pago?";
+  if (facts.has_trade_in === undefined) return tradeInQuestion(facts, policy);
+  if (facts.has_trade_in === true && !facts.trade_in_description) return "¿De qué año, marca y modelo es?";
   if (!hasContactPath(facts)) return "¿Me compartes tu número para que el gerente pueda ayudarte?";
   if (facts.first_time_buyer === undefined) return "¿Ya has financiado un carro antes en Estados Unidos?";
   if (facts.employment_months === undefined) return "¿Cuánto tiempo llevas trabajando en tu empleo actual?";
@@ -170,6 +182,51 @@ function nextPushTarget(value: number | undefined): number | undefined {
   if (value === 1_500) return 2_000;
   if (value === 2_000) return 2_500;
   return undefined;
+}
+
+function tradeInQuestion(facts: SofiaFacts, policy: SofiaPolicy): string {
+  const range = rangeFor(facts.vehicle_category, policy);
+  const downPayment = facts.down_payment_accepted ?? facts.down_payment_declared;
+  const reachesCategory = downPayment !== undefined && (range.max === undefined ? downPayment >= range.min : downPayment >= range.max);
+  return reachesCategory
+    ? "¿Traes algún carro para dar de cambio?"
+    : "¿Tienes algún carro que puedas dar de parte de pago? Eso te ayudaría bastante con el enganche.";
+}
+
+function factsFromMedia(media: SofiaTurnInput["mediaContext"]): SofiaFacts {
+  const classifications = media?.imageClassifications ?? [];
+  return {
+    ...(classifications.includes("identity_document") ? { has_id_document: true } : {}),
+    ...(classifications.includes("income_proof_document") ? { has_income_proof_document: true } : {}),
+    ...(classifications.includes("vehicle_photo") ? { has_trade_in: true } : {}),
+  };
+}
+
+function reactionFor(input: SofiaTurnInput, newFacts: SofiaFacts, facts: SofiaFacts): string | undefined {
+  const classifications = input.mediaContext?.imageClassifications ?? [];
+  if (classifications.includes("vehicle_photo")) return "Se ve bien. El gerente lo tasa cuando vengas.";
+  if (classifications.includes("identity_document") || classifications.includes("income_proof_document")) return "Listo, ya la recibí. Se la paso al gerente.";
+  if (classifications.some((classification) => classification === "unrelated" || classification === "unknown")) return "Gracias por compartirla. Seguimos con la información de tu compra.";
+  if (newFacts.vehicle_use === "familia") {
+    const category = facts.vehicle_category ? `la ${displayVehicleCategory(facts.vehicle_category)}` : "esa opción";
+    return `Perfecto, para familia ${category} es buena opción.`;
+  }
+  if (newFacts.vehicle_use === "solo") return "Perfecto, vamos a buscar una opción que te funcione a ti.";
+  if (newFacts.down_payment_declared !== undefined) return "Va, con eso ya tenemos con qué trabajar.";
+  if (newFacts.has_trade_in === false) return "Entendido, seguimos sin vehículo de cambio.";
+  if (newFacts.has_trade_in === true) return "Perfecto, con ese carro de cambio podemos revisar más opciones.";
+  if (newFacts.first_time_buyer === true) return "Perfecto, muchos empiezan así. Trabajamos con bancos para primera compra.";
+  if (newFacts.first_time_buyer === false) return "Perfecto, ya tienes experiencia financiando.";
+  if (newFacts.employment_months !== undefined) return "Gracias, con ese tiempo ya tenemos un dato importante.";
+  if (newFacts.has_income_proof === true || newFacts.has_income_proof_document === true) return "Perfecto, con eso podemos revisar mejor tu perfil.";
+  if (newFacts.has_id_document === true) return "Listo, ya la recibí. Se la paso al gerente.";
+  if (facts.vehicle_category || facts.vehicle_model_interest) return `Perfecto, te ayudo con esa ${displayVehicleCategory(facts.vehicle_category ?? "opción")}.`;
+  return undefined;
+}
+
+function displayVehicleCategory(category: string): string {
+  const normalized = category.trim().toLowerCase();
+  return normalized === "suv" ? "SUV" : normalized === "sedan" ? "sedán" : normalized === "work truck" ? "camioneta de trabajo" : category;
 }
 
 function applyPushDecision(facts: SofiaFacts, message: string): void {

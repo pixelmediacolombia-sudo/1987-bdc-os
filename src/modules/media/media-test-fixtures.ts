@@ -6,7 +6,7 @@ export const IMAGE_TEXT = "Busco una SUV para mi familia. Enganche disponible: 2
 
 export function fixtureAdapter(): FixtureMediaUnderstandingAdapter {
   const audio: MediaUnderstandingResult = { kind: "audio", text: AUDIO_TEXT, source: "fixture" };
-  const image: MediaUnderstandingResult = { kind: "image", text: IMAGE_TEXT, source: "fixture" };
+  const image: MediaUnderstandingResult = { kind: "image", classification: "unrelated", source: "fixture" };
   return new FixtureMediaUnderstandingAdapter({
     "family-suv.wav": audio,
     "qualification-signals.svg": image,

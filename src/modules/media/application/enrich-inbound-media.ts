@@ -1,5 +1,6 @@
 import type { MediaUnderstandingPort } from "@/modules/media/application/media-understanding.port";
 import type { GhlWebhookEvent, InboundMessage } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { MediaClassification } from "@/modules/media/media";
 
 export type MediaEnrichmentLogger = {
   info(message: string): void;
@@ -20,21 +21,39 @@ export async function enrichInboundMedia(
   if (!inbound?.attachments?.length || !understanding) return event;
 
   const understood: string[] = [];
+  let audioTranscriptionFailed = false;
+  const imageClassifications: MediaClassification[] = [];
   for (const attachment of inbound.attachments) {
     try {
       const result = await understanding.understand(attachment);
-      const text = result.text.replace(/\s+/g, " ").trim();
-      if (!text) continue;
-      understood.push(`${attachment.kind === "audio" ? "Transcripción de audio" : "Lectura de imagen"}: ${text}`);
-      logger.info(`GHL media understood external=${event.externalId} contact=${inbound.contactId} kind=${attachment.kind} source=${result.source}`);
+      if (attachment.kind === "audio") {
+        const text = result.text?.replace(/\s+/g, " ").trim();
+        if (!text) {
+          audioTranscriptionFailed = true;
+          continue;
+        }
+        understood.push(text);
+        logger.info(`GHL media understood external=${event.externalId} contact=${inbound.contactId} kind=audio source=${result.source}`);
+      } else {
+        imageClassifications.push(result.classification ?? "unknown");
+        logger.info(`GHL media classified external=${event.externalId} contact=${inbound.contactId} kind=image classification=${result.classification ?? "unknown"} source=${result.source}`);
+      }
     } catch (error) {
       const detail = error instanceof Error ? error.message : "unknown error";
       logger.error(`GHL media understanding failed external=${event.externalId} contact=${inbound.contactId} kind=${attachment.kind}: ${detail}`);
+      if (attachment.kind === "audio") audioTranscriptionFailed = true;
+      else imageClassifications.push("unknown");
     }
   }
 
-  if (understood.length === 0) return event;
   const content = [inbound.content.trim(), ...understood].filter(Boolean).join("\n");
-  const enrichedMessage: InboundMessage = { ...inbound, content };
+  const enrichedMessage: InboundMessage = {
+    ...inbound,
+    content,
+    mediaSignals: {
+      ...(audioTranscriptionFailed ? { audioTranscriptionFailed: true } : {}),
+      ...(imageClassifications.length > 0 ? { imageClassifications } : {}),
+    },
+  };
   return { ...event, inboundMessage: enrichedMessage };
 }

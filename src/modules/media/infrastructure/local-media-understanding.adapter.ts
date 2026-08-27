@@ -5,6 +5,7 @@ import { basename, extname, join } from "node:path";
 import { promisify } from "node:util";
 import type { MediaUnderstandingPort, MediaUnderstandingResult } from "@/modules/media/application/media-understanding.port";
 import type { MediaAttachment } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { MediaClassification } from "@/modules/media/media";
 
 const execFileAsync = promisify(execFile);
 
@@ -64,10 +65,23 @@ export class LocalMediaUnderstandingAdapter implements MediaUnderstandingPort {
       windowsHide: true,
     });
     const text = output.stdout.replace(/\s+/g, " ").trim();
-    if (!text) throw new Error("Local image OCR returned empty text");
     this.options.logger?.info(`Local image OCR completed file=${basename(input.path)}`);
-    return { kind: "image", text, source: "local-ocr" };
+    return { kind: "image", classification: classifyImageText(text), source: "local-ocr" };
   }
+}
+
+function classifyImageText(text: string): MediaClassification {
+  const normalized = text.toLowerCase();
+  if (/driver'?s license|driving license|licencia|identificaci[oó]n|passport|pasaporte|id card/.test(normalized)) {
+    return "identity_document";
+  }
+  if (/pay ?stub|paycheck|tal[oó]n|comprobante|estado de cuenta|bank statement|income|ingreso/.test(normalized)) {
+    return "income_proof_document";
+  }
+  if (/honda|toyota|ford|chevrolet|nissan|veh[ií]culo|vehicle|carro|auto|suv|sedan|truck|pickup/.test(normalized)) {
+    return "vehicle_photo";
+  }
+  return text ? "unrelated" : "unknown";
 }
 
 type MaterializedAttachment = { path: string; temporaryDirectory?: string };

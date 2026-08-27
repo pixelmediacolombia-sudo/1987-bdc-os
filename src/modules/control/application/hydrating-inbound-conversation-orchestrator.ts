@@ -71,6 +71,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
           ...factsFromContext(context.activeFacts),
           ...(previous?.facts ?? {}),
         },
+        mediaContext: input.mediaContext,
         turnCount: (previous?.turnCount ?? 0) + 1,
         isFirstTurn: !previous,
       });
@@ -175,7 +176,7 @@ function factsFromContext(activeFacts: Record<string, string>): SofiaFacts {
     if (key === "down_payment_declared" || key === "down_payment_accepted" || key === "down_payment_push_target" || key === "employment_months") {
       const parsed = Number(value);
       if (Number.isFinite(parsed)) facts[key] = parsed;
-    } else if (key === "push_accepted" || key === "has_trade_in" || key === "first_time_buyer" || key === "has_income_proof" || key === "trade_in_financed" || key === "visit_intent") {
+    } else if (key === "push_accepted" || key === "has_trade_in" || key === "first_time_buyer" || key === "has_income_proof" || key === "has_id_document" || key === "has_income_proof_document" || key === "trade_in_financed" || key === "visit_intent") {
       if (value === "true" || value === "false") facts[key] = value === "true";
     } else if (key in factsFromContextKeys()) {
       facts[key as keyof SofiaFacts] = value as never;

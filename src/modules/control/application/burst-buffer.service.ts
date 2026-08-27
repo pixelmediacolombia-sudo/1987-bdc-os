@@ -212,6 +212,7 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
           contactId,
           messages,
           consolidatedText: messages.map((item) => item.content).join("\n"),
+          mediaContext: mergeMediaContext(messages),
         });
       } catch (error) {
         await this.redis.lpush(messageKey, ...serializedMessages.reverse());
@@ -276,6 +277,19 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
   private scopeKey(tenantId: string, contactId: string): string {
     return scopeSuffix(tenantId, contactId);
   }
+}
+
+function mergeMediaContext(messages: BufferedInboundMessage[]): {
+  audioTranscriptionFailed?: boolean;
+  imageClassifications?: Array<"identity_document" | "income_proof_document" | "vehicle_photo" | "unrelated" | "unknown">;
+} | undefined {
+  const imageClassifications = messages.flatMap((message) => message.mediaSignals?.imageClassifications ?? []);
+  const audioTranscriptionFailed = messages.some((message) => message.mediaSignals?.audioTranscriptionFailed);
+  if (!audioTranscriptionFailed && imageClassifications.length === 0) return undefined;
+  return {
+    ...(audioTranscriptionFailed ? { audioTranscriptionFailed: true } : {}),
+    ...(imageClassifications.length > 0 ? { imageClassifications } : {}),
+  };
 }
 
 function hasExternalId(serialized: string, externalId: string): boolean {
