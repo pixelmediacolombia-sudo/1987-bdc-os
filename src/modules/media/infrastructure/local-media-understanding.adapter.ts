@@ -47,13 +47,28 @@ export class LocalMediaUnderstandingAdapter implements MediaUnderstandingPort {
     const modelPath = this.options.whisperModelPath?.trim();
     if (!executable || !modelPath) throw new Error("Local audio transcription is not configured");
     const whisperInput = await this.prepareWhisperInput(input);
-    const output = await execFileAsync(executable, ["-m", modelPath, "-f", whisperInput, "--no-timestamps", "--no-gpu"], {
-      timeout: this.options.timeoutMs,
-      maxBuffer: 1024 * 1024,
-      windowsHide: true,
-    });
-    const text = `${output.stdout}\n${output.stderr}`.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").trim();
-    if (!text) throw new Error("Local audio transcription returned empty text");
+    let output: { stdout: string; stderr: string };
+    try {
+      output = await execFileAsync(executable, [
+        "-m", modelPath,
+        "-f", whisperInput,
+        "-l", "es",
+        "--no-timestamps",
+        "--no-gpu",
+        "--no-prints",
+      ], {
+        timeout: this.options.timeoutMs,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+      });
+    } catch (error) {
+      throw new Error(`Whisper command failed: ${formatCommandFailure(error)}`);
+    }
+    const text = stripTerminalCodes(output.stdout).replace(/\s+/g, " ").trim();
+    if (!text) {
+      const diagnostic = stripTerminalCodes(output.stderr).replace(/\s+/g, " ").trim();
+      throw new Error(`Local audio transcription returned empty text${diagnostic ? ` (${truncateDiagnostic(diagnostic)})` : ""}`);
+    }
     this.options.logger?.info(`Local audio transcription completed file=${basename(input.path)}`);
     return { kind: "audio", text, source: "local-whisper" };
   }
@@ -83,6 +98,25 @@ export class LocalMediaUnderstandingAdapter implements MediaUnderstandingPort {
     this.options.logger?.info(`Local image OCR completed file=${basename(input.path)}`);
     return { kind: "image", classification: classifyImageText(text), source: "local-ocr" };
   }
+}
+
+function formatCommandFailure(error: unknown): string {
+  const failure = error as { code?: string | number; signal?: string; stderr?: string; stdout?: string };
+  const parts = [
+    failure.code !== undefined ? `code=${failure.code}` : undefined,
+    failure.signal ? `signal=${failure.signal}` : undefined,
+    failure.stderr ? `stderr=${truncateDiagnostic(failure.stderr)}` : undefined,
+    failure.stdout ? `stdout=${truncateDiagnostic(failure.stdout)}` : undefined,
+  ].filter(Boolean);
+  return parts.join(" ") || (error instanceof Error ? error.message : "unknown error");
+}
+
+function stripTerminalCodes(value: string): string {
+  return value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+function truncateDiagnostic(value: string): string {
+  return stripTerminalCodes(value).replace(/\s+/g, " ").trim().slice(-1200);
 }
 
 function classifyImageText(text: string): MediaClassification {
