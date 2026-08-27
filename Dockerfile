@@ -13,6 +13,13 @@ RUN git clone --depth 1 --branch "${WHISPER_VERSION}" https://github.com/ggml-or
         -DWHISPER_BUILD_EXAMPLES=ON \
         -DWHISPER_BUILD_TESTS=OFF \
         -DWHISPER_BUILD_SERVER=OFF \
+        -DGGML_NATIVE=OFF \
+        -DGGML_SSE42=OFF \
+        -DGGML_AVX=OFF \
+        -DGGML_AVX2=OFF \
+        -DGGML_BMI2=OFF \
+        -DGGML_FMA=OFF \
+        -DGGML_F16C=OFF \
     && cmake --build whisper.cpp/build --config Release --target whisper-cli -j2 \
     && mkdir -p /out/bin /out/lib /out/models \
     && cp whisper.cpp/build/bin/whisper-cli /out/bin/whisper-cli \
