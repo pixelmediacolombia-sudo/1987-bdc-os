@@ -82,6 +82,27 @@ test("un audio vacío activa la aclaración sin inventar texto del cliente", asy
   assert.deepEqual(enriched.inboundMessage?.mediaSignals, { audioTranscriptionFailed: true });
 });
 
+test("transporta la categoría de vehículo identificada en la imagen sin transportar OCR", async () => {
+  const event = parseGhlWebhookPayload({
+    eventId: "media-inbound-vehicle-category",
+    eventType: "InboundMessage",
+    locationId: "location-media-test",
+    direction: "inbound",
+    contactId: "contact-media-test",
+    messageType: "WhatsApp",
+    message: { attachments: [{ type: "image/svg+xml", filename: "vehicle.svg", localPath: "fixtures/media/vehicle.svg" }] },
+  }, Buffer.from("media-inbound-vehicle-category"), "signature");
+  const enriched = await enrichInboundMedia(event, new FixtureMediaUnderstandingAdapter({
+    "vehicle.svg": { kind: "image", classification: "vehicle_photo", vehicleCategory: "SUV", source: "fixture", text: "OCR must not enter content" },
+  }), { info: () => undefined, error: () => undefined });
+
+  assert.deepEqual(enriched.inboundMessage?.mediaSignals, {
+    imageClassifications: ["vehicle_photo"],
+    imageVehicleCategories: ["suv"],
+  });
+  assert.doesNotMatch(enriched.inboundMessage?.content ?? "", /OCR must not enter content/);
+});
+
 test("si el adaptador local no está habilitado no rompe el webhook", async () => {
   const event = parseGhlWebhookPayload({
     eventId: "media-inbound-3",

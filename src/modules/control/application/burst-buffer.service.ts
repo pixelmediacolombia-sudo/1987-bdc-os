@@ -282,13 +282,16 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
 function mergeMediaContext(messages: BufferedInboundMessage[]): {
   audioTranscriptionFailed?: boolean;
   imageClassifications?: Array<"identity_document" | "income_proof_document" | "vehicle_photo" | "unrelated" | "unknown">;
+  imageVehicleCategories?: string[];
 } | undefined {
   const imageClassifications = messages.flatMap((message) => message.mediaSignals?.imageClassifications ?? []);
+  const imageVehicleCategories = messages.flatMap((message) => message.mediaSignals?.imageVehicleCategories ?? []);
   const audioTranscriptionFailed = messages.some((message) => message.mediaSignals?.audioTranscriptionFailed);
-  if (!audioTranscriptionFailed && imageClassifications.length === 0) return undefined;
+  if (!audioTranscriptionFailed && imageClassifications.length === 0 && imageVehicleCategories.length === 0) return undefined;
   return {
     ...(audioTranscriptionFailed ? { audioTranscriptionFailed: true } : {}),
     ...(imageClassifications.length > 0 ? { imageClassifications } : {}),
+    ...(imageVehicleCategories.length > 0 ? { imageVehicleCategories } : {}),
   };
 }
 

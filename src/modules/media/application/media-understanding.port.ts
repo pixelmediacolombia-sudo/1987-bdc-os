@@ -7,6 +7,8 @@ export type MediaUnderstandingResult = {
   text?: string;
   source: "fixture" | "local-whisper" | "local-ocr";
   classification?: MediaClassification;
+  /** A narrowly classified vehicle category may guide the next deterministic question. */
+  vehicleCategory?: string;
 };
 
 export interface MediaUnderstandingPort {

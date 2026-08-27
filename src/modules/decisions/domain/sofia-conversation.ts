@@ -37,6 +37,7 @@ export type SofiaTurnInput = {
   mediaContext?: {
     audioTranscriptionFailed?: boolean;
     imageClassifications?: Array<"identity_document" | "income_proof_document" | "vehicle_photo" | "unrelated" | "unknown">;
+    imageVehicleCategories?: string[];
   };
 };
 
@@ -195,7 +196,9 @@ function tradeInQuestion(facts: SofiaFacts, policy: SofiaPolicy): string {
 
 function factsFromMedia(media: SofiaTurnInput["mediaContext"]): SofiaFacts {
   const classifications = media?.imageClassifications ?? [];
+  const vehicleCategory = media?.imageVehicleCategories?.find((category) => category.trim());
   return {
+    ...(vehicleCategory ? { vehicle_category: vehicleCategory } : {}),
     ...(classifications.includes("identity_document") ? { has_id_document: true } : {}),
     ...(classifications.includes("income_proof_document") ? { has_income_proof_document: true } : {}),
     ...(classifications.includes("vehicle_photo") ? { has_trade_in: true } : {}),
@@ -204,7 +207,12 @@ function factsFromMedia(media: SofiaTurnInput["mediaContext"]): SofiaFacts {
 
 function reactionFor(input: SofiaTurnInput, newFacts: SofiaFacts, facts: SofiaFacts): string | undefined {
   const classifications = input.mediaContext?.imageClassifications ?? [];
-  if (classifications.includes("vehicle_photo")) return "Se ve bien. El gerente lo tasa cuando vengas.";
+  if (classifications.includes("vehicle_photo")) {
+    const imageVehicleCategory = input.mediaContext?.imageVehicleCategories?.find((category) => category.trim());
+    return imageVehicleCategory
+      ? `Se ve buena esa ${displayVehicleCategory(imageVehicleCategory)}.`
+      : "Se ve bien. El gerente lo tasa cuando vengas.";
+  }
   if (classifications.includes("identity_document") || classifications.includes("income_proof_document")) return "Listo, ya la recibí. Se la paso al gerente.";
   if (classifications.some((classification) => classification === "unrelated" || classification === "unknown")) return "Gracias por compartirla. Seguimos con la información de tu compra.";
   if (newFacts.vehicle_use === "familia") {
@@ -247,11 +255,12 @@ function extractFacts(message: string): SofiaFacts {
   const facts: SofiaFacts = {};
   const phone = message.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/);
   const normalizedWithoutPhone = phone ? normalized.replace(phone[0].toLowerCase(), " ") : normalized;
-  const amount = normalizedWithoutPhone.match(/(?:\$|usd\s*)?(\d{3,5}(?:[,.]\d{3})*|\d{1,3}(?:[,.]\d{3})+)(?:\s*(?:d[oó]lares|usd))?/i);
-  if (amount) {
-    const value = Number(amount[1].replace(/[,.]/g, ""));
-    if (Number.isFinite(value)) facts.down_payment_declared = value;
-  }
+  const numericAmount = normalizedWithoutPhone.match(/(?:\$|usd\s*)?(\d{3,5}(?:[,.]\d{3})*|\d{1,3}(?:[,.]\d{3})+)(?:\s*(?:d[oó]lares|usd))?/i);
+  const numericValue = numericAmount ? Number(numericAmount[1].replace(/[,.]/g, "")) : undefined;
+  const wordAmount = normalizedWithoutPhone.match(SPANISH_THOUSANDS_AMOUNT_PATTERN);
+  const wordValue = wordAmount ? parseSpanishAmount(wordAmount[0]) : undefined;
+  const value = numericValue ?? wordValue;
+  if (value !== undefined && Number.isFinite(value)) facts.down_payment_declared = value;
   if (/\b(suv|camioneta)\b/.test(normalized)) facts.vehicle_category = "suv";
   else if (/\b(sedan|carro|auto)\b/.test(normalized)) facts.vehicle_category = "sedan";
   else if (/\b(camion|truck|pickup|trabajo)\b/.test(normalized)) facts.vehicle_category = "work truck";
@@ -279,4 +288,39 @@ function extractFacts(message: string): SofiaFacts {
     facts.contact_value = phone[0].replace(/\D/g, "");
   }
   return facts;
+}
+
+const SPANISH_NUMBER_WORDS = [
+  "un", "uno", "una", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve",
+  "diez", "once", "doce", "trece", "catorce", "quince", "dieciseis", "diecisiete", "dieciocho", "diecinueve",
+  "veinte", "veintiuno", "veintiun", "veintidos", "veintitres", "veinticuatro", "veinticinco", "veintiseis", "veintisiete", "veintiocho", "veintinueve",
+  "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa",
+  "cien", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos", "seiscientos", "setecientos", "ochocientos", "novecientos",
+  "mil",
+];
+const SPANISH_NUMBER_WORD = `(?:${SPANISH_NUMBER_WORDS.join("|")})`;
+const SPANISH_THOUSANDS_AMOUNT_PATTERN = new RegExp(`\\b${SPANISH_NUMBER_WORD}(?:\\s+${SPANISH_NUMBER_WORD})*\\s+mil(?:\\s+${SPANISH_NUMBER_WORD})?\\b|\\bmil(?:\\s+${SPANISH_NUMBER_WORD})?\\b`, "i");
+
+function parseSpanishAmount(value: string): number | undefined {
+  const units: Record<string, number> = {
+    un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9,
+    diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17, dieciocho: 18, diecinueve: 19,
+    veinte: 20, veintiuno: 21, veintiun: 21, veintidos: 22, veintitres: 23, veinticuatro: 24, veinticinco: 25, veintiseis: 26, veintisiete: 27, veintiocho: 28, veintinueve: 29,
+    treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90,
+    cien: 100, ciento: 100, doscientos: 200, trescientos: 300, cuatrocientos: 400, quinientos: 500, seiscientos: 600, setecientos: 700, ochocientos: 800, novecientos: 900,
+  };
+  let total = 0;
+  let current = 0;
+  for (const token of value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/)) {
+    if (token === "mil") {
+      total += (current || 1) * 1000;
+      current = 0;
+      continue;
+    }
+    const amount = units[token];
+    if (amount === undefined) return undefined;
+    current += amount;
+  }
+  const result = total + current;
+  return total > 0 ? result : undefined;
 }

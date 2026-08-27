@@ -96,7 +96,8 @@ export class LocalMediaUnderstandingAdapter implements MediaUnderstandingPort {
     });
     const text = output.stdout.replace(/\s+/g, " ").trim();
     this.options.logger?.info(`Local image OCR completed file=${basename(input.path)}`);
-    return { kind: "image", classification: classifyImageText(text), source: "local-ocr" };
+    const imageResult = classifyImageText(text);
+    return { kind: "image", ...imageResult, source: "local-ocr" };
   }
 }
 
@@ -119,18 +120,27 @@ function truncateDiagnostic(value: string): string {
   return stripTerminalCodes(value).replace(/\s+/g, " ").trim().slice(-1200);
 }
 
-function classifyImageText(text: string): MediaClassification {
+function classifyImageText(text: string): { classification: MediaClassification; vehicleCategory?: string } {
   const normalized = text.toLowerCase();
   if (/driver'?s license|driving license|licencia|identificaci[oó]n|passport|pasaporte|id card/.test(normalized)) {
-    return "identity_document";
+    return { classification: "identity_document" };
   }
   if (/pay ?stub|paycheck|tal[oó]n|comprobante|estado de cuenta|bank statement|income|ingreso/.test(normalized)) {
-    return "income_proof_document";
+    return { classification: "income_proof_document" };
   }
   if (/honda|toyota|ford|chevrolet|nissan|veh[ií]culo|vehicle|carro|auto|suv|sedan|truck|pickup/.test(normalized)) {
-    return "vehicle_photo";
+    const vehicleCategory = /\b(suv|camioneta)\b/.test(normalized)
+      ? "suv"
+      : /\bsedan\b/.test(normalized)
+        ? "sedan"
+        : /\b(camion|truck|pickup)\b/.test(normalized)
+          ? "work truck"
+          : /\b(van|minivan)\b/.test(normalized)
+            ? "van"
+            : undefined;
+    return { classification: "vehicle_photo", ...(vehicleCategory ? { vehicleCategory } : {}) };
   }
-  return text ? "unrelated" : "unknown";
+  return { classification: text ? "unrelated" : "unknown" };
 }
 
 type MaterializedAttachment = { path: string; temporaryDirectory?: string };

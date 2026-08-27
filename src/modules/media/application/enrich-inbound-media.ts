@@ -23,6 +23,7 @@ export async function enrichInboundMedia(
   const understood: string[] = [];
   let audioTranscriptionFailed = false;
   const imageClassifications: MediaClassification[] = [];
+  const imageVehicleCategories: string[] = [];
   for (const attachment of inbound.attachments) {
     try {
       const result = await understanding.understand(attachment);
@@ -36,6 +37,7 @@ export async function enrichInboundMedia(
         logger.info(`GHL media understood external=${event.externalId} contact=${inbound.contactId} kind=audio source=${result.source}`);
       } else {
         imageClassifications.push(result.classification ?? "unknown");
+        if (result.vehicleCategory?.trim()) imageVehicleCategories.push(result.vehicleCategory.trim().toLowerCase());
         logger.info(`GHL media classified external=${event.externalId} contact=${inbound.contactId} kind=image classification=${result.classification ?? "unknown"} source=${result.source}`);
       }
     } catch (error) {
@@ -53,6 +55,7 @@ export async function enrichInboundMedia(
     mediaSignals: {
       ...(audioTranscriptionFailed ? { audioTranscriptionFailed: true } : {}),
       ...(imageClassifications.length > 0 ? { imageClassifications } : {}),
+      ...(imageVehicleCategories.length > 0 ? { imageVehicleCategories } : {}),
     },
   };
   return { ...event, inboundMessage: enrichedMessage };

@@ -8,4 +8,5 @@ export type MediaClassification =
 export type SofiaMediaContext = {
   audioTranscriptionFailed?: boolean;
   imageClassifications?: MediaClassification[];
+  imageVehicleCategories?: string[];
 };

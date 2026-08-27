@@ -77,6 +77,23 @@ test("Sofia reacts to each captured answer before asking the next question", () 
   assert.equal(firstTime.response, "Perfecto, muchos empiezan así. Trabajamos con bancos para primera compra.\n¿Cuánto tiempo llevas trabajando en tu empleo actual?");
 });
 
+test("Sofia extracts all facts from the single-sentence audio transcript", () => {
+  const result = new SofiaConversationEngine().processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "Hola, busco una SUV para mi familia y tengo como dos mil de enganche.",
+    priorFacts: {},
+    turnCount: 1,
+    isFirstTurn: true,
+    contactChannel: "WhatsApp",
+  });
+
+  assert.equal(result.facts.vehicle_category, "suv");
+  assert.equal(result.facts.vehicle_use, "familia");
+  assert.equal(result.facts.down_payment_declared, 2000);
+  assert.match(result.response ?? "", /parte de pago/);
+  assert.doesNotMatch(result.response ?? "", /con qu[eé] cuentas para el enganche/i);
+});
+
 test("Sofia selects the trade-in wording from the vehicle down-payment range", () => {
   const engine = new SofiaConversationEngine();
   const nearMinimum = engine.processTurn({ dealerName: "Koons", latestMessage: "Cuento con $2,500", priorFacts: { vehicle_category: "suv", vehicle_use: "familia" }, turnCount: 3, contactChannel: "WhatsApp" });
@@ -97,6 +114,23 @@ test("Sofia acknowledges a vehicle photo, records only the trade-in boolean and 
   assert.equal(result.facts.has_trade_in, true);
   assert.equal(result.facts.trade_in_description, undefined);
   assert.equal(result.response, "Se ve bien. El gerente lo tasa cuando vengas.\n¿De qué año, marca y modelo es?");
+});
+
+test("Sofia uses a vehicle category identified by image without asking for the category again", () => {
+  const result = new SofiaConversationEngine().processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "Adjunto de image",
+    priorFacts: {},
+    mediaContext: { imageClassifications: ["vehicle_photo"], imageVehicleCategories: ["suv"] },
+    turnCount: 1,
+    isFirstTurn: true,
+  });
+
+  assert.equal(result.facts.vehicle_category, "suv");
+  assert.equal(result.facts.has_trade_in, true);
+  assert.match(result.response ?? "", /Se ve buena esa SUV\./);
+  assert.match(result.response ?? "", /para la familia/);
+  assert.doesNotMatch(result.response ?? "", /qu[eé] carro est[aá]s buscando/i);
 });
 
 test("Sofia records document classifications as booleans without document contents", () => {

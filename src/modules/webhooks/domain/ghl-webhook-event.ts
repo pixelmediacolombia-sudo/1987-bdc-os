@@ -30,6 +30,7 @@ export type InboundMessage = {
   mediaSignals?: {
     audioTranscriptionFailed?: boolean;
     imageClassifications?: MediaClassification[];
+    imageVehicleCategories?: string[];
   };
 };
 

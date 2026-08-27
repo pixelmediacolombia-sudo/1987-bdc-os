@@ -144,8 +144,11 @@ test("E2E multimodal: audio entra al flujo y la imagen no expone OCR", async () 
   assert.equal(responses.length, 2);
   assert.ok(responses.every((response) => response.trim().length > 0));
   assert.equal(savedState?.turnCount, 2);
-  assert.equal(responses[0], "Hola! Te saludamos desde Country Club Cars Inc.. Soy Sofía.\nPerfecto, para familia la SUV es buena opción. ¿Con cuánto cuentas para el enganche?");
-  assert.equal(responses[1], "Gracias por compartirla. Seguimos con la información de tu compra.\n¿Con cuánto cuentas para el enganche?");
+  assert.equal(savedState?.facts.vehicle_category, "suv");
+  assert.equal(savedState?.facts.vehicle_use, "familia");
+  assert.equal(savedState?.facts.down_payment_declared, 2500);
+  assert.equal(responses[0], "Hola! Te saludamos desde Country Club Cars Inc.. Soy Sofía.\nPerfecto, para familia la SUV es buena opción. ¿Tienes algún carro que puedas dar de parte de pago? Eso te ayudaría bastante con el enganche.");
+  assert.equal(responses[1], "Gracias por compartirla. Seguimos con la información de tu compra.\n¿Tienes algún carro que puedas dar de parte de pago? Eso te ayudaría bastante con el enganche.");
   console.log(`MEDIA_E2E_RESPONSES audio=${JSON.stringify(responses[0])} image=${JSON.stringify(responses[1])}`);
   assert.equal(typeof IMAGE_TEXT, "string");
 });
