@@ -34,6 +34,7 @@ RUN npm ci
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY policies ./policies
 RUN npm run build && npm prune --omit=dev
 
 FROM node:24-bookworm-slim
@@ -55,6 +56,7 @@ WORKDIR /app
 COPY --from=app-build /app/package*.json ./
 COPY --from=app-build /app/node_modules ./node_modules
 COPY --from=app-build /app/dist ./dist
+COPY --from=app-build /app/policies ./policies
 COPY --from=whisper-build /out/bin/whisper-cli /opt/whisper/bin/whisper-cli
 COPY --from=whisper-build /out/lib/ /opt/whisper/lib/
 COPY --from=whisper-build /out/models/ggml-base.bin /opt/whisper/models/ggml-base.bin
