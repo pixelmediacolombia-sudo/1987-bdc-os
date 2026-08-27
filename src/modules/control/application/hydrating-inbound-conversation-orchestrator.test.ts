@@ -7,6 +7,7 @@ import type { ConsolidatedInboundConversation } from "@/modules/control/applicat
 import type { HydratedContext } from "@/modules/memory/domain/hydrated-context";
 import type { ConversationHydrator } from "@/modules/memory/application/conversation-hydrator";
 import { SofiaConversationEngine } from "@/modules/decisions/domain/sofia-conversation";
+import { OutboundMessageRejectedError } from "@/modules/control/application/registered-outbound-message-sender";
 
 function context(state: string = "open"): HydratedContext {
   return {
@@ -61,6 +62,30 @@ test("Sofia response is sent to the connected dealer using the inbound channel",
   assert.equal(sent[0]?.externalId, "inbound-1");
   assert.match(String(sent[0]?.content), /Sofía/);
   assert.match(String(sent[0]?.semanticHash), /^[a-f0-9]{64}$/);
+});
+
+test("semantic repetition veto is terminal and does not requeue the inbound batch", async () => {
+  const logs: string[] = [];
+  const flow = {
+    sendSofiaResponse: async () => {
+      throw new OutboundMessageRejectedError("WAIT", "semantic repetition");
+    },
+  } as unknown as QualificationFlowService;
+  const repository: SofiaStateRepositoryPort = { load: async () => undefined, save: async () => undefined };
+  const hydrator = { hydrate: async () => context() } as unknown as ConversationHydrator;
+  const orchestrator = new HydratingInboundConversationOrchestrator(
+    hydrator,
+    flow,
+    { engine: new SofiaConversationEngine(), repository, dealerName: "Test Dealer" },
+    undefined,
+    false,
+    { info: (message) => logs.push(message), error: (message) => logs.push(`error:${message}`) },
+  );
+
+  await orchestrator.process(inbound());
+
+  assert.equal(logs.some((message) => message.includes("Sofia outbound suppressed") && message.includes("action=WAIT")), true);
+  assert.equal(logs.some((message) => message.startsWith("error:")), false);
 });
 
 test("Sofia routes Messenger and Instagram to the supported GHL channel types", async () => {

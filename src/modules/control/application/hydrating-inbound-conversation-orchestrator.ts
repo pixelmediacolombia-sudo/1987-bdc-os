@@ -7,6 +7,7 @@ import type { OutboundMessageChannel } from "@/modules/control/application/ports
 import { SofiaConversationEngine, type SofiaFacts } from "@/modules/decisions/domain/sofia-conversation";
 import { resolveDealerDisplayName } from "@/modules/decisions/domain/dealer-identity";
 import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
+import { OutboundMessageRejectedError } from "@/modules/control/application/registered-outbound-message-sender";
 
 export type SofiaConversationLogger = {
   info(message: string): void;
@@ -115,6 +116,12 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
           });
           this.logger.info(`Sofia outbound sent tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel}`);
         } catch (error) {
+          if (error instanceof OutboundMessageRejectedError) {
+            this.logger.info(
+              `Sofia outbound suppressed tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel} action=${error.action}`,
+            );
+            return;
+          }
           const detail = error instanceof Error ? error.message : "unknown error";
           this.logger.error(`Sofia outbound failed tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel}: ${detail}`);
           throw error;

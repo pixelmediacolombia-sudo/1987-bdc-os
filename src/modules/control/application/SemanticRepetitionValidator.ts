@@ -88,7 +88,8 @@ export class SemanticRepetitionValidator implements SemanticRepetitionGuard {
       await client.query(
         `INSERT INTO public.decision_logs
            (tenant_id, contact_id, external_id, input_version, allowed_actions, selected_action, reason, model_trace)
-         VALUES ($1, $2, $3, 'semantic-repetition-v1', $4::jsonb, $5, $6, $7::jsonb)`,
+         VALUES ($1, $2, $3, 'semantic-repetition-v1', $4::jsonb, $5, $6, $7::jsonb)
+         ON CONFLICT DO NOTHING`,
         [
           tenantId,
           contactRow.id,
