@@ -37,7 +37,10 @@ export class GhlInboundMediaResolver implements InboundMediaResolverPort {
       const response = await this.apiClient.request<ArrayBuffer>(tenantId, {
         method: "GET",
         url: `https://services.leadconnectorhq.com/conversations/messages/${encodeURIComponent(inbound.providerMessageId)}/locations/${encodeURIComponent(event.locationId)}/recording`,
-        headers: { Accept: "audio/*, application/octet-stream" },
+        headers: {
+          Accept: "audio/*, application/octet-stream",
+          Version: "v3",
+        },
         responseType: "arraybuffer",
       });
       const contentType = typeof response.headers["content-type"] === "string"

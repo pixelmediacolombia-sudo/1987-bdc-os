@@ -6,9 +6,11 @@ import type { GhlWebhookEvent } from "@/modules/webhooks/domain/ghl-webhook-even
 
 test("resuelve la grabacion de GHL por messageId sin exponer el token", async () => {
   let requestedUrl = "";
+  let requestedVersion = "";
   const resolver = new GhlInboundMediaResolver(
-    { request: async (_tenantId: string, config: { url?: string }) => {
+    { request: async (_tenantId: string, config: { url?: string; headers?: Record<string, unknown> }) => {
       requestedUrl = String(config.url);
+      requestedVersion = String(config.headers && (config.headers as Record<string, unknown>).Version);
       return { headers: { "content-type": "audio/ogg; codecs=opus" }, data: Buffer.from("audio-bytes") };
     } } as never,
     { resolveTenantId: async (locationId) => locationId === "location-1" ? "tenant-1" : undefined },
@@ -34,6 +36,7 @@ test("resuelve la grabacion de GHL por messageId sin exponer el token", async ()
   const resolved = await resolver.resolve(event);
   const attachment = resolved.inboundMessage?.attachments?.[0];
   assert.match(requestedUrl, /conversations\/messages\/message-1\/locations\/location-1\/recording$/);
+  assert.equal(requestedVersion, "v3");
   assert.equal(resolved.inboundMessage?.content, "Adjunto de audio");
   assert.equal(attachment?.kind, "audio");
   assert.equal(attachment?.mimeType, "audio/ogg");
