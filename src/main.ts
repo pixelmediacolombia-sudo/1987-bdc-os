@@ -46,6 +46,7 @@ import { GhlQualificationTagProvider } from "@/features/ghl-oauth/infrastructure
 import { PostgresSofiaStateRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-sofia-state.repository";
 import { ensureTenantFeatureFlags } from "@/modules/control/infrastructure/persistence/postgres/tenant-flags.migration";
 import { LocalMediaUnderstandingAdapter } from "@/modules/media/infrastructure/local-media-understanding.adapter";
+import { GhlInboundMediaResolver } from "@/modules/media/infrastructure/ghl-inbound-media-resolver";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -62,8 +63,11 @@ async function start(): Promise<void> {
   const stateService = new HmacOAuthStateService(config.oauthStateSecret);
   const cryptor = new Aes256GcmTokenCryptor(config.encryptionSecret);
   const repository = new PostgresTenantIntegrationRepository(pool);
+  const locationRouteRepository = new PostgresTenantLocationRouteRepository(pool);
+  const tokenRefresh = new GhlTokenRefreshUseCase(oauthClient, repository, cryptor);
+  const ghlApiClient = new GhlApiClient(tokenRefresh);
   const presentationService = new GhlOAuthPresentationService(
-    new InitiateGhlOAuthUseCase(oauthClient, stateService, new PostgresTenantLocationRouteRepository(pool)),
+    new InitiateGhlOAuthUseCase(oauthClient, stateService, locationRouteRepository),
     new CompleteGhlOAuthUseCase(oauthClient, stateService, cryptor, repository),
   );
   const controller = new GhlOAuthController(presentationService);
@@ -137,6 +141,7 @@ async function start(): Promise<void> {
     policyEvaluator,
     undefined,
     mediaUnderstanding,
+    new GhlInboundMediaResolver(ghlApiClient, locationRouteRepository),
   );
   const webhookQueue = new RedisWebhookQueue(redis);
   await webhookQueue.start(async (job) => {
@@ -145,12 +150,10 @@ async function start(): Promise<void> {
   });
   let qualificationSignalWorker: QualificationSignalWorker | undefined;
   if (config.qualificationSignalEnabled) {
-    const signalTokenRefresh = new GhlTokenRefreshUseCase(oauthClient, repository, cryptor);
-    const signalApiClient = new GhlApiClient(signalTokenRefresh);
     qualificationSignalWorker = new QualificationSignalWorker(
       qualificationSignalRepository,
       new MetaCapiProvider(),
-      new GhlQualificationTagProvider(signalApiClient),
+      new GhlQualificationTagProvider(ghlApiClient),
       cryptor,
       config.nodeEnv,
       config.qualificationSignalPollMs,

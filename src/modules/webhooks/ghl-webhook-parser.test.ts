@@ -61,6 +61,24 @@ test("extrae el id del mensaje del proveedor para no confundir la salida de Sofi
   assert.equal(event.humanInterruption?.staffMessage?.providerMessageId, "provider-message-42");
 });
 
+test("conserva un inbound de WhatsApp con body vacio para resolver su grabacion por messageId", () => {
+  const payload = {
+    type: "InboundMessage",
+    locationId: "location-sandbox",
+    messageId: "audio-message-42",
+    contactId: "contact-42",
+    conversationId: "conversation-42",
+    direction: "inbound",
+    messageType: "WhatsApp",
+    contentType: "text/plain",
+    body: "",
+  };
+  const event = parseGhlWebhookPayload(payload, Buffer.from(JSON.stringify(payload)), "signature");
+  assert.equal(event.inboundMessage?.channel, "whatsapp");
+  assert.equal(event.inboundMessage?.content, "");
+  assert.equal(event.inboundMessage?.providerMessageId, "audio-message-42");
+});
+
 test("reconoce WhatsApp cuando GHL lo entrega como messageType plano", () => {
   const payload = {
     type: "OutboundMessage",

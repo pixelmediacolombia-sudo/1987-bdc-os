@@ -1,6 +1,7 @@
 import type { MediaUnderstandingPort } from "@/modules/media/application/media-understanding.port";
 import type { GhlWebhookEvent, InboundMessage } from "@/modules/webhooks/domain/ghl-webhook-event";
 import type { MediaClassification } from "@/modules/media/media";
+import type { InboundMediaResolverPort } from "@/modules/media/infrastructure/inbound-media-resolver.port";
 
 export type MediaEnrichmentLogger = {
   info(message: string): void;
@@ -16,9 +17,11 @@ export async function enrichInboundMedia(
   event: GhlWebhookEvent,
   understanding: MediaUnderstandingPort | undefined,
   logger: MediaEnrichmentLogger = defaultLogger,
+  resolver?: InboundMediaResolverPort,
 ): Promise<GhlWebhookEvent> {
-  const inbound = event.inboundMessage;
-  if (!inbound?.attachments?.length || !understanding) return event;
+  const resolvedEvent = resolver ? await resolver.resolve(event) : event;
+  const inbound = resolvedEvent.inboundMessage;
+  if (!inbound?.attachments?.length || !understanding) return resolvedEvent;
 
   const understood: string[] = [];
   let audioTranscriptionFailed = false;
@@ -58,5 +61,5 @@ export async function enrichInboundMedia(
       ...(imageVehicleCategories.length > 0 ? { imageVehicleCategories } : {}),
     },
   };
-  return { ...event, inboundMessage: enrichedMessage };
+  return { ...resolvedEvent, inboundMessage: enrichedMessage };
 }

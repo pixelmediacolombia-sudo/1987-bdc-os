@@ -8,6 +8,7 @@ import type { PolicyEvaluatorPort } from "@/modules/decisions/application/policy
 import { parseGhlWebhookPayload } from "@/modules/webhooks/domain/ghl-webhook.parser";
 import { enrichInboundMedia } from "@/modules/media/application/enrich-inbound-media";
 import type { MediaUnderstandingPort } from "@/modules/media/application/media-understanding.port";
+import type { InboundMediaResolverPort } from "@/modules/media/infrastructure/inbound-media-resolver.port";
 
 export type WebhookProcessLogger = {
   info(message: string): void;
@@ -27,6 +28,7 @@ export class ProcessGHLWebhookUseCase {
     private readonly policyEvaluator?: PolicyEvaluatorPort,
     private readonly logger: WebhookProcessLogger = defaultLogger,
     private readonly mediaUnderstanding?: MediaUnderstandingPort,
+    private readonly inboundMediaResolver?: InboundMediaResolverPort,
   ) {}
 
   async execute(input: {
@@ -35,7 +37,7 @@ export class ProcessGHLWebhookUseCase {
     signature: string;
   }): Promise<{ duplicate: boolean; tenantId: string; externalId: string }> {
     const parsedEvent = parseGhlWebhookPayload(input.payload, input.rawBody, input.signature);
-    const event = await enrichInboundMedia(parsedEvent, this.mediaUnderstanding, this.logger);
+    const event = await enrichInboundMedia(parsedEvent, this.mediaUnderstanding, this.logger, this.inboundMediaResolver);
     if (!event.inboundMessage && isInboundEventType(event.eventType)) {
       this.logger.info(`GHL inbound ignored unsupported or incomplete channel external=${event.externalId} event=${event.eventType}`);
     }

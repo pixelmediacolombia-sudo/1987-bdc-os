@@ -247,11 +247,16 @@ function buildMessage(
     ?? stringAt(payload, ["content", "body", "text"])
     ?? attachments.map((attachment) => attachment.caption).find((caption): caption is string => Boolean(caption))
     ?? (attachments.length > 0 ? attachments.map((attachment) => `Adjunto de ${attachment.kind}`).join("; ") : undefined);
+  const providerMessageId = extractProviderMessageId(payload, message);
 
-  if (!contactId || !content) return undefined;
+  // GHL's real WhatsApp audio webhook can carry an empty body and expose the
+  // recording only through the message-id recording endpoint. Keep that
+  // inbound event alive long enough for the infrastructure resolver to fetch
+  // the audio; ordinary empty events without a provider id remain ignored.
+  if (!contactId || (!content && !providerMessageId)) return undefined;
 
   const conversationId = extractConversationId(payload, message);
-  const normalizedContent = content.replace(/\s+/g, " ").trim().toLowerCase();
+  const normalizedContent = (content ?? "").replace(/\s+/g, " ").trim().toLowerCase();
   const semanticHash = createHash("sha256")
     .update([direction, contactId, conversationId ?? "", normalizedContent].join("|"), "utf8")
     .digest("hex");
@@ -261,10 +266,6 @@ function buildMessage(
   const ctwa = extractCtwaAttribution(payload);
   const channel = extractChannel(payload) ?? (direction === "outbound" ? "other" : undefined);
   if (!channel) return undefined;
-  const providerMessageId = direction === "outbound"
-    ? extractProviderMessageId(payload, message)
-    : undefined;
-
   return {
     externalId,
     ...(providerMessageId ? { providerMessageId } : {}),
@@ -279,7 +280,7 @@ function buildMessage(
     // the persisted value inside the database contract instead of inventing
     // an unsupported channel such as `unknown`.
     channel,
-    content,
+    content: content ?? "",
     semanticHash,
     ...(attachments.length > 0 ? { attachments } : {}),
   };
