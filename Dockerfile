@@ -44,11 +44,12 @@ ENV NODE_ENV=production \
     LD_LIBRARY_PATH=/opt/whisper/lib \
     WHISPER_CLI_PATH=/opt/whisper/bin/whisper-cli \
     WHISPER_MODEL_PATH=/opt/whisper/models/ggml-base.bin \
+    FFMPEG_CLI_PATH=/usr/bin/ffmpeg \
     TESSERACT_CLI_PATH=/usr/bin/tesseract \
     MEDIA_UNDERSTANDING_ENABLED=false
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa libgomp1 \
+    && apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

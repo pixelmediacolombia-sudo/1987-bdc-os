@@ -126,6 +126,7 @@ async function start(): Promise<void> {
     ? new LocalMediaUnderstandingAdapter({
         whisperExecutable: config.whisperCliPath,
         whisperModelPath: config.whisperModelPath,
+        ffmpegExecutable: config.ffmpegCliPath,
         tesseractExecutable: config.tesseractCliPath,
       })
     : undefined;

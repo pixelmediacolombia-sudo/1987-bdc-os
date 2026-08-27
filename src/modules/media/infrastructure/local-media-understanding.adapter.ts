@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 export type LocalMediaUnderstandingOptions = {
   whisperExecutable?: string;
   whisperModelPath?: string;
+  ffmpegExecutable?: string;
   tesseractExecutable?: string;
   timeoutMs?: number;
   logger?: { info(message: string): void; error(message: string): void };
@@ -45,7 +46,8 @@ export class LocalMediaUnderstandingAdapter implements MediaUnderstandingPort {
     const executable = this.options.whisperExecutable?.trim();
     const modelPath = this.options.whisperModelPath?.trim();
     if (!executable || !modelPath) throw new Error("Local audio transcription is not configured");
-    const output = await execFileAsync(executable, ["-m", modelPath, "-f", input.path, "--no-timestamps"], {
+    const whisperInput = await this.prepareWhisperInput(input);
+    const output = await execFileAsync(executable, ["-m", modelPath, "-f", whisperInput, "--no-timestamps", "--no-gpu"], {
       timeout: this.options.timeoutMs,
       maxBuffer: 1024 * 1024,
       windowsHide: true,
@@ -54,6 +56,19 @@ export class LocalMediaUnderstandingAdapter implements MediaUnderstandingPort {
     if (!text) throw new Error("Local audio transcription returned empty text");
     this.options.logger?.info(`Local audio transcription completed file=${basename(input.path)}`);
     return { kind: "audio", text, source: "local-whisper" };
+  }
+
+  private async prepareWhisperInput(input: MaterializedAttachment): Promise<string> {
+    if (extname(input.path).toLowerCase() === ".wav") return input.path;
+    const ffmpeg = this.options.ffmpegExecutable?.trim();
+    if (!ffmpeg) throw new Error("Audio conversion is not configured");
+    const outputPath = join(input.temporaryDirectory ?? tmpdir(), "attachment.wav");
+    await execFileAsync(ffmpeg, ["-y", "-i", input.path, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", outputPath], {
+      timeout: this.options.timeoutMs,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+    });
+    return outputPath;
   }
 
   private async readImage(input: MaterializedAttachment): Promise<MediaUnderstandingResult> {

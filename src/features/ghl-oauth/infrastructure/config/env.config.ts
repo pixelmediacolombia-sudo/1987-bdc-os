@@ -20,6 +20,7 @@ export type AppConfig = {
   mediaUnderstandingEnabled: boolean;
   whisperCliPath?: string;
   whisperModelPath?: string;
+  ffmpegCliPath?: string;
   tesseractCliPath?: string;
   ghlClientId: string;
   ghlClientSecret: string;
@@ -77,6 +78,7 @@ export function loadAppConfig(): AppConfig {
     mediaUnderstandingEnabled: booleanEnv("MEDIA_UNDERSTANDING_ENABLED", false),
     whisperCliPath: process.env.WHISPER_CLI_PATH?.trim() || undefined,
     whisperModelPath: process.env.WHISPER_MODEL_PATH?.trim() || undefined,
+    ffmpegCliPath: process.env.FFMPEG_CLI_PATH?.trim() || undefined,
     tesseractCliPath: process.env.TESSERACT_CLI_PATH?.trim() || undefined,
     ghlClientId: required("GHL_CLIENT_ID"),
     ghlClientSecret: required("GHL_CLIENT_SECRET"),
