@@ -157,6 +157,16 @@ function mediaKind(value: string | undefined): MediaAttachmentKind | undefined {
   return undefined;
 }
 
+function mediaKindFromUrl(value: string | undefined): MediaAttachmentKind | undefined {
+  if (!value) return undefined;
+  const pathname = value.toLowerCase().split(/[?#]/, 1)[0];
+  const extension = pathname.match(/\.([a-z0-9]+)$/)?.[1];
+  if (!extension) return undefined;
+  if (["aac", "amr", "m4a", "mp3", "ogg", "opus", "wav", "webm"].includes(extension)) return "audio";
+  if (["gif", "jpeg", "jpg", "png", "webp"].includes(extension)) return "image";
+  return undefined;
+}
+
 function extractMediaAttachments(payload: JsonObject, message: JsonObject): MediaAttachment[] {
   const candidates = [
     valueAt(message, "attachments"),
@@ -170,10 +180,21 @@ function extractMediaAttachments(payload: JsonObject, message: JsonObject): Medi
     valueAt(payload, "data.message.attachments"),
     valueAt(payload, "data.message.media"),
   ];
+  const payloadMimeType = stringAt(payload, ["contentType", "content_type", "message.contentType", "message.content_type"]);
+  const payloadMediaKind = mediaKind(payloadMimeType);
 
   for (const candidate of candidates) {
     const items = Array.isArray(candidate) ? candidate : [candidate];
     const attachments = items.flatMap((item): MediaAttachment[] => {
+      if (typeof item === "string") {
+        const kind = payloadMediaKind ?? mediaKindFromUrl(item);
+        if (!kind) return [];
+        return [{
+          kind,
+          ...(payloadMediaKind && payloadMimeType ? { mimeType: payloadMimeType } : {}),
+          url: item,
+        }];
+      }
       const object = asObject(item);
       if (!object) return [];
       const mimeType = stringAt(object, ["mimeType", "mime_type", "contentType", "content_type", "type"]);

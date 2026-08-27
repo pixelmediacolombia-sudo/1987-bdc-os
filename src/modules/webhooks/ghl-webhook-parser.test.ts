@@ -75,6 +75,27 @@ test("reconoce WhatsApp cuando GHL lo entrega como messageType plano", () => {
   assert.equal(event.humanInterruption?.staffMessage?.channel, "whatsapp");
 });
 
+test("reconoce adjuntos multimedia de GHL cuando attachments contiene una URL", () => {
+  const payload = {
+    type: "InboundMessage",
+    locationId: "location-sandbox",
+    id: "inbound-whatsapp-audio-42",
+    contactId: "contact-42",
+    conversationId: "conversation-42",
+    messageType: "WhatsApp",
+    contentType: "text/plain",
+    body: "",
+    attachments: ["https://media.example.test/voice.ogg?signature=redacted"],
+  };
+  const event = parseGhlWebhookPayload(payload, Buffer.from(JSON.stringify(payload)), "signature");
+  assert.equal(event.inboundMessage?.channel, "whatsapp");
+  assert.equal(event.inboundMessage?.content, "Adjunto de audio");
+  assert.deepEqual(event.inboundMessage?.attachments?.[0], {
+    kind: "audio",
+    url: "https://media.example.test/voice.ogg?signature=redacted",
+  });
+});
+
 test("normaliza los canales de mensajería compatibles con GHL", () => {
   const cases = [
     ["Messenger", "fb"],
