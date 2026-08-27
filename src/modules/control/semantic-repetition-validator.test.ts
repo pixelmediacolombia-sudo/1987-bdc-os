@@ -31,4 +31,5 @@ test("resuelve el GHL contact ID antes de consultar columnas UUID", async () => 
   assert.equal(messageQuery?.values?.[0], TENANT_ID);
   assert.equal(messageQuery?.values?.[1], CONTACT_UUID);
   assert.notEqual(messageQuery?.values?.[1], GHL_CONTACT_ID);
+  assert.match(messageQuery?.sql ?? "", /previous_inbound\.created_at/);
 });

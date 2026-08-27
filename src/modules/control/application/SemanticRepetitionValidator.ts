@@ -67,6 +67,20 @@ export class SemanticRepetitionValidator implements SemanticRepetitionGuard {
             AND cv.contact_id = $2
             AND m.direction = 'outbound'
             AND m.sender_type IN ('agent', 'assistant')
+            AND m.created_at > COALESCE(
+              (
+                SELECT MAX(previous_inbound.created_at)
+                  FROM public.messages AS previous_inbound
+                  JOIN public.conversations AS previous_cv
+                    ON previous_cv.id = previous_inbound.conversation_id
+                   AND previous_cv.tenant_id = previous_inbound.tenant_id
+                 WHERE previous_inbound.tenant_id = $1
+                   AND previous_cv.contact_id = $2
+                   AND previous_inbound.direction = 'inbound'
+                   AND previous_inbound.sender_type = 'client'
+              ),
+              '-infinity'::timestamptz
+            )
           ORDER BY m.created_at DESC, m.id DESC
           LIMIT 5`,
         [tenantId, contactRow.id],
