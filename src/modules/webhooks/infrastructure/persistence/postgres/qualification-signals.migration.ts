@@ -94,10 +94,11 @@ STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
+  -- Enumerate only bootstrap routing metadata here. The worker applies the
+  -- tenant-scoped qualification_signal_enabled check when claiming events;
+  -- joining FORCE RLS tenants without app.tenant_id would hide every route.
   SELECT route.dealer_id
-    FROM public.tenant_location_routes AS route
-    JOIN public.tenants AS tenant ON tenant.dealer_id = route.dealer_id
-   WHERE tenant.qualification_signal_enabled = true;
+    FROM public.tenant_location_routes AS route;
 $$;
 
 REVOKE ALL ON FUNCTION public.list_qualification_signal_dealers() FROM PUBLIC;
