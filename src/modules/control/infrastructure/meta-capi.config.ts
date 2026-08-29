@@ -61,9 +61,15 @@ export function loadMetaCapiEnvConfig(env: NodeJS.ProcessEnv = process.env): {
   }
 
   return {
-    eventName: env.META_CAPI_EVENT_NAME?.trim() || "Lead_Calificado",
+    eventName: normalizeMetaEventName(env.META_CAPI_EVENT_NAME?.trim()),
     dealers,
   };
+}
+
+function normalizeMetaEventName(value?: string): string {
+  // Meta rejects this legacy custom name for business_messaging events.
+  if (!value || value === "Lead_Calificado") return "LeadSubmitted";
+  return value;
 }
 
 export function findMetaCapiEnvConfig(

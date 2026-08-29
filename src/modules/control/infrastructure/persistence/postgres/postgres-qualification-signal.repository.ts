@@ -36,7 +36,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
   constructor(
     private readonly pool: Pool,
     private readonly metaCapiDealers: MetaCapiTenantConfig[] = [],
-    private readonly metaCapiEventName = "Lead_Calificado",
+    private readonly metaCapiEventName = "LeadSubmitted",
   ) {}
 
   async enqueueWithinTransaction(client: PoolClient, input: QualificationCompletion): Promise<void> {
@@ -87,7 +87,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
       [input.ledgerEntryId, input.tenantId],
     );
     const eventTime = completion.rows[0]?.qualification_completed_at ?? new Date();
-    const eventName = this.metaCapiEventName || dealerRow.meta_event_name?.trim() || "Lead_Calificado";
+    const eventName = this.metaCapiEventName || dealerRow.meta_event_name?.trim() || "LeadSubmitted";
     const payload = buildMetaCapiPayload({
       eventName,
       eventId: input.ledgerEntryId,

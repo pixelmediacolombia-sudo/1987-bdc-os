@@ -70,6 +70,11 @@ test("Ticket 8.5 loads all seven master-map dataset/token pairs", () => {
   assert.equal(findMetaCapiEnvConfig("Koons Fredericksburg ES", config.dealers)?.key, "KOONS_FBURG_ES");
 });
 
+test("Ticket 8.5 uses a Meta-supported event name for business messaging by default", () => {
+  assert.equal(loadMetaCapiEnvConfig({}).eventName, "LeadSubmitted");
+  assert.equal(loadMetaCapiEnvConfig({ META_CAPI_EVENT_NAME: "Lead_Calificado" }).eventName, "LeadSubmitted");
+});
+
 test("Ticket 8.5 rejects an incomplete dataset/token pair", () => {
   assert.throws(
     () => loadMetaCapiEnvConfig({ META_CAPI_DATASET_ACTION: "dataset-action" }),

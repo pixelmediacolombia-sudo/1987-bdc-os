@@ -13,7 +13,7 @@ CREATE INDEX IF NOT EXISTS contacts_ctwa_clid_idx
 ALTER TABLE public.tenants
   ADD COLUMN IF NOT EXISTS meta_dataset_id TEXT,
   ADD COLUMN IF NOT EXISTS encrypted_meta_access_token TEXT,
-  ADD COLUMN IF NOT EXISTS meta_event_name TEXT NOT NULL DEFAULT 'Lead_Calificado',
+  ADD COLUMN IF NOT EXISTS meta_event_name TEXT NOT NULL DEFAULT 'LeadSubmitted',
   ADD COLUMN IF NOT EXISTS meta_capi_enabled BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS meta_test_event_code TEXT;
 
