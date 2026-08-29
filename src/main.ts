@@ -150,6 +150,13 @@ async function start(): Promise<void> {
   });
   let qualificationSignalWorker: QualificationSignalWorker | undefined;
   if (config.qualificationSignalEnabled) {
+    const runtimeDatabase = await pool.query<{ database_name: string; database_user: string }>(
+      "SELECT current_database() AS database_name, current_user AS database_user",
+    );
+    const databaseIdentity = runtimeDatabase.rows[0];
+    console.info(
+      `[Ticket8.5] Qualification signal runtime database database=${databaseIdentity?.database_name ?? "unknown"} user=${databaseIdentity?.database_user ?? "unknown"}`,
+    );
     console.info(
       `[Ticket8.5] Qualification signal worker enabled configured_dealers=${config.metaCapiDealers.length} poll_ms=${config.qualificationSignalPollMs}`,
     );
