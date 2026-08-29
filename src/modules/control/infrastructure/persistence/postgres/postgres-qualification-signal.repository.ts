@@ -320,7 +320,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
                                 ELSE 'pending' END,
                   last_error = $5,
                   next_attempt_at = CASE
-                    WHEN $7::boolean THEN now() + interval '5 minutes'
+                    WHEN $6::boolean THEN now() + interval '5 minutes'
                     WHEN attempts + $3 = 1 THEN now() + interval '1 minute'
                     WHEN attempts + $3 = 2 THEN now() + interval '5 minutes'
                     WHEN attempts + $3 = 3 THEN now() + interval '15 minutes'
@@ -329,7 +329,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
                   END,
                   claim_token = NULL, claimed_at = NULL, updated_at = now()
             WHERE dealer_id = $1 AND ${table === "capi_events" ? "event_id" : "id"} = $2`,
-          [dealerId, eventId, increment, failure.retryable, failure.error.slice(0, 1000), null, failure.rateLimited ?? false],
+          [dealerId, eventId, increment, failure.retryable, failure.error.slice(0, 1000), failure.rateLimited ?? false],
         );
       }
       await client.query("COMMIT");
