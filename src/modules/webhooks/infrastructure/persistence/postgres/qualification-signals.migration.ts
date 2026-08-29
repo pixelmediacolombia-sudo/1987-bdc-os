@@ -17,6 +17,9 @@ ALTER TABLE public.tenants
   ADD COLUMN IF NOT EXISTS meta_capi_enabled BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS meta_test_event_code TEXT;
 
+ALTER TABLE public.tenants
+  ALTER COLUMN meta_event_name SET DEFAULT 'LeadSubmitted';
+
 CREATE TABLE IF NOT EXISTS public.capi_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   dealer_id UUID NOT NULL REFERENCES public.tenants(dealer_id) ON DELETE CASCADE,
