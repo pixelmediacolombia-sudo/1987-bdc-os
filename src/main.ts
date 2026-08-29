@@ -150,6 +150,9 @@ async function start(): Promise<void> {
   });
   let qualificationSignalWorker: QualificationSignalWorker | undefined;
   if (config.qualificationSignalEnabled) {
+    console.info(
+      `[Ticket8.5] Qualification signal worker enabled configured_dealers=${config.metaCapiDealers.length} poll_ms=${config.qualificationSignalPollMs}`,
+    );
     qualificationSignalWorker = new QualificationSignalWorker(
       qualificationSignalRepository,
       new MetaCapiProvider(),
@@ -159,6 +162,8 @@ async function start(): Promise<void> {
       config.qualificationSignalPollMs,
     );
     await qualificationSignalWorker.start();
+  } else {
+    console.info("[Ticket8.5] Qualification signal worker disabled reason=QUALIFICATION_SIGNAL_ENABLED_false");
   }
   const webhookController = new WebhookController(
     processWebhook,

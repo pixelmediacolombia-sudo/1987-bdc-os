@@ -7,9 +7,12 @@ import { GhlQualificationTagProvider } from "@/features/ghl-oauth/infrastructure
 import { MetaCapiProvider, QualificationDeliveryError } from "@/modules/control/infrastructure/meta-capi.provider";
 import type { MetaCapiPayload } from "@/modules/decisions/domain/meta-capi";
 
+const DIAGNOSTIC_LOG_INTERVAL_MS = 60_000;
+
 export class QualificationSignalWorker {
   private timer?: NodeJS.Timeout;
   private running = false;
+  private lastDiagnosticLogAt = 0;
 
   constructor(
     private readonly repository: QualificationSignalRepository,
@@ -21,8 +24,10 @@ export class QualificationSignalWorker {
   ) {}
 
   async start(): Promise<void> {
+    console.info(`[Ticket8.5] Qualification signal worker starting poll_ms=${this.pollMs}`);
     await this.runOnce();
     this.timer = setInterval(() => void this.runOnce(), this.pollMs);
+    console.info("[Ticket8.5] Qualification signal worker initialized");
   }
 
   async stop(): Promise<void> {
@@ -34,18 +39,32 @@ export class QualificationSignalWorker {
     if (this.running) return;
     this.running = true;
     try {
-      for (const dealerId of await this.repository.listDealerIds()) {
-        await this.processCapi(dealerId);
-        await this.processGhlTag(dealerId);
+      const dealerIds = await this.repository.listDealerIds();
+      let capiClaims = 0;
+      let ghlTagClaims = 0;
+      for (const dealerId of dealerIds) {
+        if (await this.processCapi(dealerId)) capiClaims += 1;
+        if (await this.processGhlTag(dealerId)) ghlTagClaims += 1;
+      }
+      const now = Date.now();
+      if (
+        capiClaims > 0 ||
+        ghlTagClaims > 0 ||
+        now - this.lastDiagnosticLogAt >= DIAGNOSTIC_LOG_INTERVAL_MS
+      ) {
+        console.info(
+          `[Ticket8.5] Qualification signal worker cycle dealers_found=${dealerIds.length} capi_claims=${capiClaims} ghl_tag_claims=${ghlTagClaims}`,
+        );
+        this.lastDiagnosticLogAt = now;
       }
     } finally {
       this.running = false;
     }
   }
 
-  private async processCapi(dealerId: string): Promise<void> {
+  private async processCapi(dealerId: string): Promise<boolean> {
     const event = await this.repository.claimNextCapiEvent(dealerId);
-    if (!event) return;
+    if (!event) return false;
     if (!event.datasetId || (!event.accessToken && !event.encryptedAccessToken)) {
       await this.repository.markCapiFailure({
         dealerId,
@@ -53,7 +72,7 @@ export class QualificationSignalWorker {
         error: "Meta CAPI dataset or access token is not configured",
         retryable: false,
       });
-      return;
+      return true;
     }
 
     try {
@@ -78,11 +97,12 @@ export class QualificationSignalWorker {
       });
       console.warn(`[Ticket8.5] Meta CAPI delivery failed dealer=${dealerId} event=${event.eventId}`);
     }
+    return true;
   }
 
-  private async processGhlTag(dealerId: string): Promise<void> {
+  private async processGhlTag(dealerId: string): Promise<boolean> {
     const event = await this.repository.claimNextGhlTagEvent(dealerId);
-    if (!event) return;
+    if (!event) return false;
     try {
       await this.tagProvider.addQualificationCompletedTag({
         tenantId: dealerId,
@@ -100,6 +120,7 @@ export class QualificationSignalWorker {
       });
       console.warn(`[Ticket8.5] GHL qualification tag failed dealer=${dealerId} ledger=${event.ledgerEntryId}`);
     }
+    return true;
   }
 }
 
