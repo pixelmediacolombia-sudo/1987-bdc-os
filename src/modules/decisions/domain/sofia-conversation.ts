@@ -66,7 +66,7 @@ export class SofiaConversationEngine {
   constructor(private readonly policy: SofiaPolicy = DEFAULT_SOFIA_POLICY) {}
 
   processTurn(input: SofiaTurnInput): SofiaTurnResult {
-    const extractedFacts = extractFacts(input.latestMessage);
+    const extractedFacts = extractFacts(input.latestMessage, input.priorFacts);
     const facts = mergeFacts(input.priorFacts, factsFromMedia(input.mediaContext), extractedFacts);
     const contactChannel = normalizeContactChannel(input.contactChannel);
     if (contactChannel) facts.contact_channel = contactChannel;
@@ -228,7 +228,11 @@ function reactionFor(input: SofiaTurnInput, newFacts: SofiaFacts, facts: SofiaFa
   if (newFacts.employment_months !== undefined) return "Gracias, con ese tiempo ya tenemos un dato importante.";
   if (newFacts.has_income_proof === true || newFacts.has_income_proof_document === true) return "Perfecto, con eso podemos revisar mejor tu perfil.";
   if (newFacts.has_id_document === true) return "Listo, ya la recibí. Se la paso al gerente.";
-  if (facts.vehicle_category || facts.vehicle_model_interest) return `Perfecto, te ayudo con esa ${displayVehicleCategory(facts.vehicle_category ?? "opción")}.`;
+  if (facts.vehicle_category || facts.vehicle_model_interest) {
+    const vehicle = facts.vehicle_model_interest ?? displayVehicleCategory(facts.vehicle_category ?? "opción");
+    const article = facts.vehicle_model_interest ? "ese" : "esa";
+    return `Perfecto, te ayudo con ${article} ${vehicle}.`;
+  }
   return undefined;
 }
 
@@ -250,21 +254,30 @@ function applyPushDecision(facts: SofiaFacts, message: string): void {
   }
 }
 
-function extractFacts(message: string): SofiaFacts {
-  const normalized = message.trim().toLowerCase();
+function extractFacts(message: string, priorFacts: SofiaFacts): SofiaFacts {
+  const userMessage = stripAdMetadata(message);
+  const normalized = userMessage.trim().toLowerCase();
   const facts: SofiaFacts = {};
-  const phone = message.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/);
+  const phone = userMessage.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/);
   const normalizedWithoutPhone = phone ? normalized.replace(phone[0].toLowerCase(), " ") : normalized;
-  const numericAmount = normalizedWithoutPhone.match(/(?:\$|usd\s*)?(\d{3,5}(?:[,.]\d{3})*|\d{1,3}(?:[,.]\d{3})+)(?:\s*(?:d[oó]lares|usd))?/i);
-  const numericValue = numericAmount ? Number(numericAmount[1].replace(/[,.]/g, "")) : undefined;
+  const expectsDownPayment = Boolean(
+    !priorFacts.down_payment_declared &&
+    (priorFacts.vehicle_category || priorFacts.vehicle_model_interest) &&
+    priorFacts.vehicle_use,
+  );
+  const numericValue = extractDownPaymentNumber(normalizedWithoutPhone, expectsDownPayment);
   const wordAmount = normalizedWithoutPhone.match(SPANISH_THOUSANDS_AMOUNT_PATTERN);
-  const wordValue = wordAmount ? parseSpanishAmount(wordAmount[0]) : undefined;
+  const wordValue = wordAmount && (expectsDownPayment || hasDownPaymentContext(normalizedWithoutPhone))
+    ? parseSpanishAmount(wordAmount[0])
+    : undefined;
   const value = numericValue ?? wordValue;
   if (value !== undefined && Number.isFinite(value)) facts.down_payment_declared = value;
   if (/\b(suv|camioneta)\b/.test(normalized)) facts.vehicle_category = "suv";
   else if (/\b(sedan|carro|auto)\b/.test(normalized)) facts.vehicle_category = "sedan";
   else if (/\b(camion|truck|pickup|trabajo)\b/.test(normalized)) facts.vehicle_category = "work truck";
   else if (/\b(van|minivan)\b/.test(normalized)) facts.vehicle_category = "van";
+  const vehicleModel = extractVehicleModelInterest(userMessage, priorFacts, normalizedWithoutPhone);
+  if (vehicleModel) facts.vehicle_model_interest = vehicleModel;
   if (/\bpara m[ií] mismo\b|\bsolo para m[ií]\b|\bpara m[ií]\b(?!\s+familia)/.test(normalized)) facts.vehicle_use = "solo";
   else if (/\bpara la familia|para mi familia|familia\b/.test(normalized)) facts.vehicle_use = "familia";
   if (/\b(no|ninguno|no tengo)\b.*\b(trade|carro|veh[ií]culo)\b|\bno trade\b/.test(normalized)) facts.has_trade_in = false;
@@ -288,6 +301,53 @@ function extractFacts(message: string): SofiaFacts {
     facts.contact_value = phone[0].replace(/\D/g, "");
   }
   return facts;
+}
+
+function stripAdMetadata(message: string): string {
+  return message
+    .replace(/^\s*\*Headline:\*.*(?:\r?\n|$)/gim, "")
+    .replace(/^\s*\*Source URL:\*.*(?:\r?\n|$)/gim, "")
+    .trim();
+}
+
+function extractDownPaymentNumber(message: string, expectsDownPayment: boolean): number | undefined {
+  const matches = [...message.matchAll(/(?:\$|usd\s*)?(\d{1,3}(?:[,.]\d{3})+|\d{3,5})(?:\s*(?:d[oó]lares|usd))?/gi)];
+  const explicit = matches.find((match) => {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const before = message.slice(Math.max(0, start - 32), start);
+    const after = message.slice(end, Math.min(message.length, end + 24));
+    return /(?:\$|\busd\b|d[oó]lares?|enganche|anticipo|inicial|parte de pago|cuento con|tengo|dispongo|ahorrad[oa])\s*$/i.test(before) ||
+      /^\s*(?:d[oó]lares?|\busd\b|de\s+(?:el\s+)?enganche|para\s+(?:el\s+)?enganche)\b/i.test(after);
+  });
+  const selected = explicit ?? (
+    expectsDownPayment && matches.length === 1 &&
+    /^(?:(?:tengo|cuento con|dispongo de|puedo dar|son)\s+)?(?:\$\s*)?\d[\d,.]*(?:\s*(?:d[oó]lares|usd))?[.!?]?$/.test(message.trim())
+      ? matches[0]
+      : undefined
+  );
+  return selected ? Number(selected[1].replace(/[,.]/g, "")) : undefined;
+}
+
+function hasDownPaymentContext(message: string): boolean {
+  return /\$|\busd\b|d[oó]lares?|enganche|anticipo|inicial|parte de pago|cuento con|tengo|dispongo|ahorrad[oa]/i.test(message);
+}
+
+function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, normalized: string): string | undefined {
+  if (priorFacts.vehicle_model_interest) return undefined;
+  const explicit = message.match(/\b(?:quiero|busco|quisiera|necesito|me interesa|estoy buscando|ando buscando)\s+(?:(?:un|una|el|la)\s+)?(.+?)(?:\s+(?:para|con|porque|y)\b.*)?$/i);
+  const candidate = explicit?.[1]?.trim() ?? (
+    !priorFacts.vehicle_category && !priorFacts.vehicle_model_interest &&
+    normalized.split(/\s+/).length <= 5 &&
+    !/\b(?:hola|gracias|informaci[oó]n|ayuda|quiero m[aá]s|buenas|buenos d[ií]as|buenas tardes|buenas noches)\b/i.test(normalized) &&
+    !/^(?:si|sí|no|ok|okay|claro|un carro|un auto|una camioneta|una suv|un sedan)$/i.test(normalized)
+      ? message.trim()
+      : undefined
+  );
+  if (!candidate) return undefined;
+  const cleaned = candidate.replace(/[.!?,;:]+$/, "").replace(/^(?:un|una|el|la)\s+/i, "").trim();
+  if (!cleaned || /^(?:suv|camioneta|sedan|carro|auto|camion|truck|pickup|van|minivan)$/i.test(cleaned) || /^(?:m[aá]s\s+informaci[oó]n|informaci[oó]n|ayuda)$/i.test(cleaned)) return undefined;
+  return cleaned;
 }
 
 const SPANISH_NUMBER_WORDS = [

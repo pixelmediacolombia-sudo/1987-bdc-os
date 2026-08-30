@@ -64,6 +64,48 @@ test("Sofia opens with dealer identity and reacts before asking", () => {
   assert.equal(result.response, "Hola! Te saludamos desde Koons Automotive of Culpeper. Soy Sofía.\nPerfecto, te ayudo con esa SUV. ¿Es para ti o para la familia?");
 });
 
+test("Sofia ignores Facebook promotional metadata when opening a WhatsApp conversation", () => {
+  const result = new SofiaConversationEngine().processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "*Headline:* $200 Seguro + $500 de Bono GRATIS\n*Source URL:* https://fb.me/example\n\n¡Hola! Quiero más información",
+    priorFacts: {},
+    turnCount: 1,
+    isFirstTurn: true,
+    contactChannel: "WhatsApp",
+  });
+
+  assert.equal(result.facts.down_payment_declared, undefined);
+  assert.equal(result.facts.vehicle_model_interest, undefined);
+  assert.match(result.response ?? "", /¿Qué carro estás buscando financiar/i);
+});
+
+test("Sofia records a specific vehicle model and ignores its model year as a down payment", () => {
+  const result = new SofiaConversationEngine().processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "Quiero un Toyota Corolla 2015",
+    priorFacts: {},
+    turnCount: 2,
+    contactChannel: "WhatsApp",
+  });
+
+  assert.equal(result.facts.vehicle_model_interest, "Toyota Corolla 2015");
+  assert.equal(result.facts.down_payment_declared, undefined);
+  assert.match(result.response ?? "", /¿Es para ti o para la familia\?/i);
+});
+
+test("Sofia selects the explicit down payment instead of a vehicle model year", () => {
+  const result = new SofiaConversationEngine().processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "Busco un Toyota Corolla 2015 y cuento con $2,000 de enganche",
+    priorFacts: {},
+    turnCount: 2,
+    contactChannel: "WhatsApp",
+  });
+
+  assert.equal(result.facts.vehicle_model_interest, "Toyota Corolla 2015");
+  assert.equal(result.facts.down_payment_declared, 2000);
+});
+
 test("Sofia reacts to each captured answer before asking the next question", () => {
   const engine = new SofiaConversationEngine();
   const family = engine.processTurn({ dealerName: "Koons", latestMessage: "Es para mi familia", priorFacts: { vehicle_category: "suv" }, turnCount: 2 });
