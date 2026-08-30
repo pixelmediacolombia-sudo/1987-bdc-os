@@ -7,7 +7,7 @@ import type {
   QualificationCompletionPort,
   QualificationSignalRepository,
 } from "@/modules/control/application/ports/qualification-signal.port";
-import { buildMetaCapiPayload } from "@/modules/decisions/domain/meta-capi";
+import { buildMetaCapiPayload, hasMetaCapiAttribution } from "@/modules/decisions/domain/meta-capi";
 import { findMetaCapiEnvConfig, type MetaCapiTenantConfig } from "@/modules/control/infrastructure/meta-capi.config";
 
 type ContactSignalRow = {
@@ -88,6 +88,9 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
     );
     const eventTime = completion.rows[0]?.qualification_completed_at ?? new Date();
     const eventName = this.metaCapiEventName || dealerRow.meta_event_name?.trim() || "LeadSubmitted";
+    const eventStatus = hasMetaCapiAttribution(contactRow.ctwa_clid)
+      ? "pending"
+      : "skipped_no_attribution";
     const payload = buildMetaCapiPayload({
       eventName,
       eventId: input.ledgerEntryId,
@@ -105,10 +108,19 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
 
     await client.query(
       `INSERT INTO public.capi_events
-         (dealer_id, contact_id, ledger_entry_id, event_name, event_id, event_time, payload_sent)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-       ON CONFLICT (dealer_id, event_id) DO NOTHING`,
-      [input.tenantId, contactRow.id, input.ledgerEntryId, eventName, input.ledgerEntryId, eventTime, JSON.stringify(payload)],
+         (dealer_id, contact_id, ledger_entry_id, event_name, event_id, event_time, payload_sent, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+       ON CONFLICT (dealer_id, event_id) DO UPDATE SET
+         status = CASE
+           WHEN capi_events.status IN ('pending', 'skipped_no_attribution') THEN EXCLUDED.status
+           ELSE capi_events.status
+         END,
+         payload_sent = CASE
+           WHEN capi_events.status IN ('pending', 'skipped_no_attribution') THEN EXCLUDED.payload_sent
+           ELSE capi_events.payload_sent
+         END,
+         updated_at = now()`,
+      [input.tenantId, contactRow.id, input.ledgerEntryId, eventName, input.ledgerEntryId, eventTime, JSON.stringify(payload), eventStatus],
     );
     await client.query(
       `INSERT INTO public.ghl_qualification_tag_events

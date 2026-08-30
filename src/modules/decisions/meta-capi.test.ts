@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { findMetaCapiEnvConfig, loadMetaCapiEnvConfig } from "@/modules/control/infrastructure/meta-capi.config";
-import { buildMetaCapiPayload, hashPhone } from "@/modules/decisions/domain/meta-capi";
+import { buildMetaCapiPayload, hasMetaCapiAttribution, hashPhone } from "@/modules/decisions/domain/meta-capi";
 
 test("Ticket 8.5 normalizes common US phone formats to the same hash", () => {
   const variants = ["(571) 555-0134", "+1 571 555 0134", "1-571-555-0134", "15715550134"];
@@ -23,6 +23,12 @@ test("Ticket 8.5 omits empty personal fields and leaves ctwa_clid clear", () => 
   assert.equal("ph" in userData, false);
   assert.equal("em" in userData, false);
   assert.equal(userData.external_id.length, 64);
+});
+
+test("Ticket 8.5 treats only a real ctwa_clid as Meta attribution", () => {
+  assert.equal(hasMetaCapiAttribution(undefined), false);
+  assert.equal(hasMetaCapiAttribution("   "), false);
+  assert.equal(hasMetaCapiAttribution("click-1"), true);
 });
 
 test("Ticket 8.5 loads all seven master-map dataset/token pairs", () => {

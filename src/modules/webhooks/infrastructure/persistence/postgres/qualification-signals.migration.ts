@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS public.capi_events (
 );
 
 ALTER TABLE public.capi_events
+  DROP CONSTRAINT IF EXISTS capi_events_status_check;
+ALTER TABLE public.capi_events
+  ADD CONSTRAINT capi_events_status_check
+  CHECK (status IN ('pending', 'sent', 'failed', 'abandoned', 'skipped_no_attribution'));
+
+ALTER TABLE public.capi_events
   ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   ADD COLUMN IF NOT EXISTS claim_token TEXT,
   ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ,
