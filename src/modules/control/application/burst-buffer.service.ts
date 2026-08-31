@@ -90,7 +90,7 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
     const timerKey = this.timerKey(normalizedTenantId, contactId);
 
     const bufferedMessages = await this.redis.lrange(messageKey, 0, -1);
-    const duplicate = bufferedMessages.some((serialized) => hasExternalId(serialized, message.externalId));
+    const duplicate = bufferedMessages.some((serialized) => hasSameInboundIdentity(serialized, message));
     const count = duplicate
       ? bufferedMessages.length
       : await this.redis.rpush(messageKey, JSON.stringify(storedMessage));
@@ -295,15 +295,15 @@ function mergeMediaContext(messages: BufferedInboundMessage[]): {
   };
 }
 
-function hasExternalId(serialized: string, externalId: string): boolean {
+function hasSameInboundIdentity(serialized: string, message: InboundMessage): boolean {
   try {
     const parsed: unknown = JSON.parse(serialized);
-    return Boolean(
-      parsed &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed) &&
-      (parsed as { externalId?: unknown }).externalId === externalId,
-    );
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const stored = parsed as { externalId?: unknown; providerMessageId?: unknown; semanticHash?: unknown; contactId?: unknown };
+    if (stored.contactId !== message.contactId) return false;
+    return stored.externalId === message.externalId ||
+      Boolean(message.providerMessageId && stored.providerMessageId === message.providerMessageId) ||
+      Boolean(message.semanticHash && stored.semanticHash === message.semanticHash);
   } catch {
     return false;
   }

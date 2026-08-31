@@ -192,6 +192,26 @@ test("reintentar el mismo webhook no duplica el mensaje y repara el timer durabl
   assert.match(logs.join("\n"), /ensuring durable schedule/);
 });
 
+test("webhooks con delivery distinto pero el mismo providerMessageId o semanticHash no generan otro turno", async () => {
+  const redis = new FakeRedis();
+  const mutex = new ContactMutex(redis, 30_000);
+  const orchestrator = new CapturingOrchestrator();
+  const service = new BurstBufferService(redis, mutex, orchestrator, {
+    bufferSeconds: 15,
+    controlTtlSeconds: 90,
+    timerScheduler: () => setTimeout(() => undefined, 60_000).unref(),
+  });
+  const first = { ...createMessage("delivery-1", "Busco una SUV"), providerMessageId: "provider-message-1", semanticHash: "semantic-1" };
+  const duplicateByProvider = { ...first, externalId: "delivery-2" };
+  const duplicateBySemantic = { ...first, externalId: "delivery-3", providerMessageId: "provider-message-3" };
+
+  await service.add(first, "tenant-42");
+  await service.add(duplicateByProvider, "tenant-42");
+  await service.add(duplicateBySemantic, "tenant-42");
+
+  assert.equal(redis.lists.get("buffer:messages:tenant:tenant-42:contact:contact-42")?.length, 1);
+});
+
 test("el mutex solo libera el token que lo adquirió", async () => {
   const redis = new FakeRedis();
   const first = new ContactMutex(redis, 30_000);

@@ -4,6 +4,7 @@ import type { QualificationFlowService } from "@/modules/control/application/qua
 import type { SofiaStateRepositoryPort } from "@/modules/control/application/ports/sofia-state-repository.port";
 import { SofiaConversationEngine } from "@/modules/decisions/domain/sofia-conversation";
 import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
+import type { QualificationHandoffPort } from "@/modules/control/application/ports/qualification-handoff.port";
 
 export type InboundConversationOrchestratorComposition = {
   hydrator: ConversationHydrator;
@@ -14,6 +15,7 @@ export type InboundConversationOrchestratorComposition = {
   sofiaDealerName?: string;
   qualificationLedger?: QuestionLedgerService;
   qualificationSignalEnabled?: boolean;
+  qualificationHandoff?: QualificationHandoffPort;
 };
 
 /** Keeps the outbound qualification path fail-closed behind its feature flag. */
@@ -33,5 +35,7 @@ export function createInboundConversationOrchestrator(
       : undefined,
     input.qualificationLedger,
     input.qualificationSignalEnabled ?? false,
+    undefined,
+    input.qualificationHandoff,
   );
 }

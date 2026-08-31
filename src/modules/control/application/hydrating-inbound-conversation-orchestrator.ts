@@ -8,6 +8,7 @@ import { SofiaConversationEngine, sofiaPolicyFromPolicyPack, type SofiaFacts } f
 import { resolveDealerDisplayName } from "@/modules/decisions/domain/dealer-identity";
 import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
 import { OutboundMessageRejectedError } from "@/modules/control/application/registered-outbound-message-sender";
+import type { QualificationHandoffPort } from "@/modules/control/application/ports/qualification-handoff.port";
 
 export type SofiaConversationLogger = {
   info(message: string): void;
@@ -31,6 +32,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
     private readonly qualificationLedger?: QuestionLedgerService,
     private readonly qualificationSignalEnabled = false,
     private readonly logger: SofiaConversationLogger = defaultLogger,
+    private readonly qualificationHandoff?: QualificationHandoffPort,
   ) {}
 
   async process(input: ConsolidatedInboundConversation): Promise<void> {
@@ -79,6 +81,12 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
         isFirstTurn: !previous,
       });
       const inboundChannel = input.messages.at(-1)?.channel ?? "missing";
+      const handoffEligible =
+        this.qualificationHandoff &&
+        result.leadLevel === "A" &&
+        !result.hardRuleFailure &&
+        result.contactCaptured &&
+        !previous?.facts.handoff_completed;
       const response = result.response?.trim();
       this.logger.info(
         `Sofia decision tenant=${input.tenantId} contact=${input.contactId} channel=${inboundChannel} turn=${(previous?.turnCount ?? 0) + 1} lead=${result.leadLevel} next=${result.nextStep} response=${response ? "yes" : "no"} flags=sofia:${sofiaEnabledForTenant ? "on" : "off"},qualification:${qualificationFlowEnabledForTenant ? "on" : "off"}`,
@@ -117,6 +125,25 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
             channel: outboundChannel,
           });
           this.logger.info(`Sofia outbound sent tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel}`);
+          if (handoffEligible && this.qualificationHandoff) {
+            await this.qualificationHandoff.markQualified({
+              tenantId: input.tenantId,
+              contactId: input.contactId,
+              leadLevel: result.leadLevel === "A" ? "A" : "B",
+              stage: "Calificado",
+              customerMessage: response,
+            });
+            await this.sofia.repository.save(input.tenantId, input.contactId, {
+              turnCount: (previous?.turnCount ?? 0) + 1,
+              facts: { ...result.facts, handoff_completed: true },
+              leadLevel: result.leadLevel,
+              ...(result.facts.push_accepted === undefined ? {} : { pushAccepted: result.facts.push_accepted }),
+              ...(result.facts.has_trade_in === undefined ? {} : { hasTradeIn: result.facts.has_trade_in }),
+              hardRuleFailure: result.hardRuleFailure,
+              ...(result.response ? { lastResponse: result.response } : {}),
+            });
+            this.logger.info(`Sofia qualification handoff recorded tenant=${input.tenantId} contact=${input.contactId} stage=Calificado`);
+          }
         } catch (error) {
           if (error instanceof OutboundMessageRejectedError) {
             this.logger.info(

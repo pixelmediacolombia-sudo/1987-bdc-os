@@ -16,6 +16,7 @@ test("Country Club policy loads the Spanish source as the business authority", a
   assert.equal(policy.sofia?.knowledge?.dealer.address, "8606 Wise Ave, Baltimore, MD 21222");
   assert.equal(policy.sofia?.downPaymentRanges["work truck"]?.min, 2500);
   assert.equal(policy.sofia?.knowledge?.modelCategories.tacoma, "work truck");
+  assert.doesNotMatch(policy.sofia?.knowledge?.requirements.es ?? "", /referencias/i);
 });
 
 test("Country Club greeting anchors the category and asks for the name formally", async () => {
@@ -122,4 +123,47 @@ test("Country Club classification follows A/B/C and does not ask employment leng
   });
   assert.match(result.response ?? "", /comprobante|talones|estados de cuenta/i);
   assert.doesNotMatch(result.response ?? "", /antigüedad|cuánto tiempo lleva trabajando/i);
+});
+
+test("Country Club applies the purchase-intent filter and closes when the customer declines", async () => {
+  const engine = await countryClubEngine();
+  const filter = engine.processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "Solo estoy mirando, todavía no tengo fecha.",
+    priorFacts: { contact_name: "Laura", vehicle_category: "suv", down_payment_declared: 2000, has_trade_in: false, first_time_buyer: true },
+    turnCount: 6,
+    contactChannel: "WhatsApp",
+    language: "es",
+  });
+  assert.equal(filter.facts.purchase_timeline, "none");
+  assert.match(filter.response ?? "", /esta semana|este mes/i);
+
+  const close = engine.processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "No, por ahora no estoy listo.",
+    priorFacts: { ...filter.facts, purchase_timeline: "none" },
+    turnCount: 7,
+    contactChannel: "WhatsApp",
+    language: "es",
+  });
+  assert.equal(close.leadLevel, "C");
+  assert.match(close.response ?? "", /Cualquier cosa aquí estamos/i);
+  assert.equal(close.nextStep, "follow_up");
+});
+
+test("Country Club handles a photo without commenting on price, condition or availability", async () => {
+  const engine = await countryClubEngine();
+  const result = engine.processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "Le mando la foto de mi carro.",
+    priorFacts: { contact_name: "Laura", vehicle_category: "suv", down_payment_declared: 2000, has_trade_in: false, first_time_buyer: true },
+    turnCount: 3,
+    contactChannel: "WhatsApp",
+    language: "es",
+    mediaContext: { imageClassifications: ["vehicle_photo"], imageVehicleCategories: ["suv"] },
+  });
+  assert.match(result.response ?? "", /asesor para que la revise/i);
+  assert.match(result.response ?? "", /¿En cuánto tiempo/i);
+  assert.doesNotMatch(result.response ?? "", /precio|estado|año|disponib/i);
+  assert.equal(result.facts.has_trade_in, false);
 });

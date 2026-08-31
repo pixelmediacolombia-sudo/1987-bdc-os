@@ -6,7 +6,9 @@ import { createPostgresPool } from "@/features/ghl-oauth/infrastructure/persiste
 import { HydratingInboundConversationOrchestrator } from "@/modules/control/application/hydrating-inbound-conversation-orchestrator";
 import type { QualificationFlowService } from "@/modules/control/application/qualification-flow.service";
 import { PostgresSofiaStateRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-sofia-state.repository";
+import { PostgresQualificationSignalRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-qualification-signal.repository";
 import { SofiaConversationEngine } from "@/modules/decisions/domain/sofia-conversation";
+import { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
 import { ConversationHydrator } from "@/modules/memory/application/conversation-hydrator";
 import { PostgresHydrationRepository } from "@/modules/memory/infrastructure/persistence/postgres/postgres-hydration.repository";
 import { LocalPolicyPackProvider } from "@/modules/memory/infrastructure/policies/local-policy-pack.provider";
@@ -61,6 +63,7 @@ test(
   async () => {
     const pool = createPostgresPool(DATABASE_URL as string, false);
     const outbound: CapturedOutbound[] = [];
+    const qualificationHandoffs: Array<{ contactId: string; leadLevel: string; stage: string; customerMessage: string }> = [];
     try {
       await seedLocalCountryClub(pool);
       const hydrator = new ConversationHydrator(
@@ -73,13 +76,16 @@ test(
           return { providerMessageId: `local-provider-message-${outbound.length}` };
         },
       } as unknown as QualificationFlowService;
+      const signalRepository = new PostgresQualificationSignalRepository(pool, [], "LeadSubmitted");
+      const questionLedger = new QuestionLedgerService(pool, signalRepository);
       const orchestrator = new HydratingInboundConversationOrchestrator(
         hydrator,
         fakeLocalOutbound,
         { engine: new SofiaConversationEngine(), repository: new PostgresSofiaStateRepository(pool), dealerName: "Country Club Cars Inc." },
-        undefined,
-        false,
+        questionLedger,
+        true,
         { info: () => undefined, error: (message) => { throw new Error(message); } },
+        { markQualified: async (input) => { qualificationHandoffs.push(input); } },
       );
 
       const spanishResponses = await runCustomerConversation(pool, orchestrator, {
@@ -281,6 +287,19 @@ test(
       assert.ok(outbound.every((message) => message.channel === "WhatsApp"));
       assert.ok(outbound.every((message) => message.tenantId === TENANT_ID));
       assert.ok(outbound.every((message) => message.content.trim().length > 0));
+      assert.deepEqual(qualificationHandoffs.map((handoff) => handoff.stage), ["Calificado", "Calificado", "Calificado"]);
+      assert.deepEqual(qualificationHandoffs.map((handoff) => handoff.contactId).sort(), [CONTACT_TWO_ID, CONTACT_FOUR_ID, CONTACT_SEVEN_ID].sort());
+      const qualificationRows = await pool.query<{ event_name: string; status: string; ctwa_clid: string | null; payload_sent: Record<string, unknown> }>(
+        `SELECT event.event_name, event.status, contact.ctwa_clid, event.payload_sent
+           FROM public.capi_events AS event
+           JOIN public.contacts AS contact ON contact.id = event.contact_id
+          WHERE event.dealer_id = $1
+          ORDER BY contact.ghl_contact_id`,
+        [TENANT_ID],
+      );
+      assert.equal(qualificationRows.rowCount, 3);
+      assert.ok(qualificationRows.rows.every((row) => row.event_name === "LeadSubmitted" && row.status === "pending" && row.ctwa_clid));
+      assert.ok(qualificationRows.rows.every((row) => (row.payload_sent.data as Array<{ user_data: { ctwa_clid?: string } }>)[0]?.user_data.ctwa_clid));
       console.log(`LOCAL_WHATSAPP_SIMULATION ${JSON.stringify({ ids: { tenantId: TENANT_ID, locationId: LOCATION_ID, contacts: [CONTACT_ONE_ID, CONTACT_TWO_ID, CONTACT_THREE_ID, CONTACT_FOUR_ID, CONTACT_FIVE_ID, CONTACT_SIX_ID, CONTACT_SEVEN_ID, CONTACT_EIGHT_ID] }, conversations: [spanishResponses.length, englishResponses.length, unknownModelResponses.length, coSignerResponses.length, typoResponses.length, terseResponses.length, selfEmployedResponses.length, familyTradeInResponses.length], outboundCaptured: outbound.length, stateLevels: stateRows.rows.map((row) => row.lead_level) })}`);
     } finally {
       await pool.end();
@@ -399,24 +418,24 @@ async function seedLocalCountryClub(pool: Pool): Promise<void> {
   await pool.query("DELETE FROM public.tenants WHERE dealer_id = $1", [TENANT_ID]);
   await pool.query(
     `INSERT INTO public.tenants (dealer_id, ghl_location_id, timezone, policy_version, status, sofia_enabled, qualification_flow_enabled, qualification_signal_enabled)
-     VALUES ($1, $2, 'America/Bogota', 'country_club_cars_v8', 'active', true, true, false)`,
+     VALUES ($1, $2, 'America/Bogota', 'country_club_cars_v8', 'active', true, true, true)`,
     [TENANT_ID, LOCATION_ID],
   );
   const contacts = [
-    [CONTACT_ONE_UUID, CONTACT_ONE_ID, "es"],
-    [CONTACT_TWO_UUID, CONTACT_TWO_ID, "en"],
-    [CONTACT_THREE_UUID, CONTACT_THREE_ID, "es"],
-    [CONTACT_FOUR_UUID, CONTACT_FOUR_ID, "es"],
-    [CONTACT_FIVE_UUID, CONTACT_FIVE_ID, "es"],
-    [CONTACT_SIX_UUID, CONTACT_SIX_ID, "es"],
-    [CONTACT_SEVEN_UUID, CONTACT_SEVEN_ID, "es"],
-    [CONTACT_EIGHT_UUID, CONTACT_EIGHT_ID, "es"],
+    [CONTACT_ONE_UUID, CONTACT_ONE_ID, "es", null],
+    [CONTACT_TWO_UUID, CONTACT_TWO_ID, "en", "ctwa-local-002"],
+    [CONTACT_THREE_UUID, CONTACT_THREE_ID, "es", null],
+    [CONTACT_FOUR_UUID, CONTACT_FOUR_ID, "es", "ctwa-local-004"],
+    [CONTACT_FIVE_UUID, CONTACT_FIVE_ID, "es", null],
+    [CONTACT_SIX_UUID, CONTACT_SIX_ID, "es", null],
+    [CONTACT_SEVEN_UUID, CONTACT_SEVEN_ID, "es", "ctwa-local-007"],
+    [CONTACT_EIGHT_UUID, CONTACT_EIGHT_ID, "es", null],
   ] as const;
-  for (const [contactUuid, contactId, language] of contacts) {
+  for (const [contactUuid, contactId, language, ctwaClid] of contacts) {
     await pool.query(
-      `INSERT INTO public.contacts (id, tenant_id, ghl_contact_id, preferred_language, consent_state)
-       VALUES ($1::uuid, $2::uuid, $3::text, $4::text, 'granted')`,
-      [contactUuid, TENANT_ID, contactId, language],
+      `INSERT INTO public.contacts (id, tenant_id, ghl_contact_id, ctwa_clid, preferred_language, consent_state)
+       VALUES ($1::uuid, $2::uuid, $3::text, $4::text, $5::text, 'granted')`,
+      [contactUuid, TENANT_ID, contactId, ctwaClid, language],
     );
   }
   const conversations = [

@@ -147,6 +147,10 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
     delete extractedFacts.vehicle_model_interest;
   }
   const facts = mergeFacts(input.priorFacts, factsFromMedia(input.mediaContext), extractedFacts);
+  if (input.priorFacts.has_trade_in === false) {
+    facts.has_trade_in = false;
+    delete facts.trade_in_description;
+  }
   applyCountryClubCategoryFromModel(facts, knowledge);
   const contactChannel = normalizeContactChannel(input.contactChannel);
   if (contactChannel) facts.contact_channel = contactChannel;
@@ -166,6 +170,13 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
 
   if (facts.handoff_completed && !directAnswer) {
     return makeResult(facts, leadLevel, [countryClubSafeExit(knowledge, language)], "follow_up", contactCaptured, hardRuleFailure);
+  }
+
+  const mediaResponse = countryClubMediaResponse(input, facts, language);
+  if (mediaResponse) {
+    const opening = firstTurn ? countryClubOpening(facts, knowledge, policy, language, directAnswer) : [];
+    const question = countryClubNextQuestion(facts, input.contactChannel, policy, language);
+    return makeResult(facts, leadLevel, [...opening, mediaResponse, question].filter(Boolean) as string[], "ask", contactCaptured, hardRuleFailure);
   }
 
   if (firstTurn) {
@@ -324,6 +335,24 @@ function countryClubQualifiedHandoff(knowledge: SofiaKnowledge, language: "es" |
 
 function countryClubThanks(language: "es" | "en"): string {
   return language === "en" ? "Thank you for the information." : "Gracias por la información.";
+}
+
+function countryClubMediaResponse(input: SofiaTurnInput, _facts: SofiaFacts, language: "es" | "en"): string | undefined {
+  const classifications = input.mediaContext?.imageClassifications ?? [];
+  if (classifications.length === 0) return undefined;
+  if (classifications.includes("vehicle_photo")) {
+    return language === "en"
+      ? "Thank you. I will pass the photo to the advisor to review."
+      : "Gracias. Se la paso al asesor para que la revise.";
+  }
+  if (classifications.includes("identity_document") || classifications.includes("income_proof_document")) {
+    return language === "en"
+      ? "Thank you. I will pass it to the advisor to review."
+      : "Gracias. Se la paso al asesor para que la revise.";
+  }
+  return language === "en"
+    ? "Thank you for sharing it. I will have the advisor review it."
+    : "Gracias por compartirla. Se la paso al asesor para que la revise.";
 }
 
 function dedupeMessages(messages: string[]): string[] {
