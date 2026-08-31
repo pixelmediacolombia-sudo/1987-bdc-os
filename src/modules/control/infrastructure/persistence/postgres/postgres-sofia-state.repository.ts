@@ -99,6 +99,7 @@ export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
 }
 
 const PERSISTED_FACT_KEYS = new Set([
+  "contact_name",
   "vehicle_category",
   "vehicle_model_interest",
   "vehicle_use",
@@ -116,5 +117,8 @@ const PERSISTED_FACT_KEYS = new Set([
   "has_income_proof",
   "has_id_document",
   "has_income_proof_document",
+  "purchase_timeline",
+  "has_co_signer",
   "visit_intent",
+  "handoff_completed",
 ]);

@@ -8,6 +8,7 @@ const POLICY_FILES: Record<string, string> = {
   "v0.1": "policy_v0.1.json",
   v1: "policy_v1.json",
   koons_policy_v1: "koons_policy_v1.json",
+  country_club_cars_v8: "country_club_cars_v8.json",
 };
 
 export class LocalPolicyPackProvider implements PolicyPackProviderPort {

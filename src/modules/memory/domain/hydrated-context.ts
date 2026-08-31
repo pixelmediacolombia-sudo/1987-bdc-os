@@ -1,5 +1,6 @@
 export type MessageDirection = "inbound" | "outbound";
 export type MessageSenderType = "agent" | "client" | "staff";
+import type { SofiaPolicy } from "@/modules/decisions/domain/sofia-conversation";
 
 export type TenantFeatureFlags = {
   sofiaEnabled: boolean;
@@ -29,6 +30,7 @@ export type PolicyPack = {
       text: string;
     };
   };
+  sofia?: SofiaPolicy;
   [key: string]: unknown;
 };
 

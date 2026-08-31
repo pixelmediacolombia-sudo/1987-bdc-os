@@ -4,7 +4,7 @@ import type { ConsolidatedInboundConversation, InboundConversationOrchestratorPo
 import { QualificationFlowService } from "@/modules/control/application/qualification-flow.service";
 import type { SofiaStateRepositoryPort } from "@/modules/control/application/ports/sofia-state-repository.port";
 import type { OutboundMessageChannel } from "@/modules/control/application/ports/outbound-message-sender.port";
-import { SofiaConversationEngine, type SofiaFacts } from "@/modules/decisions/domain/sofia-conversation";
+import { SofiaConversationEngine, sofiaPolicyFromPolicyPack, type SofiaFacts } from "@/modules/decisions/domain/sofia-conversation";
 import { resolveDealerDisplayName } from "@/modules/decisions/domain/dealer-identity";
 import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
 import { OutboundMessageRejectedError } from "@/modules/control/application/registered-outbound-message-sender";
@@ -64,10 +64,12 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
         return;
       }
       const previous = await this.sofia.repository.load(input.tenantId, input.contactId);
-      const result = this.sofia.engine.processTurn({
+      const engine = this.sofia.engine.withPolicy(sofiaPolicyFromPolicyPack(context.tenant.policies));
+      const result = engine.processTurn({
         dealerName,
         latestMessage: input.consolidatedText,
         contactChannel: input.messages.at(-1)?.channel,
+        language: context.contact.preferredLanguage,
         priorFacts: {
           ...factsFromContext(context.activeFacts),
           ...(previous?.facts ?? {}),
@@ -183,7 +185,7 @@ function factsFromContext(activeFacts: Record<string, string>): SofiaFacts {
     if (key === "down_payment_declared" || key === "down_payment_accepted" || key === "down_payment_push_target" || key === "employment_months") {
       const parsed = Number(value);
       if (Number.isFinite(parsed)) facts[key] = parsed;
-    } else if (key === "push_accepted" || key === "has_trade_in" || key === "first_time_buyer" || key === "has_income_proof" || key === "has_id_document" || key === "has_income_proof_document" || key === "trade_in_financed" || key === "visit_intent") {
+    } else if (key === "push_accepted" || key === "has_trade_in" || key === "first_time_buyer" || key === "has_income_proof" || key === "has_id_document" || key === "has_income_proof_document" || key === "trade_in_financed" || key === "has_co_signer" || key === "visit_intent" || key === "handoff_completed") {
       if (value === "true" || value === "false") facts[key] = value === "true";
     } else if (key in factsFromContextKeys()) {
       facts[key as keyof SofiaFacts] = value as never;
@@ -194,12 +196,16 @@ function factsFromContext(activeFacts: Record<string, string>): SofiaFacts {
 
 function factsFromContextKeys(): Record<string, true> {
   return {
+    contact_name: true,
     vehicle_category: true,
     vehicle_model_interest: true,
     vehicle_use: true,
     trade_in_description: true,
     contact_channel: true,
     contact_value: true,
+    purchase_timeline: true,
+    has_co_signer: true,
+    handoff_completed: true,
     trade_in_financed: true,
   };
 }

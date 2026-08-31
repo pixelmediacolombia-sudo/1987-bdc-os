@@ -1,0 +1,53 @@
+{
+  "version": "country_club_cars_v8",
+  "downPayment": { "min": null, "max": null, "currency": "USD" },
+  "quietHours": { "enabled": false, "start": null, "end": null },
+  "humanHandoff": { "enabled": true, "triggers": ["stop_ai", "consent_denied", "customer_requests_human"] },
+  "sofia": {
+    "downPaymentRanges": {
+      "sedan": { "min": 1500 },
+      "suv": { "min": 2000 },
+      "van": { "min": 2000 },
+      "work truck": { "min": 2500 },
+      "default": { "min": 1500 }
+    },
+    "knowledge": {
+      "id": "country_club_cars",
+      "formalAddress": true,
+      "dealer": {
+      "name": "Country Club Cars Inc.",
+      "address": "8606 Wise Ave, Baltimore, MD 21222",
+      "hours": {
+        "es": "lunes a sábado de 9:00 am a 7:00 pm; domingo cerrado",
+        "en": "Monday to Saturday, 9:00 am to 7:00 pm; Sunday closed"
+      }
+      },
+    "modelCategories": {
+      "silverado": "work truck", "f-150": "work truck", "ram 1500": "work truck", "tundra": "work truck", "tacoma": "work truck", "ranger": "work truck", "colorado": "work truck", "frontier": "work truck", "sierra": "work truck", "titan": "work truck", "ridgeline": "work truck", "canyon": "work truck", "maverick": "work truck", "santa cruz": "work truck",
+      "tahoe": "suv", "suburban": "suv", "explorer": "suv", "expedition": "suv", "highlander": "suv", "4runner": "suv", "pilot": "suv", "cr-v": "suv", "crv": "suv", "rav4": "suv", "rogue": "suv", "equinox": "suv", "traverse": "suv", "escape": "suv", "edge": "suv", "pathfinder": "suv", "grand cherokee": "suv", "wrangler": "suv", "durango": "suv", "palisade": "suv", "telluride": "suv", "santa fe": "suv", "tucson": "suv", "sportage": "suv", "sorento": "suv",
+      "odyssey": "van", "sienna": "van", "caravan": "van", "grand caravan": "van", "pacifica": "van", "quest": "van",
+      "civic": "sedan", "accord": "sedan", "corolla": "sedan", "camry": "sedan", "altima": "sedan", "sentra": "sedan", "elantra": "sedan", "sonata": "sedan", "jetta": "sedan", "malibu": "sedan", "impala": "sedan", "fusion": "sedan", "optima": "sedan", "forte": "sedan", "versa": "sedan", "mazda3": "sedan", "mazda6": "sedan"
+    },
+    "requirements": {
+      "es": "Le cuento: se necesita una identificación - licencia, ITIN, pasaporte o social - y comprobante de ingresos, como talones de pago, carta del empleador o estados de cuenta bancarios. También se requiere comprobante de domicilio y el enganche depende de la categoría.",
+      "en": "Here is what you need: an ID - license, ITIN, passport, or social security number - and proof of income, such as pay stubs, an employer letter, or bank statements. You also need proof of address, and the down payment depends on the vehicle category."
+    },
+    "safeExit": {
+      "es": "Eso lo confirmo con el asesor. Mientras tanto, seguimos con la información pendiente.",
+      "en": "I will confirm that with the advisor. In the meantime, we can continue with the pending information."
+    },
+    "noTimeline": {
+      "es": "Ahorita nuestra prioridad es atender a las personas que buscan un carro esta semana o este mes. ¿Le interesaría venir en ese tiempo?",
+      "en": "Right now we are prioritizing customers looking to get into a vehicle this week or this month. Would that work for you?"
+    },
+    "qualifiedHandoff": {
+      "es": "Perfecto, {name}. Ya tengo todo lo necesario. Le paso su información a uno de nuestros asesores para que se comunique con usted y coordinen los detalles.",
+      "en": "Perfect, {name}. I have everything I need. I am passing your information to one of our advisors so they can reach out and go over the details with you."
+    },
+    "notQualifiedClose": {
+      "es": "Con mucho gusto. Cualquier cosa aquí estamos, que tenga buen día.",
+      "en": "Absolutely. We are here whenever you are ready - have a great day."
+    }
+    }
+  }
+}
