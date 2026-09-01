@@ -818,10 +818,6 @@ function hasVehicleInterestCue(message: string): boolean {
   return /\b(?:quiero|busco|quisiera|necesito|me interesa|estoy buscando|ando buscando|looking for|interested in)\b/i.test(message);
 }
 
-function isNameOnlyMessage(message: string): boolean {
-  return /^(?:soy|me llamo|mi nombre es|my name is|i am(?!\s+(?:interested|looking)\b))\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)?[.!?]?\s*$/i.test(message.trim());
-}
-
 const SPANISH_NUMBER_WORDS = [
   "un", "uno", "una", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve",
   "diez", "once", "doce", "trece", "catorce", "quince", "dieciseis", "diecisiete", "dieciocho", "diecinueve",
