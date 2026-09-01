@@ -79,6 +79,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
         mediaContext: input.mediaContext,
         turnCount: (previous?.turnCount ?? 0) + 1,
         isFirstTurn: !previous,
+        lastResponse: previous?.lastResponse,
       });
       const inboundChannel = input.messages.at(-1)?.channel ?? "missing";
       const handoffEligible =

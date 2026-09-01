@@ -5,7 +5,7 @@ import { LocalPolicyPackProvider } from "@/modules/memory/infrastructure/policie
 
 const policyPromise = new LocalPolicyPackProvider().load("country_club_cars_v8");
 
-async function run(message: string, priorFacts: SofiaFacts = {}, options: { turnCount?: number; language?: string; pendingQuestion?: "has_trade_in" | "trade_in_financed" | "has_income_proof" | "first_time_buyer" | "purchase_timeline"; isFirstTurn?: boolean; isAdvertisementMetadata?: boolean; mediaContext?: SofiaFacts extends never ? never : Parameters<SofiaConversationEngine["processTurn"]>[0]["mediaContext"] } = {}) {
+async function run(message: string, priorFacts: SofiaFacts = {}, options: { turnCount?: number; language?: string; pendingQuestion?: "has_trade_in" | "trade_in_financed" | "has_income_proof" | "first_time_buyer" | "purchase_timeline"; lastResponse?: string; isFirstTurn?: boolean; isAdvertisementMetadata?: boolean; mediaContext?: SofiaFacts extends never ? never : Parameters<SofiaConversationEngine["processTurn"]>[0]["mediaContext"] } = {}) {
   const policy = await policyPromise;
   assert.ok(policy.sofia);
   return new SofiaConversationEngine(policy.sofia).processTurn({
@@ -16,6 +16,7 @@ async function run(message: string, priorFacts: SofiaFacts = {}, options: { turn
     language: options.language ?? "es",
     contactChannel: "WhatsApp",
     pendingQuestion: options.pendingQuestion,
+    lastResponse: options.lastResponse,
     isFirstTurn: options.isFirstTurn,
     isAdvertisementMetadata: options.isAdvertisementMetadata,
     mediaContext: options.mediaContext,
@@ -96,3 +97,41 @@ caseTest("I-02", async () => assert.doesNotMatch((await run("Juan", { vehicle_ca
 caseTest("I-03", async () => { const result = await run("¿Qué requisitos piden?", { ...withVehicle, down_payment_declared: 1000 }); assert.equal(result.facts.down_payment_declared, 1000); assert.match(result.response ?? "", /identificación|comprobante/i); });
 caseTest("I-04", async () => assert.equal((await run("mejor $2,000", { ...withVehicle, down_payment_declared: 1000 })).facts.down_payment_declared, 2000));
 caseTest("I-05", async () => { let prior: SofiaFacts = { ...withVehicle }; const responses: string[] = []; for (const message of ["Tengo $2,000", "Tengo un Civic para dar", "Nunca he financiado"]) { const result = await run(message, prior); prior = result.facts; responses.push(result.response ?? ""); } assert.equal(new Set(responses).size, 3); });
+
+caseTest("R-01", async () => {
+  const result = await run("Con Andrés como está!", { vehicle_category: "sedan" }, { lastResponse: "¿Con quién tengo el gusto?" });
+  assert.equal(result.facts.contact_name, "Andrés");
+  assert.doesNotMatch(result.response ?? "", /Con Andrés/);
+  assert.doesNotMatch(result.response ?? "", /con quién tengo el gusto/i);
+});
+caseTest("R-02", async () => {
+  const result = await run("Con ???", { vehicle_category: "sedan" }, { lastResponse: "¿Con quién tengo el gusto?" });
+  assert.equal(result.facts.contact_name, undefined);
+  assert.match(result.response ?? "", /confirma su nombre/i);
+  assert.notEqual(result.response, "¿Con quién tengo el gusto?");
+});
+caseTest("R-03", async () => {
+  const previous = "¿Con quién tengo el gusto?";
+  const result = await run("No", { vehicle_category: "sedan" }, { lastResponse: previous });
+  assert.notEqual(result.response, previous);
+  assert.match(result.response ?? "", /nombre/i);
+});
+caseTest("R-04", async () => {
+  const result = await run("Quiero financiar un auto 🚗", {}, { isFirstTurn: true, turnCount: 1 });
+  assert.equal(result.facts.vehicle_category, undefined);
+  assert.equal(result.facts.vehicle_model_interest, undefined);
+  assert.doesNotMatch(result.response ?? "", /\$1,?500|Quiero financiar un auto/i);
+  assert.match(result.response ?? "", /con quién|nombre/i);
+});
+caseTest("R-05", async () => {
+  const result = await run("Enganche de qué?", { contact_name: "Andrés", vehicle_category: "sedan", vehicle_model_interest: "financiar un auto" });
+  assert.equal(result.facts.vehicle_category, undefined);
+  assert.equal(result.facts.vehicle_model_interest, undefined);
+  assert.match(result.response ?? "", /toda la razón|qué tipo de vehículo/i);
+});
+caseTest("R-06", async () => {
+  const result = await run("Si no te he dicho que auto es", { contact_name: "Andrés", vehicle_category: "work truck", vehicle_model_interest: "Tacoma" });
+  assert.equal(result.facts.vehicle_category, undefined);
+  assert.equal(result.facts.vehicle_model_interest, undefined);
+  assert.match(result.response ?? "", /disculpe|carro.*SUV.*troca/i);
+});
