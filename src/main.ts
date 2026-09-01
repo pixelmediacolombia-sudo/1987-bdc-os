@@ -45,6 +45,7 @@ import { GhlApiClient } from "@/features/ghl-oauth/infrastructure/ghl/ghl-api.cl
 import { GhlQualificationTagProvider } from "@/features/ghl-oauth/infrastructure/ghl/ghl-qualification-tag.provider";
 import { PostgresSofiaStateRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-sofia-state.repository";
 import { ensureTenantFeatureFlags } from "@/modules/control/infrastructure/persistence/postgres/tenant-flags.migration";
+import { ensureCountryClubPolicy } from "@/modules/control/infrastructure/persistence/postgres/country-club-policy.migration";
 import { LocalMediaUnderstandingAdapter } from "@/modules/media/infrastructure/local-media-understanding.adapter";
 import { GhlInboundMediaResolver } from "@/modules/media/infrastructure/ghl-inbound-media-resolver";
 
@@ -56,6 +57,8 @@ async function start(): Promise<void> {
   await ensureWebhookTables(pool);
   await ensureTenantFeatureFlags(pool);
   await ensureMemoryTables(pool);
+  const countryClubActivated = await ensureCountryClubPolicy(pool);
+  console.info(`[CountryClub] policy_version=country_club_cars_v8 activated=${countryClubActivated}`);
   await ensureDecisionLogsTable(pool);
   await ensureQualificationSignalTables(pool);
 

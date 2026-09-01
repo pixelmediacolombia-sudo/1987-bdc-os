@@ -209,7 +209,7 @@ function toOutboundChannel(channel: string | undefined): OutboundMessageChannel 
 function factsFromContext(activeFacts: Record<string, string>): SofiaFacts {
   const facts: SofiaFacts = {};
   for (const [key, value] of Object.entries(activeFacts)) {
-    if (key === "down_payment_declared" || key === "down_payment_accepted" || key === "down_payment_push_target" || key === "employment_months") {
+    if (key === "down_payment_declared" || key === "down_payment_accepted" || key === "down_payment_push_target" || key === "employment_months" || key === "vehicle_year" || key === "trade_in_year") {
       const parsed = Number(value);
       if (Number.isFinite(parsed)) facts[key] = parsed;
     } else if (key === "push_accepted" || key === "has_trade_in" || key === "first_time_buyer" || key === "has_income_proof" || key === "has_id_document" || key === "has_income_proof_document" || key === "trade_in_financed" || key === "has_co_signer" || key === "visit_intent" || key === "handoff_completed") {
@@ -226,6 +226,7 @@ function factsFromContextKeys(): Record<string, true> {
     contact_name: true,
     vehicle_category: true,
     vehicle_model_interest: true,
+    trade_in_model: true,
     vehicle_use: true,
     trade_in_description: true,
     contact_channel: true,

@@ -6,6 +6,7 @@ import { ensureMemoryTables } from "@/modules/memory/infrastructure/persistence/
 import { ensureDecisionLogsTable } from "@/modules/decisions/infrastructure/persistence/postgres/decision-logs.migration";
 import { ensureQualificationSignalTables } from "@/modules/webhooks/infrastructure/persistence/postgres/qualification-signals.migration";
 import { ensureTenantFeatureFlags } from "@/modules/control/infrastructure/persistence/postgres/tenant-flags.migration";
+import { ensureCountryClubPolicy } from "@/modules/control/infrastructure/persistence/postgres/country-club-policy.migration";
 
 async function main(): Promise<void> {
   const config = loadAppConfig();
@@ -17,7 +18,8 @@ async function main(): Promise<void> {
     await ensureMemoryTables(pool);
     await ensureDecisionLogsTable(pool);
     await ensureQualificationSignalTables(pool);
-    console.log("Database migration completed: integrations, webhooks, tenant flags, facts, objectives, Sofia state, and qualification signals are ready.");
+    const countryClubActivated = await ensureCountryClubPolicy(pool);
+    console.log(`Database migration completed: integrations, webhooks, tenant flags, facts, objectives, Sofia state, qualification signals, and Country Club policy are ready (country_club_activated=${countryClubActivated}).`);
   } finally {
     await pool.end();
   }
