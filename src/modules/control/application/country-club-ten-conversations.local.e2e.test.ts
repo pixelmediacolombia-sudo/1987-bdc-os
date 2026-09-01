@@ -96,7 +96,7 @@ async function seed(pool: Pool): Promise<void> {
   await pool.query("DELETE FROM public.tenants WHERE dealer_id = $1", [TENANT_ID]);
   await pool.query(
     `INSERT INTO public.tenants (dealer_id, ghl_location_id, timezone, policy_version, status, sofia_enabled, qualification_flow_enabled, qualification_signal_enabled)
-     VALUES ($1::uuid, $2, 'America/Bogota', 'default_v1', 'active', true, true, false)`,
+     VALUES ($1::uuid, $2, 'America/Bogota', 'country_club_cars_v8', 'active', true, true, false)`,
     [TENANT_ID, LOCATION_ID],
   );
   for (const [index, scenario] of scenarios.entries()) {
