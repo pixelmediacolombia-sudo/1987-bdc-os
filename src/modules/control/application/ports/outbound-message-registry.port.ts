@@ -27,5 +27,6 @@ export interface OutboundMessageRegistryPort {
     contactId: string;
     semanticHash?: string;
     providerMessageId?: string;
+    content?: string;
   }): Promise<boolean>;
 }

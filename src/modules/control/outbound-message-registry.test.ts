@@ -135,7 +135,27 @@ test("wasIssuedBy1987 prioritizes sent provider ids and only accepts live reserv
   assert.ok(query);
   assert.match(query.sql, /provider_message_id = \$3 AND status = 'sent'/);
   assert.match(query.sql, /semantic_hash = \$4 AND status = 'reserved' AND expires_at > now\(\)/);
-  assert.deepEqual(query.values, ["tenant-a", "contact-a", "provider-1", "hash-a"]);
+  assert.deepEqual(query.values, ["tenant-a", "contact-a", "provider-1", "hash-a", null]);
+});
+
+test("wasIssuedBy1987 recognizes an active reservation by normalized content before provider id attachment", async () => {
+  const client = new FakeClient();
+  client.resultCount = 1;
+  client.resultRows = [{}];
+  const registry = new PostgresOutboundMessageRegistry(createPool(client));
+
+  assert.equal(await registry.wasIssuedBy1987({
+    tenantId: "tenant-a",
+    contactId: "contact-a",
+    semanticHash: "webhook-format-hash",
+    content: "Perfecto, Andrés.\n¿Qué vehículo está buscando financiar?",
+  }), true);
+
+  const query = client.calls.find((call) => call.sql.includes("FROM public.outbound_message_registry") && call.sql.includes("SELECT 1"));
+  assert.ok(query);
+  assert.match(query.sql, /status = 'reserved'/);
+  assert.match(query.sql, /regexp_replace\(btrim\(lower\(content\)\)/);
+  assert.deepEqual(query.values, ["tenant-a", "contact-a", null, "webhook-format-hash", "Perfecto, Andrés.\n¿Qué vehículo está buscando financiar?"]);
 });
 
 test("provider association requires the active attempt and failed reservations become terminal", async () => {

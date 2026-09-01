@@ -59,6 +59,7 @@ export class PostgresOutboundMessageRegistry implements OutboundMessageRegistryP
     contactId: string;
     semanticHash?: string;
     providerMessageId?: string;
+    content?: string;
   }): Promise<boolean> {
     return this.withTenantContext(input.tenantId, async (client) => {
       const result = await client.query(
@@ -70,9 +71,17 @@ export class PostgresOutboundMessageRegistry implements OutboundMessageRegistryP
               ($3::text IS NOT NULL AND provider_message_id = $3 AND status = 'sent')
               OR
               ($4::text IS NOT NULL AND semantic_hash = $4 AND status = 'reserved' AND expires_at > now())
+              OR
+              (
+                $5::text IS NOT NULL
+                AND status = 'reserved'
+                AND expires_at > now()
+                AND regexp_replace(btrim(lower(content)), '[[:space:]]+', ' ', 'g')
+                  = regexp_replace(btrim(lower($5::text)), '[[:space:]]+', ' ', 'g')
+              )
             )
           LIMIT 1`,
-        [input.tenantId, input.contactId, input.providerMessageId ?? null, input.semanticHash ?? null],
+        [input.tenantId, input.contactId, input.providerMessageId ?? null, input.semanticHash ?? null, input.content ?? null],
       );
       return result.rowCount === 1;
     });

@@ -343,6 +343,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
         contactId: interruption.contactId,
         semanticHash: interruption.staffMessage.semanticHash,
         providerMessageId: interruption.staffMessage.providerMessageId ?? interruption.staffMessage.externalId,
+        content: interruption.staffMessage.content,
       }),
     );
     const contact = await client.query<ContactRow>(
