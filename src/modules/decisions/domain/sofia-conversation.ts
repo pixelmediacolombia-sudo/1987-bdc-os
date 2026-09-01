@@ -176,7 +176,7 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
   const hardRuleFailure = hasHardRuleFailure(facts);
   const leadLevel = classifyLead(facts, policy);
   const directAnswer = countryClubAnswer(input.latestMessage, facts, policy, knowledge, language);
-  const acknowledgement = countryClubAcknowledgement(extractedFacts, facts, language);
+  const acknowledgement = countryClubAcknowledgement(extractedFacts, facts, language, input.priorFacts);
   const firstTurn = input.isFirstTurn || (input.turnCount === 1 && Object.keys(input.priorFacts).length === 0);
 
   if (input.mediaContext?.audioTranscriptionFailed) {
@@ -189,7 +189,14 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
     return makeResult(facts, "C", [knowledge.notQualifiedClose[language]], "follow_up", contactCaptured, false);
   }
   if (facts.purchase_timeline === "none" && input.priorFacts.purchase_timeline === undefined) {
-    return makeResult(facts, leadLevel, [countryClubNoTimelineQuestion(policy, language)], "ask", contactCaptured, false);
+    return makeResult(
+      facts,
+      leadLevel,
+      [language === "en" ? "I understand, you are still looking." : "Entiendo, todavía está revisando opciones.", countryClubNoTimelineQuestion(policy, language)],
+      "ask",
+      contactCaptured,
+      false,
+    );
   }
 
   if (facts.handoff_completed && !directAnswer) {
@@ -229,10 +236,12 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
   if (question) {
     const belowFloor = countryClubBelowFloor(facts, policy);
     const firstPush = belowFloor && facts.down_payment_push_target !== countryClubMinimum(facts, policy);
+    const categoryJustCaptured = Boolean(extractedFacts.vehicle_category && !input.priorFacts.vehicle_category);
     if (firstPush) facts.down_payment_push_target = countryClubMinimum(facts, policy);
     const messages = [
       directAnswer,
       acknowledgement,
+      categoryJustCaptured ? countryClubCategoryFloorMessage(facts, policy, language) : undefined,
       firstPush ? countryClubBelowFloorMessage(facts, policy, language) : undefined,
       question,
     ].filter(Boolean) as string[];
@@ -341,15 +350,31 @@ function isCountryClubVehicleCorrection(message: string): boolean {
     /no (?:te )?dije (?:qu[eé] )?(?:auto|carro|veh[ií]culo|suv|troca)/.test(normalized);
 }
 
-function countryClubAcknowledgement(newFacts: SofiaFacts, facts: SofiaFacts, language: "es" | "en"): string | undefined {
-  if (newFacts.contact_name) return language === "en" ? `Nice to meet you, ${facts.contact_name}.` : `Mucho gusto, ${facts.contact_name}.`;
+function countryClubAcknowledgement(newFacts: SofiaFacts, facts: SofiaFacts, language: "es" | "en", priorFacts: SofiaFacts): string {
+  if (newFacts.contact_name) {
+    return priorFacts.contact_name === facts.contact_name
+      ? language === "en" ? `Thanks, ${facts.contact_name}.` : `Claro, ${facts.contact_name}.`
+      : language === "en" ? `Nice to meet you, ${facts.contact_name}.` : `Mucho gusto, ${facts.contact_name}.`;
+  }
   if (newFacts.down_payment_declared !== undefined) return language === "en" ? `Thank you. I have noted $${newFacts.down_payment_declared.toLocaleString("en-US")} for the down payment.` : `Gracias. Anoto $${newFacts.down_payment_declared.toLocaleString("en-US")} para el enganche.`;
+  if (newFacts.vehicle_model_interest || newFacts.vehicle_category) {
+    const vehicle = newFacts.vehicle_model_interest ?? displayCountryClubCategory(facts.vehicle_category ?? "vehicle", language);
+    return language === "en" ? `Got it, you are looking at ${vehicle}.` : `Perfecto, entonces busca ${vehicle}.`;
+  }
   if (newFacts.has_trade_in === false) return language === "en" ? "Understood. We will continue without a trade-in." : "Entendido. Seguimos sin vehículo de parte de pago.";
   if (newFacts.has_trade_in === true) return language === "en" ? "Thank you. That trade-in can help with the down payment." : "Gracias. Ese vehículo puede ayudar con el enganche.";
   if (newFacts.first_time_buyer !== undefined) return language === "en" ? "Thank you for sharing that." : "Gracias por compartirlo.";
   if (newFacts.purchase_timeline) return language === "en" ? "Perfect, thank you." : "Perfecto, gracias.";
   if (newFacts.has_income_proof === true || newFacts.has_income_proof_document === true) return language === "en" ? "Perfect, thank you." : "Perfecto, gracias.";
-  return undefined;
+  return language === "en" ? "Got it, thanks." : "Entiendo, gracias.";
+}
+
+function countryClubCategoryFloorMessage(facts: SofiaFacts, policy: SofiaPolicy, language: "es" | "en"): string {
+  const minimum = countryClubMinimum(facts, policy).toLocaleString("en-US");
+  const category = displayCountryClubCategory(facts.vehicle_category ?? "vehicle", language);
+  return language === "en"
+    ? `For ${category}, we usually start at $${minimum} down.`
+    : `Para ${category}, normalmente trabajamos desde $${minimum} de enganche.`;
 }
 
 function countryClubTradeInQuestion(facts: SofiaFacts, policy: SofiaPolicy, language: "es" | "en"): string {
@@ -630,12 +655,11 @@ function extractFacts(message: string, priorFacts: SofiaFacts, countryClub = fal
   const value = numericValue ?? shorthandValue ?? wordValue;
   const ambiguousAmount = /\bentre\b[\s\S]*\b(?:y|o)\b[\s\S]*\b(?:mil|\d)\b/i.test(normalizedWithoutPhone);
   if (value !== undefined && Number.isFinite(value) && value >= 100 && value <= 50_000 && !ambiguousAmount) facts.down_payment_declared = value;
-  if (!priorFacts.vehicle_category) {
-    if (/\b(suv|camioneta)\b/.test(normalized)) facts.vehicle_category = "suv";
-    else if (/\bsedan\b/.test(normalized)) facts.vehicle_category = "sedan";
-    else if (/\b(troca|camion|truck|pickup|trabajo)\b/.test(normalized)) facts.vehicle_category = "work truck";
-    else if (/\b(van|minivan)\b/.test(normalized)) facts.vehicle_category = "van";
-    else if (/\bcarrit[oa]\b/.test(normalized)) facts.vehicle_category = "sedan";
+  if (!priorFacts.vehicle_category && !isGenericVehicleFinancingCall(normalized)) {
+    if (/\b(?:suv|suvcita|camioneta\s+(?:grande|familiar))\b/.test(normalized)) facts.vehicle_category = "suv";
+    else if (/\b(?:sedan|carro|carrito|cochecito|auto)\b/.test(normalized)) facts.vehicle_category = "sedan";
+    else if (/\b(?:troca|troka|trocka|trokita|troque|camioneta\s+de\s+trabajo|camion|truck|pickup|trabajo)\b/.test(normalized)) facts.vehicle_category = "work truck";
+    else if (/\b(?:van|vanesita|minivan)\b/.test(normalized)) facts.vehicle_category = "van";
     if (/\bno s[eé] si\b[\s\S]*\b(?:carro|auto|suv|troca)\b/.test(normalized)) delete facts.vehicle_category;
   }
   if (countryClub && isStandaloneVehicleYear(normalizedWithoutPhone) && priorFacts.vehicle_model_interest) facts.vehicle_year = Number(normalizedWithoutPhone);
@@ -753,7 +777,8 @@ function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, no
   const candidate = explicit?.[1]?.trim() ?? (
     !priorFacts.vehicle_category && !priorFacts.vehicle_model_interest &&
     normalized.split(/\s+/).length <= 5 &&
-    !/\b(?:hola|gracias|informaci[oó]n|ayuda|quiero(?:\s+m[aá]s)?|buenas|buenos d[ií]as|buenas tardes|buenas noches)\b/i.test(normalized) &&
+    !/[¿?]/.test(message) &&
+    !/\b(?:hola|gracias|informaci[oó]n|ayuda|quiero(?:\s+m[aá]s)?|busco|buscando|looking|requisit|d[oó]nde|donde|cu[aá]nto|horario|mensualidad|document|piden|necesito|buenas|buenos d[ií]as|buenas tardes|buenas noches)\b/i.test(normalized) &&
     !/^(?:si|sí|no|ok|okay|claro|un carro|un auto|una camioneta|una suv|un sedan)$/i.test(normalized)
       ? message.trim()
       : undefined
@@ -771,7 +796,7 @@ function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, no
     .replace(/^(?:un|una|el|la)\s+/i, "")
     .replace(/\s+/g, " ")
     .trim();
-  if (!cleaned || /^(?:suv|camioneta|sedan|carro|auto|camion|truck|pickup|van|minivan)$/i.test(cleaned) || /^(?:m[aá]s\s+informaci[oó]n|informaci[oó]n|ayuda)$/i.test(cleaned)) return undefined;
+  if (!cleaned || /^(?:suv|suvcita|camioneta|camioneta\s+(?:grande|familiar)|sedan|carro|carrito|cochecito|auto|troca|troka|trocka|trokita|troque|camion|truck|pickup|van|vanesita|minivan)(?:\s+(?:barato|barata|usado|usada|familiar|grande))?$/i.test(cleaned) || /^(?:m[aá]s\s+informaci[oó]n|informaci[oó]n|ayuda)$/i.test(cleaned)) return undefined;
   return cleaned;
 }
 
@@ -804,7 +829,8 @@ function extractContactName(message: string): string | undefined {
 
 function isValidContactName(candidate: string): boolean {
   const normalized = candidate.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (/\b(?:con|de|para|por|como|esta|est[aá]|soy|habla|busco|quiero|tengo|mucho|gusto)\b/.test(normalized)) return false;
+  if (/\b(?:con|de|para|por|como|esta|est[aá]|soy|habla|busco|quiero|tengo|mucho|gusto|down|payment|deposit|enganche|suv|troca|troka|trokita|truck|pickup|carro|auto|camioneta)\b/.test(normalized)) return false;
+  if (SPANISH_NUMBER_WORDS.some((word) => new RegExp(`\\b${word}\\b`).test(normalized))) return false;
   return /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:[-\s][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){0,2}$/.test(candidate);
 }
 

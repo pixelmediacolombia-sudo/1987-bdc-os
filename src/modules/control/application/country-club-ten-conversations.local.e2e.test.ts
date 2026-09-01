@@ -19,9 +19,9 @@ const scenarios = [
   { id: "01-normal", language: "es", messages: ["Me llamo Ana, busco un Camry y tengo $2,000"] },
   { id: "02-requirements", language: "es", messages: ["Soy Luis", "¿Qué requisitos piden?"] },
   { id: "03-location", language: "es", messages: ["Soy Marta", "¿Dónde están?"] },
-  { id: "04-low-down-payment", language: "es", messages: ["Soy Carlos, busco una Tacoma", "Tengo $1,000"] },
+  { id: "04-low-down-payment", language: "es", messages: ["Soy Carlos, busco una trokita barata", "Con mil quinientos como down"] },
   { id: "05-no-trade", language: "es", messages: ["Soy Elena, busco una SUV", "Tengo $2,000", "no tengo carro para dar"] },
-  { id: "06-typos", language: "es", messages: ["Olaa, kiero una SUV", "tengo mil dolares pal enganche"] },
+  { id: "06-typos", language: "es", messages: ["Olaa, kiero una trokita", "tengo mil dolares pal enganche"] },
   { id: "07-english", language: "en", messages: ["Hi, I’m looking for a CR-V", "What do I need to buy a vehicle?"] },
   { id: "08-fragmented", language: "es", messages: ["Hola", "Busco", "Una SUV"] },
   { id: "09-not-ready", language: "es", messages: ["Soy Rosa", "solo estoy mirando", "No, por ahora no estoy listo"] },
@@ -54,10 +54,12 @@ test("LOCAL DB E2E: 10 conversaciones Country Club cubren respuestas y persisten
     );
 
     const outcomes: Array<{ id: string; responses: number; lastResponse?: string; leadLevel?: string }> = [];
+    const transcripts: Array<{ id: string; turns: Array<{ input: string; response: string }> }> = [];
     for (const [index, scenario] of scenarios.entries()) {
       const contactUuid = `00000000-0000-0000-0000-0000000010${String(index + 1).padStart(2, "0")}`;
       const contactId = `local-ten-${scenario.id}`;
       let before = outbound.length;
+      const transcript: Array<{ input: string; response: string }> = [];
       for (const [turn, message] of scenario.messages.entries()) {
         await orchestrator.process({
           tenantId: TENANT_ID,
@@ -65,7 +67,20 @@ test("LOCAL DB E2E: 10 conversaciones Country Club cubren respuestas y persisten
           consolidatedText: message,
           messages: [{ externalId: `${scenario.id}-${turn + 1}`, contactId, channel: "whatsapp", content: message, semanticHash: `${scenario.id}-${turn + 1}`, receivedAt: new Date().toISOString() }],
         });
+        const sent = outbound.at(-1);
+        assert.equal(sent?.scenario, contactId);
+        transcript.push({ input: message, response: sent?.content ?? "" });
       }
+      for (const [turn, entry] of transcript.entries()) {
+        assert.ok(entry.response, `missing response for ${scenario.id} turn ${turn + 1}`);
+        if (turn > 0) {
+          const terminal = /asesor|asesora|gerente|advisor|good day|buen día/i.test(entry.response);
+          if (!terminal) assert.equal((entry.response.match(/\?/g) ?? []).length, 1, `expected one question in ${scenario.id} turn ${turn + 1}`);
+          assert.ok(entry.response.split("\n").some((line) => !line.trim().startsWith("¿") && !line.trim().endsWith("?")), `expected reaction in ${scenario.id} turn ${turn + 1}`);
+        }
+        if (turn > 0) assert.notEqual(entry.response, transcript[turn - 1]?.response, `repeated response in ${scenario.id} turn ${turn + 1}`);
+      }
+      transcripts.push({ id: scenario.id, turns: transcript });
       const state = await pool.query<{ turn_count: number; lead_level: string; last_response: string | null }>(
         `SELECT turn_count, lead_level, last_response FROM public.sofia_conversation_state
           WHERE tenant_id = $1 AND contact_id = $2::uuid`,
@@ -85,6 +100,7 @@ test("LOCAL DB E2E: 10 conversaciones Country Club cubren respuestas y persisten
     assert.ok(outcomes.some((outcome) => /2,?500|llegar/i.test(outcome.lastResponse ?? "")));
     assert.ok(outcomes.some((outcome) => outcome.leadLevel === "A"));
     assert.equal(new Set(outbound.map((message) => message.content)).size > 1, true);
+    console.log(`LOCAL_DB_10_TRANSCRIPTS ${JSON.stringify(transcripts)}`);
     console.log(`LOCAL_DB_10_CONVERSATIONS ${JSON.stringify({ policyVersion: policyRow.rows[0]?.policy_version, conversations: outcomes.map(({ id, responses, leadLevel }) => ({ id, responses, leadLevel })), outbound: outbound.length })}`);
   } finally {
     await pool.query("DELETE FROM public.tenants WHERE dealer_id = $1", [TENANT_ID]).catch(() => undefined);
