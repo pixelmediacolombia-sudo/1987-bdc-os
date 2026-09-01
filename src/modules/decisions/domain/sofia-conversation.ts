@@ -730,12 +730,12 @@ function extractDownPaymentNumber(message: string, expectsDownPayment: boolean):
     const before = message.slice(Math.max(0, start - 32), start);
     const after = message.slice(end, Math.min(message.length, end + 24));
     return /^\s*(?:\$|usd\b)/i.test(match[0]) ||
-      /(?:\$|\busd\b|d[oó]lares?|enganche|anticipo|inicial|parte de pago|cuento con|tengo|dispongo|ahorrad[oa])\s*$/i.test(before) ||
-      /^\s*(?:d[oó]lares?|\busd\b|de\s+(?:el\s+)?enganche|para\s+(?:el\s+)?enganche)\b/i.test(after);
+      /(?:\$|\busd\b|d[oó]lares?|enganche|anticipo|inicial|parte de pago|down(?:\s+payment)?|deposit|cuento con|\b(?:con|with)\b|tengo|dispongo|ahorrad[oa])\s*$/i.test(before) ||
+      /^\s*(?:d[oó]lares?|\busd\b|down(?:\s+payment)?|deposit|de\s+(?:el\s+)?enganche|para\s+(?:el\s+)?enganche)\b/i.test(after);
   });
   const selected = explicit ?? (
     expectsDownPayment && matches.length === 1 &&
-    (/^(?:(?:tengo|cuento con|dispongo de|puedo dar|son)\s+)?(?:\$\s*)?\d[\d,.]*(?:\s*(?:d[oó]lares|usd))?[.!?]?$/.test(message.trim()) || /\bcomo\b[\s\S]*\bm[aá]s\s+o\s+menos\b/i.test(message))
+    (/^(?:(?:con|with|tengo|cuento con|dispongo de|puedo dar|son)\s+)?(?:\$\s*)?\d[\d,.]*(?:\s*(?:d[oó]lares|usd|down(?:\s+payment)?|deposit))?(?:\s+como\s+down(?:\s+payment)?)?[.!?]?$/i.test(message.trim()) || /\bcomo\b[\s\S]*\bm[aá]s\s+o\s+menos\b/i.test(message))
       ? matches[0]
       : undefined
   );
@@ -743,7 +743,7 @@ function extractDownPaymentNumber(message: string, expectsDownPayment: boolean):
 }
 
 function hasDownPaymentContext(message: string): boolean {
-  return /\$|\busd\b|d[oó]lares?|enganche|anticipo|inicial|parte de pago|cuento con|tengo|dispongo|ahorrad[oa]/i.test(message);
+  return /\$|\busd\b|d[oó]lares?|enganche|anticipo|inicial|parte de pago|down(?:\s+payment)?|deposit|cuento con|\b(?:con|with)\b|tengo|dispongo|ahorrad[oa]/i.test(message);
 }
 
 function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, normalized: string, countryClub = false): string | undefined {
@@ -785,11 +785,11 @@ function isCountryClubStandaloneName(message: string, priorFacts: SofiaFacts): b
 
 function extractContactName(message: string): string | undefined {
   const token = "[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:-[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)?";
-  const nameToken = `(?!(?:y|and|como|est[aá]|busco|quiero|tengo|para|con|de)\\b)${token}`;
+  const nameToken = `(?!(?:y|and|como|est[aá]|busco|quiero|tengo|para|con|de|mucho|gusto)\\b)${token}`;
   const name = `(${nameToken}(?:\\s+${nameToken}){0,2})`;
   const patterns = [
     new RegExp(`^\\s*(?:soy|me llamo|mi nombre es|my name is|i am(?!\\s+(?:interested|looking)\\b))\\s+(?:el\\s+señor\\s+|la\\s+señora\\s+)?${name}(?=\\s*(?:,|\\.|!|\\?|$|\\b(?:y|and|quiero|busco|i|i'm)\\b))`, "i"),
-    new RegExp(`^\\s*con\\s+${name}(?=\\s*(?:,|\\.|!|\\?|$|\\bcomo\\b))`, "i"),
+    new RegExp(`^\\s*con\\s+${name}(?=\\s*(?:,|\\.|!|\\?|$|\\bcomo\\b|\\bmucho\\s+gusto\\b))`, "i"),
     new RegExp(`^\\s*de\\s+parte\\s+de\\s+${name}(?=\\s*(?:,|\\.|!|\\?|$))`, "i"),
     new RegExp(`^\\s*habla\\s+con\\s+${name}(?=\\s*(?:,|\\.|!|\\?|$))`, "i"),
     new RegExp(`^\\s*${name},?\\s+(?:mucho\\s+gusto|como\\s+est[aá])\\s*[.!?]*$`, "i"),
@@ -804,7 +804,7 @@ function extractContactName(message: string): string | undefined {
 
 function isValidContactName(candidate: string): boolean {
   const normalized = candidate.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (/\b(?:con|de|para|por|como|esta|est[aá]|soy|habla|busco|quiero|tengo)\b/.test(normalized)) return false;
+  if (/\b(?:con|de|para|por|como|esta|est[aá]|soy|habla|busco|quiero|tengo|mucho|gusto)\b/.test(normalized)) return false;
   return /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:[-\s][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){0,2}$/.test(candidate);
 }
 

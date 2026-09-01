@@ -135,3 +135,24 @@ caseTest("R-06", async () => {
   assert.equal(result.facts.vehicle_model_interest, undefined);
   assert.match(result.response ?? "", /disculpe|carro.*SUV.*troca/i);
 });
+caseTest("R-07", async () => {
+  const result = await run("Con 1500", { contact_name: "Andrés", vehicle_category: "work truck" });
+  assert.equal(result.facts.down_payment_declared, 1500);
+  assert.doesNotMatch(result.response ?? "", /¿Con cuánto.*enganche/i);
+});
+caseTest("R-08", async () => {
+  const result = await run("Con Andrés mucho gusto", { vehicle_category: "work truck" });
+  assert.equal(result.facts.contact_name, "Andrés");
+  assert.doesNotMatch(result.response ?? "", /Andrés mucho gusto/i);
+});
+caseTest("R-09", async () => {
+  for (const message of ["Con 1500", "Con 1500 como down", "1500 down", "Con mil quinientos como down", "tengo $1,500", "with 1500 down"]) {
+    const result = await run(message, withVehicle);
+    assert.equal(result.facts.down_payment_declared, 1500, message);
+  }
+});
+caseTest("R-10", async () => {
+  const result = await run("No sé todavía", withVehicle);
+  assert.equal(result.facts.down_payment_declared, undefined);
+  assert.match(result.response ?? "", /enganche|down payment/i);
+});
