@@ -29,6 +29,8 @@ services:
         value: "false"
       - key: SOFIA_DEALER_NAME
         value: Koons Automotive of Culpeper
+      - key: COUNTRY_CLUB_GHL_LOCATION_ID
+        value: k9DePpsNBu9qWT1C6pW0
       - key: MEDIA_UNDERSTANDING_ENABLED
         value: "false"
       - key: WHISPER_CLI_PATH
