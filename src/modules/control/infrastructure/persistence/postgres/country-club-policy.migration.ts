@@ -9,19 +9,36 @@ export async function ensureCountryClubPolicy(
   ghlLocationId = process.env.COUNTRY_CLUB_GHL_LOCATION_ID?.trim() || DEFAULT_COUNTRY_CLUB_GHL_LOCATION_ID,
 ): Promise<boolean> {
   if (!ghlLocationId) throw new Error("Country Club GHL location id cannot be empty");
-  await pool.query("BEGIN");
+  const client = await pool.connect();
   try {
-    const result = await pool.query<{ ghl_location_id: string }>(
+    await client.query("BEGIN");
+    const resolved = await client.query<{ tenant_id: string | null }>(
+      "SELECT public.resolve_ghl_tenant_id($1)::text AS tenant_id",
+      [ghlLocationId],
+    );
+    const tenantId = resolved.rows[0]?.tenant_id;
+    if (!tenantId) {
+      await client.query("COMMIT");
+      return false;
+    }
+    await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+    const result = await client.query<{ policy_version: string }>(
       `UPDATE public.tenants
           SET policy_version = $1
-        WHERE ghl_location_id = $2
-        RETURNING ghl_location_id`,
-      [COUNTRY_CLUB_POLICY_VERSION, ghlLocationId],
+        WHERE dealer_id = $2
+        RETURNING policy_version`,
+      [COUNTRY_CLUB_POLICY_VERSION, tenantId],
     );
-    await pool.query("COMMIT");
-    return result.rowCount === 1;
+    const readback = await client.query<{ policy_version: string }>(
+      "SELECT policy_version FROM public.tenants WHERE dealer_id = $1",
+      [tenantId],
+    );
+    await client.query("COMMIT");
+    return result.rowCount === 1 && readback.rows[0]?.policy_version === COUNTRY_CLUB_POLICY_VERSION;
   } catch (error) {
-    await pool.query("ROLLBACK").catch(() => undefined);
+    await client.query("ROLLBACK").catch(() => undefined);
     throw error;
+  } finally {
+    client.release();
   }
 }
