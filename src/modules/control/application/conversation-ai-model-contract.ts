@@ -1,6 +1,6 @@
 import type { SofiaFacts } from "@/modules/decisions/domain/sofia-conversation";
 
-export const CONVERSATIONAL_PROMPT_VERSION = "conversation-ai-shadow-v1";
+export const CONVERSATIONAL_PROMPT_VERSION = "conversation-ai-shadow-v2-ledger-guard";
 
 export type ConversationalModelTranscriptMessage = {
   direction: "inbound" | "outbound";
@@ -27,6 +27,11 @@ export type ConversationalModelDraftInput = {
   latestMessage: string;
   transcript: ConversationalModelTranscriptMessage[];
   knownFacts: SofiaFacts;
+  resolvedFacts: SofiaFacts;
+  pendingObjectives: string[];
+  requiredAction: "ask" | "handoff" | "follow_up" | "none";
+  requiredQuestion?: string;
+  recentOutboundResponses: string[];
   nextQuestion?: string;
   ruleResponse?: string;
   language: string;
@@ -62,6 +67,8 @@ export type ConversationAiShadowRecord = {
   extraction?: ConversationalModelExtraction;
   modelFacts: Partial<SofiaFacts>;
   ruleFacts: SofiaFacts;
+  requiredAction?: "ask" | "handoff" | "follow_up" | "none";
+  requiredQuestion?: string;
   ruleResponse?: string;
   modelResponse?: string;
   draftAccepted: boolean;

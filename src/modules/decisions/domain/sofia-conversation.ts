@@ -690,7 +690,10 @@ function extractFacts(message: string, priorFacts: SofiaFacts, countryClub = fal
     else if (/\b(?:van|vanesita|minivan)\b/.test(normalized)) facts.vehicle_category = "van";
     if (/\bno s[eé] si\b[\s\S]*\b(?:carro|auto|suv|troca)\b/.test(normalized)) delete facts.vehicle_category;
   }
-  if (countryClub && isStandaloneVehicleYear(normalizedWithoutPhone) && priorFacts.vehicle_model_interest) facts.vehicle_year = Number(normalizedWithoutPhone);
+  const explicitVehicleYear = normalizedWithoutPhone.match(/\b(?:19|20)\d{2}\b/)?.[0];
+  if (countryClub && explicitVehicleYear && (priorFacts.vehicle_model_interest || /\b(?:tienen|tiene|disponible|disponibilidad|do you have|available)\b/i.test(userMessage))) {
+    facts.vehicle_year = Number(explicitVehicleYear);
+  }
   const vehicleModel = contactName && !hasVehicleInterestCue(userMessage)
     ? undefined
     : extractVehicleModelInterest(userMessage, priorFacts, normalizedWithoutPhone, countryClub);
@@ -802,6 +805,9 @@ function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, no
   if (priorFacts.vehicle_model_interest) return undefined;
   if (isGenericVehicleFinancingCall(normalized)) return undefined;
   const explicit = message.match(/\b(?:quiero|busco|quisiera|necesito|me interesa|interested in|estoy buscando|looking for|ando buscando)\s+(?:(?:un|una|el|la|a)\s+)?([\s\S]+?)(?:\s+(?:para|con|porque|y|so|because)\b[\s\S]*)?$/i);
+  const inventoryQuery = countryClub
+    ? message.match(/\b(?:tienen|tiene|disponible|disponibilidad|do you have|available)\s+(?:(?:el|la|a|an)\s+)?([\s\S]+?)(?:\?|$)/i)
+    : undefined;
   const candidate = explicit?.[1]?.trim() ?? (
     !priorFacts.vehicle_category && !priorFacts.vehicle_model_interest &&
     normalized.split(/\s+/).length <= 5 &&
@@ -811,10 +817,11 @@ function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, no
       ? message.trim()
       : undefined
   );
+  const selectedCandidateBeforeCleanup = candidate ?? inventoryQuery?.[1]?.trim();
   const countryClubUnknownCandidate = countryClub && !candidate
     ? message.match(/\b(?:de|marca)\s+([A-Za-z0-9-]+)/i)?.[1] ?? (/\bmodelo\b[\s\S]*\btabla\b/i.test(message) ? "modelo desconocido" : undefined)
     : undefined;
-  const selectedCandidate = candidate ?? countryClubUnknownCandidate;
+  const selectedCandidate = selectedCandidateBeforeCleanup ?? countryClubUnknownCandidate;
   if (!selectedCandidate) return undefined;
   const cleaned = selectedCandidate
     .split(/[?!.:,]/, 1)[0]
@@ -824,7 +831,7 @@ function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, no
     .replace(/^(?:un|una|el|la)\s+/i, "")
     .replace(/\s+/g, " ")
     .trim();
-  if (!cleaned || /^(?:suv|suvcita|camioneta|camioneta\s+(?:grande|familiar)|sedan|carro|carrito|cochecito|auto|troca|troka|trocka|trokita|troque|camion|truck|pickup|van|vanesita|minivan)(?:\s+(?:barato|barata|usado|usada|familiar|grande))?$/i.test(cleaned) || /^(?:m[aá]s\s+informaci[oó]n|informaci[oó]n|ayuda|not sure|i am not sure|maybe later|maybe next year|just looking|not ready|i am not ready|next year|looking|busco)$/i.test(cleaned)) return undefined;
+  if (!cleaned || /^(?:suv|suvcita|camioneta|camioneta\s+(?:grande|familiar)|sedan|carro|carrito|cochecito|auto|troca|troka|trocka|trokita|troque|camion|truck|pickup|van|vanesita|minivan)(?:\s+(?:barato|barata|usado|usada|familiar|grande))?$/i.test(cleaned) || /^(?:m[aá]s\s+informaci[oó]n|informaci[oó]n|ayuda|no\s+s[eé]|no\s+s[eé]\s+todav[ií]a|todav[ií]a|quiz[aá]s|talvez\s+despu[eé]s|tal\s+vez\s+despu[eé]s|solo\s+miro|solo\s+estoy\s+mirando|not sure|i am not sure|maybe later|maybe next year|just looking|not ready|i am not ready|next year|looking|busco)$/i.test(cleaned)) return undefined;
   return cleaned;
 }
 

@@ -37,7 +37,7 @@ test("local fake OpenAI extraction cannot set lead level and shadow does not rep
     dealerName: "Dealer 1",
     priorFacts: {},
     missingObjectives: ["vehicle_category"],
-    ruleTurn: (facts) => ({ facts: { ...facts, vehicle_category: "suv" }, leadLevel: "C", response: "Regla", nextStep: "ask", contactCaptured: false, hardRuleFailure: false }),
+    ruleTurn: (facts) => ({ facts: { ...facts, vehicle_category: "suv" }, leadLevel: "C", response: "Perfecto, ¿qué tipo de vehículo le interesa?", nextStep: "ask", contactCaptured: false, hardRuleFailure: false }),
   });
 
   assert.equal(result.ruleResult.leadLevel, "C");
@@ -45,7 +45,20 @@ test("local fake OpenAI extraction cannot set lead level and shadow does not rep
   assert.equal(result.modelFacts.down_payment_declared, 1500);
   assert.equal(records.length, 1);
   assert.equal(records[0]?.draftAccepted, true);
-  assert.equal(records[0]?.ruleResponse, "Regla");
+  assert.equal(records[0]?.ruleResponse, "Perfecto, ¿qué tipo de vehículo le interesa?");
+});
+
+test("model cannot replace the ledger question or use generic filler", () => {
+  const question = "¿Con cuánto contaría para el enganche?";
+  assert.equal(validateDraftSafety("I am still here to help with the next detail.", {
+    knownFacts: {}, ruleResponse: question, requiredAction: "ask", requiredQuestion: question,
+  }).accepted, false);
+  assert.deepEqual(validateDraftSafety("¿Tiene trade-in?", {
+    knownFacts: {}, ruleResponse: question, requiredAction: "ask", requiredQuestion: question,
+  }).issues, ["required_question_mismatch"]);
+  assert.deepEqual(validateDraftSafety("Perfecto, ya le paso su información al asesor.", {
+    knownFacts: {}, ruleResponse: "Perfecto, ya le paso su información al asesor.", requiredAction: "handoff",
+  }).issues, []);
 });
 
 test("local fake OpenAI draft is rejected for unsupported commercial content", () => {

@@ -59,6 +59,11 @@ export class ConversationAiService {
     }
 
     const ruleResult = input.ruleTurn({ ...input.priorFacts, ...modelFacts });
+    const requiredQuestion = extractRequiredQuestion(ruleResult.response);
+    const recentOutboundResponses = input.transcript
+      .filter((message) => message.direction === "outbound")
+      .map((message) => message.content)
+      .slice(-5);
     let modelResponse: string | undefined;
     let draftAccepted = false;
     let safetyIssues: string[] = [];
@@ -68,7 +73,12 @@ export class ConversationAiService {
         latestMessage: input.latestMessage,
         transcript: input.transcript,
         knownFacts: ruleResult.facts,
-        nextQuestion: input.missingObjectives[0],
+        resolvedFacts: ruleResult.facts,
+        pendingObjectives: input.missingObjectives,
+        requiredAction: ruleResult.nextStep,
+        ...(requiredQuestion ? { requiredQuestion } : {}),
+        recentOutboundResponses,
+        nextQuestion: requiredQuestion ?? input.missingObjectives[0],
         ruleResponse: ruleResult.response,
         language: input.language,
         dealerName: input.dealerName,
@@ -79,7 +89,9 @@ export class ConversationAiService {
       const safety = validateDraftSafety(modelResponse, {
         knownFacts: ruleResult.facts,
         ruleResponse: ruleResult.response,
-        previousResponses: input.transcript.filter((message) => message.direction === "outbound").map((message) => message.content),
+        requiredAction: ruleResult.nextStep,
+        ...(requiredQuestion ? { requiredQuestion } : {}),
+        previousResponses: recentOutboundResponses,
         clientWordCount: input.latestMessage.trim().split(/\s+/).filter(Boolean).length,
       });
       draftAccepted = safety.accepted;
@@ -98,6 +110,8 @@ export class ConversationAiService {
       ...(extraction ? { extraction } : {}),
       modelFacts,
       ruleFacts: ruleResult.facts,
+      requiredAction: ruleResult.nextStep,
+      ...(requiredQuestion ? { requiredQuestion } : {}),
       ...(ruleResult.response ? { ruleResponse: ruleResult.response } : {}),
       ...(modelResponse ? { modelResponse } : {}),
       draftAccepted,
@@ -108,6 +122,11 @@ export class ConversationAiService {
     await this.shadowRepository.save(record);
     return { ruleResult, modelFacts, ...(modelResponse ? { modelResponse } : {}), draftAccepted, safetyIssues };
   }
+}
+
+function extractRequiredQuestion(response: string | undefined): string | undefined {
+  const matches = response?.match(/[^.!?\n]*\?/g) ?? [];
+  return matches.at(-1)?.trim() || undefined;
 }
 
 function sanitizeFacts(value: Partial<SofiaFacts> | undefined): Partial<SofiaFacts> {
