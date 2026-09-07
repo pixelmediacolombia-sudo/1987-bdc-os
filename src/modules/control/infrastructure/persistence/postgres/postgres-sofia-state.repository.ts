@@ -108,6 +108,8 @@ const PERSISTED_FACT_KEYS = new Set([
   "down_payment_accepted",
   "down_payment_push_target",
   "push_accepted",
+  "negotiation_step",
+  "negotiation_other_options_accepted",
   "has_trade_in",
   "trade_in_description",
   "trade_in_model",

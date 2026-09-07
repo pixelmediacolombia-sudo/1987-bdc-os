@@ -38,7 +38,7 @@ test("Country Club greeting anchors the category and asks for the name formally"
   assert.doesNotMatch(result.response ?? "", /te llamas|¿cómo/);
 });
 
-test("Country Club normalizes 1k, does not reopen the down-payment box, and moves to trade-in", async () => {
+test("Country Club normalizes 1k, does not reopen the down-payment box, and starts the staircase", async () => {
   const engine = await countryClubEngine();
   const result = engine.processTurn({
     dealerName: "Country Club Cars Inc.",
@@ -51,7 +51,85 @@ test("Country Club normalizes 1k, does not reopen the down-payment box, and move
 
   assert.equal(result.facts.down_payment_declared, 1000);
   assert.doesNotMatch(result.response ?? "", /¿Con cuánto contaría para el enganche\?/i);
-  assert.match(result.response ?? "", /parte de pago/);
+  assert.match(result.response ?? "", /llegar a ese monto/);
+  assert.equal(result.facts.negotiation_step, "reach_floor");
+});
+
+test("Country Club advances the below-floor negotiation staircase one card at a time", async () => {
+  const engine = await countryClubEngine();
+  const baseFacts = { contact_name: "Juan", vehicle_category: "suv" };
+  const stepOne = engine.processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "Tengo $1,000 de enganche",
+    priorFacts: baseFacts,
+    turnCount: 2,
+    contactChannel: "WhatsApp",
+    language: "es",
+  });
+  assert.equal(stepOne.facts.negotiation_step, "reach_floor");
+  assert.match(stepOne.response ?? "", /depende de su cr[eé]dito/i);
+  assert.match(stepOne.response ?? "", /¿Le sería posible llegar a ese monto\?/i);
+  assert.doesNotMatch(stepOne.response ?? "", /es necesario|tiene que llegar/i);
+  assert.equal((stepOne.response?.match(/\?/g) ?? []).length, 1);
+
+  const stepTwo = engine.processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "No",
+    priorFacts: stepOne.facts,
+    turnCount: 3,
+    contactChannel: "WhatsApp",
+    language: "es",
+  });
+  assert.equal(stepTwo.facts.negotiation_step, "trade_in");
+  assert.match(stepTwo.response ?? "", /¿Tiene un vehículo para dar de parte de pago\?/i);
+  assert.equal((stepTwo.response?.match(/\?/g) ?? []).length, 1);
+
+  const stepThree = engine.processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "No tengo carro",
+    priorFacts: stepTwo.facts,
+    turnCount: 4,
+    contactChannel: "WhatsApp",
+    language: "es",
+  });
+  assert.equal(stepThree.facts.negotiation_step, "other_options");
+  assert.match(stepThree.response ?? "", /¿Estaría dispuesto a considerar otras opciones de vehículo\?/i);
+
+  const closed = engine.processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "No",
+    priorFacts: stepThree.facts,
+    turnCount: 5,
+    contactChannel: "WhatsApp",
+    language: "es",
+  });
+  assert.equal(closed.facts.negotiation_step, "closed");
+  assert.equal(closed.leadLevel, "C");
+  assert.equal(closed.nextStep, "follow_up");
+});
+
+test("Country Club does not restart the staircase after the customer accepts the reference amount", async () => {
+  const engine = await countryClubEngine();
+  const first = engine.processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "Tengo 1000",
+    priorFacts: { contact_name: "Juan", vehicle_category: "suv" },
+    turnCount: 2,
+    contactChannel: "WhatsApp",
+    language: "en",
+  });
+  const accepted = engine.processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "Yes",
+    priorFacts: first.facts,
+    turnCount: 3,
+    contactChannel: "WhatsApp",
+    language: "en",
+  });
+  assert.equal(accepted.facts.push_accepted, true);
+  assert.equal(accepted.facts.negotiation_step, "none");
+  assert.match(accepted.response ?? "", /vehicle to trade in/i);
+  assert.doesNotMatch(accepted.response ?? "", /Would it be possible to reach/i);
 });
 
 test("Country Club answers requirements before asking the next missing box", async () => {

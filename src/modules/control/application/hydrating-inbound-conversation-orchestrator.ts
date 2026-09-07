@@ -240,7 +240,7 @@ function factsFromContext(activeFacts: Record<string, string>): SofiaFacts {
     if (key === "down_payment_declared" || key === "down_payment_accepted" || key === "down_payment_push_target" || key === "employment_months" || key === "vehicle_year" || key === "trade_in_year") {
       const parsed = Number(value);
       if (Number.isFinite(parsed)) facts[key] = parsed;
-    } else if (key === "push_accepted" || key === "has_trade_in" || key === "first_time_buyer" || key === "has_income_proof" || key === "has_id_document" || key === "has_income_proof_document" || key === "trade_in_financed" || key === "has_co_signer" || key === "visit_intent" || key === "handoff_completed") {
+    } else if (key === "push_accepted" || key === "has_trade_in" || key === "negotiation_other_options_accepted" || key === "first_time_buyer" || key === "has_income_proof" || key === "has_id_document" || key === "has_income_proof_document" || key === "trade_in_financed" || key === "has_co_signer" || key === "visit_intent" || key === "handoff_completed") {
       if (value === "true" || value === "false") facts[key] = value === "true";
     } else if (key in factsFromContextKeys()) {
       facts[key as keyof SofiaFacts] = value as never;
@@ -259,6 +259,7 @@ function factsFromContextKeys(): Record<string, true> {
     trade_in_description: true,
     contact_channel: true,
     contact_value: true,
+    negotiation_step: true,
     purchase_timeline: true,
     has_co_signer: true,
     handoff_completed: true,

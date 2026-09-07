@@ -1,4 +1,5 @@
 export type SofiaLeadLevel = "A" | "B" | "C";
+export type SofiaNegotiationStep = "none" | "reach_floor" | "trade_in" | "other_options" | "closed";
 
 export type SofiaFacts = {
   contact_name?: string;
@@ -10,6 +11,8 @@ export type SofiaFacts = {
   down_payment_accepted?: number;
   down_payment_push_target?: number;
   push_accepted?: boolean;
+  negotiation_step?: SofiaNegotiationStep;
+  negotiation_other_options_accepted?: boolean;
   has_trade_in?: boolean;
   trade_in_description?: string;
   trade_in_model?: string;
@@ -152,7 +155,12 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
   if ((!cleanMessage || !/[\p{L}\p{N}]/u.test(cleanMessage) || input.isAdvertisementMetadata) && !input.mediaContext?.audioTranscriptionFailed) {
     return makeResult(input.priorFacts, classifyLead(input.priorFacts, policy), [], "none", hasCountryClubContactPath(input.priorFacts), false);
   }
-  const extractedFacts = extractFacts(input.latestMessage, input.priorFacts, true, input.pendingQuestion);
+  const extractedFacts = extractFacts(
+    input.latestMessage,
+    input.priorFacts,
+    true,
+    input.pendingQuestion ?? countryClubPendingQuestion(input.priorFacts.negotiation_step),
+  );
   const noTimelineDetected = extractedFacts.purchase_timeline === "none";
   if (!extractedFacts.contact_name && isCountryClubStandaloneName(input.latestMessage, input.priorFacts)) {
     extractedFacts.contact_name = input.latestMessage.trim().replace(/[.!?]+$/, "");
@@ -164,6 +172,8 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
     delete facts.vehicle_category;
     delete facts.vehicle_model_interest;
     delete facts.down_payment_push_target;
+    facts.negotiation_step = "none";
+    delete facts.negotiation_other_options_accepted;
   }
   if (input.priorFacts.has_trade_in === false) {
     facts.has_trade_in = false;
@@ -173,6 +183,15 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
   const contactChannel = normalizeContactChannel(input.contactChannel);
   if (contactChannel) facts.contact_channel = contactChannel;
   const language = countryClubLanguage(input.language);
+  const amountChanged = extractedFacts.down_payment_declared !== undefined &&
+    extractedFacts.down_payment_declared !== input.priorFacts.down_payment_declared;
+  if (amountChanged && countryClubBelowFloor(facts, policy)) {
+    facts.negotiation_step = "reach_floor";
+    facts.down_payment_push_target = countryClubMinimum(facts, policy);
+    delete facts.push_accepted;
+    delete facts.down_payment_accepted;
+  }
+  applyPushDecision(facts, cleanMessage);
   const contactCaptured = hasCountryClubContactPath(facts);
   const hardRuleFailure = hasHardRuleFailure(facts);
   const leadLevel = classifyLead(facts, policy);
@@ -216,6 +235,10 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
 
   if (firstTurn) {
     const opening = countryClubOpening(facts, knowledge, policy, language, directAnswer);
+    const staircase = countryClubNegotiationStaircase(facts, input.priorFacts, policy, knowledge, language, extractedFacts);
+    if (staircase) {
+      return makeResult(facts, staircase.leadLevel ?? leadLevel, [...opening, ...staircase.messages], staircase.nextStep, contactCaptured, false);
+    }
     const question = facts.contact_name ? countryClubNextQuestion(facts, input.contactChannel, policy, language) : countryClubNameQuestion(language);
     return makeResult(facts, leadLevel, [...opening, question].filter(Boolean) as string[], "ask", contactCaptured, hardRuleFailure);
   }
@@ -236,17 +259,25 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
     return makeResult(facts, "C", [knowledge.notQualifiedClose[language]], "follow_up", contactCaptured, false);
   }
 
+  const staircase = countryClubNegotiationStaircase(facts, input.priorFacts, policy, knowledge, language, extractedFacts, directAnswer);
+  if (staircase) {
+    return makeResult(
+      facts,
+      staircase.leadLevel ?? leadLevel,
+      countryClubAvoidLiteralRepeat(staircase.messages, input.lastResponse, language),
+      staircase.nextStep,
+      contactCaptured,
+      false,
+    );
+  }
+
   const question = countryClubNextQuestion(facts, input.contactChannel, policy, language, input.lastResponse);
   if (question) {
-    const belowFloor = countryClubBelowFloor(facts, policy);
-    const firstPush = belowFloor && facts.down_payment_push_target !== countryClubMinimum(facts, policy);
     const categoryJustCaptured = Boolean(extractedFacts.vehicle_category && !input.priorFacts.vehicle_category);
-    if (firstPush) facts.down_payment_push_target = countryClubMinimum(facts, policy);
     const messages = [
       directAnswer,
       acknowledgement,
       categoryJustCaptured ? countryClubCategoryFloorMessage(facts, policy, language) : undefined,
-      firstPush ? countryClubBelowFloorMessage(facts, policy, language) : undefined,
       question,
     ].filter(Boolean) as string[];
     return makeResult(facts, leadLevel, countryClubAvoidLiteralRepeat(dedupeMessages(messages), input.lastResponse, language), "ask", contactCaptured, false);
@@ -273,8 +304,8 @@ function countryClubOpening(
   const category = facts.vehicle_category ? countryClubMinimumForCategory(facts.vehicle_category, policy) : undefined;
   const vehicleLine = vehicle && category
     ? language === "en"
-      ? `I see you are looking at ${vehicle}. We start at $${category.toLocaleString("en-US")} down for that category.`
-      : `Veo que busca ${vehicle}. Trabajamos desde $${category.toLocaleString("en-US")} de enganche para esa categoría.`
+      ? `I see you are looking at ${vehicle}. We normally start around $${category.toLocaleString("en-US")} down for that category, although the final down payment depends on your credit.`
+      : `Veo que busca ${vehicle}. Normalmente trabajamos alrededor de $${category.toLocaleString("en-US")} de enganche para esa categoría, aunque el enganche final depende de su crédito.`
     : undefined;
   return [greeting, vehicleLine, directAnswer].filter(Boolean) as string[];
 }
@@ -303,6 +334,139 @@ function countryClubNextQuestion(
   if ((normalizedChannel === "messenger" || normalizedChannel === "facebook" || normalizedChannel === "fb") && !facts.contact_value) {
     return language === "en" ? "May I have the best phone number for you?" : "¿Me comparte el mejor número de teléfono?";
   }
+  return undefined;
+}
+
+function countryClubPendingQuestion(step: SofiaNegotiationStep | undefined): SofiaTurnInput["pendingQuestion"] | undefined {
+  if (step === "trade_in") return "has_trade_in";
+  return undefined;
+}
+
+type CountryClubStaircaseResult = {
+  messages: string[];
+  nextStep: SofiaTurnResult["nextStep"];
+  leadLevel?: SofiaLeadLevel;
+};
+
+/**
+ * The below-floor flow is stateful by design. The state lives in SofiaFacts
+ * and is persisted to the facts ledger as `negotiation_step`; prompt wording
+ * alone cannot prevent a repeated or skipped card after a new inbound turn.
+ */
+function countryClubNegotiationStaircase(
+  facts: SofiaFacts,
+  priorFacts: SofiaFacts,
+  policy: SofiaPolicy,
+  knowledge: SofiaKnowledge,
+  language: "es" | "en",
+  extractedFacts: SofiaFacts,
+  directAnswer?: string,
+): CountryClubStaircaseResult | undefined {
+  if (!countryClubBelowFloor(facts, policy)) {
+    if (facts.negotiation_step !== "closed") facts.negotiation_step = "none";
+    return undefined;
+  }
+
+  const minimum = countryClubMinimum(facts, policy);
+  const floorReference = countryClubBelowFloorMessage(facts, policy, language);
+  const acknowledgement = countryClubAcknowledgement(extractedFacts, facts, language, priorFacts);
+  const withDirectAnswer = (messages: string[]): string[] => [directAnswer, ...messages].filter(Boolean) as string[];
+  const step = facts.negotiation_step ?? priorFacts.negotiation_step ?? "none";
+
+  if (step === "closed") {
+    return { messages: withDirectAnswer([knowledge.notQualifiedClose[language]]), nextStep: "follow_up", leadLevel: "C" };
+  }
+
+  if (step === "reach_floor") {
+    if (facts.push_accepted === true) {
+      facts.negotiation_step = "none";
+      return undefined;
+    }
+    if (facts.push_accepted === false) {
+      facts.negotiation_step = "trade_in";
+      return {
+        messages: withDirectAnswer([acknowledgement, floorReference, countryClubTradeInStaircaseQuestion(language)]),
+        nextStep: "ask",
+        leadLevel: "B",
+      };
+    }
+    facts.negotiation_step = "reach_floor";
+    facts.down_payment_push_target = minimum;
+    return {
+      messages: withDirectAnswer([acknowledgement, floorReference, countryClubReachFloorQuestion(language)]),
+      nextStep: "ask",
+      leadLevel: "B",
+    };
+  }
+
+  if (step === "trade_in") {
+    if (facts.has_trade_in === true) {
+      facts.negotiation_step = "none";
+      return undefined;
+    }
+    if (facts.has_trade_in === false) {
+      facts.negotiation_step = "other_options";
+      return {
+        messages: withDirectAnswer([acknowledgement, floorReference, countryClubOtherOptionsQuestion(language)]),
+        nextStep: "ask",
+        leadLevel: "B",
+      };
+    }
+    return {
+      messages: withDirectAnswer([floorReference, countryClubTradeInStaircaseQuestion(language)]),
+      nextStep: "ask",
+      leadLevel: "B",
+    };
+  }
+
+  if (step === "other_options") {
+    const answer = extractYesNo(extractedFacts, facts);
+    if (answer === true) {
+      facts.negotiation_other_options_accepted = true;
+      facts.negotiation_step = "none";
+      return undefined;
+    }
+    if (answer === false) {
+      facts.negotiation_other_options_accepted = false;
+      facts.negotiation_step = "closed";
+      return { messages: withDirectAnswer([knowledge.notQualifiedClose[language]]), nextStep: "follow_up", leadLevel: "C" };
+    }
+    return {
+      messages: withDirectAnswer([floorReference, countryClubOtherOptionsQuestion(language)]),
+      nextStep: "ask",
+      leadLevel: "B",
+    };
+  }
+
+  if (facts.push_accepted === true) {
+    facts.negotiation_step = "none";
+    return undefined;
+  }
+
+  facts.negotiation_step = "reach_floor";
+  facts.down_payment_push_target = minimum;
+  return {
+    messages: withDirectAnswer([acknowledgement, floorReference, countryClubReachFloorQuestion(language)]),
+    nextStep: "ask",
+    leadLevel: "B",
+  };
+}
+
+function countryClubReachFloorQuestion(language: "es" | "en"): string {
+  return language === "en" ? "Would it be possible to reach that amount?" : "¿Le sería posible llegar a ese monto?";
+}
+
+function countryClubTradeInStaircaseQuestion(language: "es" | "en"): string {
+  return language === "en" ? "Do you have a vehicle to trade in?" : "¿Tiene un vehículo para dar de parte de pago?";
+}
+
+function countryClubOtherOptionsQuestion(language: "es" | "en"): string {
+  return language === "en" ? "Would you be open to looking at other vehicle options?" : "¿Estaría dispuesto a considerar otras opciones de vehículo?";
+}
+
+function extractYesNo(extractedFacts: SofiaFacts, facts: SofiaFacts): boolean | undefined {
+  if (extractedFacts.negotiation_other_options_accepted !== undefined) return extractedFacts.negotiation_other_options_accepted;
+  if (extractedFacts.has_trade_in !== undefined) return extractedFacts.has_trade_in;
   return undefined;
 }
 
@@ -365,8 +529,8 @@ function countryClubAnswer(message: string, facts: SofiaFacts, policy: SofiaPoli
   if (model && /tienen|tienen el|manejan|disponib|do you have|carry|available/.test(normalized)) {
     const category = facts.vehicle_category ? countryClubMinimumForCategory(facts.vehicle_category, policy) : undefined;
     return language === "en"
-      ? `Yes, we can help with ${model}${category ? `; that category starts at $${category.toLocaleString("en-US")} down.` : "."}`
-      : `Sí, le ayudamos con ${model}${category ? `; esa categoría trabaja desde $${category.toLocaleString("en-US")} de enganche.` : "."}`;
+      ? `Yes, we can help with ${model}${category ? `; that category normally starts around $${category.toLocaleString("en-US")} down, although the final down payment depends on your credit.` : "."}`
+      : `Sí, le ayudamos con ${model}${category ? `; esa categoría normalmente trabaja alrededor de $${category.toLocaleString("en-US")} de enganche, aunque el enganche final depende de su crédito.` : "."}`;
   }
   return undefined;
 }
@@ -401,8 +565,8 @@ function countryClubCategoryFloorMessage(facts: SofiaFacts, policy: SofiaPolicy,
   const minimum = countryClubMinimum(facts, policy).toLocaleString("en-US");
   const category = displayCountryClubCategory(facts.vehicle_category ?? "vehicle", language);
   return language === "en"
-    ? `For ${category}, we usually start at $${minimum} down.`
-    : `Para ${category}, normalmente trabajamos desde $${minimum} de enganche.`;
+    ? `For ${category}, we normally start around $${minimum} down, although the final down payment depends on your credit.`
+    : `Para ${category}, normalmente trabajamos alrededor de $${minimum} de enganche, aunque el enganche final depende de su crédito.`;
 }
 
 function countryClubTradeInQuestion(facts: SofiaFacts, policy: SofiaPolicy, language: "es" | "en"): string {
@@ -429,8 +593,8 @@ function countryClubMinimumForCategory(category: string, policy: SofiaPolicy): n
 function countryClubBelowFloorMessage(facts: SofiaFacts, policy: SofiaPolicy, language: "es" | "en"): string {
   const minimum = countryClubMinimum(facts, policy).toLocaleString("en-US");
   return language === "en"
-    ? `We work with what you have, but you do need to reach $${minimum}.`
-    : `Trabajamos con lo que tenga, pero es necesario llegar a $${minimum}.`;
+    ? `For this category, we normally start around $${minimum} down, although the final down payment depends on your credit.`
+    : `Para esta categoría, normalmente trabajamos alrededor de $${minimum} de enganche, aunque el enganche final depende de su crédito.`;
 }
 
 function countryClubNameQuestion(language: "es" | "en"): string {
@@ -706,6 +870,9 @@ function extractFacts(message: string, priorFacts: SofiaFacts, countryClub = fal
     facts.trade_in_description = message.trim();
   }
   if (pendingQuestion === "has_trade_in" && /^(?:s[ií]|yes|claro)$/i.test(normalized)) facts.has_trade_in = true;
+  if (countryClub && priorFacts.negotiation_step === "other_options" && /^(?:s[ií]|si|yes|claro|ok|okay|no|nop|no puedo|ahorita no)$/i.test(normalized)) {
+    facts.negotiation_other_options_accepted = /^(?:s[ií]|si|yes|claro|ok|okay)$/i.test(normalized);
+  }
   const hasTradeInContext = facts.has_trade_in === true || priorFacts.has_trade_in === true;
   if (hasTradeInContext && /\b(todav[ií]a(?:\s+\w+)?\s+debo|a[uú]n debo|sigo pagando|financiado|payments?)\b/.test(normalized)) facts.trade_in_financed = true;
   else if (hasTradeInContext && /\b(pagado|no debo|libre)\b/.test(normalized)) facts.trade_in_financed = false;
