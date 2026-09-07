@@ -9,6 +9,7 @@ import { resolveDealerDisplayName } from "@/modules/decisions/domain/dealer-iden
 import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
 import { OutboundMessageRejectedError } from "@/modules/control/application/registered-outbound-message-sender";
 import type { QualificationHandoffPort } from "@/modules/control/application/ports/qualification-handoff.port";
+import type { ConversationAiService } from "@/modules/control/application/conversation-ai.service";
 
 export type SofiaConversationLogger = {
   info(message: string): void;
@@ -33,6 +34,8 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
     private readonly qualificationSignalEnabled = false,
     private readonly logger: SofiaConversationLogger = defaultLogger,
     private readonly qualificationHandoff?: QualificationHandoffPort,
+    private readonly conversationalAi?: ConversationAiService,
+    private readonly conversationalAiSendEnabled = false,
   ) {}
 
   async process(input: ConsolidatedInboundConversation): Promise<void> {
@@ -57,7 +60,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
       this.qualificationSignalEnabled && tenantFlags.qualificationSignalEnabled;
 
     if (sofiaEnabledForTenant && this.sofia) {
-      const dealerName = resolveDealerDisplayName({
+      const dealerName = context.tenant.dealerName ?? resolveDealerDisplayName({
         dealerId: context.tenant.id,
         ghlLocationId: context.tenant.ghlLocationId,
       }) ?? this.sofia.dealerName;
@@ -67,20 +70,46 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
       }
       const previous = await this.sofia.repository.load(input.tenantId, input.contactId);
       const engine = this.sofia.engine.withPolicy(sofiaPolicyFromPolicyPack(context.tenant.policies));
-      const result = engine.processTurn({
+      const priorFacts = {
+        ...factsFromContext(context.activeFacts),
+        ...(previous?.facts ?? {}),
+      };
+      const ruleTurn = (facts: SofiaFacts) => engine.processTurn({
         dealerName,
         latestMessage: input.consolidatedText,
         contactChannel: input.messages.at(-1)?.channel,
         language: context.contact.preferredLanguage,
-        priorFacts: {
-          ...factsFromContext(context.activeFacts),
-          ...(previous?.facts ?? {}),
-        },
+        priorFacts: facts,
         mediaContext: input.mediaContext,
         turnCount: (previous?.turnCount ?? 0) + 1,
         isFirstTurn: !previous,
         lastResponse: previous?.lastResponse,
       });
+      const aiShadowEnabled = Boolean(this.conversationalAi && tenantFlags.conversationalAiShadowEnabled);
+      let result = ruleTurn(priorFacts);
+      let modelResponse: string | undefined;
+      if (aiShadowEnabled && this.conversationalAi) {
+        try {
+          const aiResult = await this.conversationalAi.process({
+            tenantId: input.tenantId,
+            contactId: input.contactId,
+            ...(input.messages.at(-1)?.externalId ? { inboundExternalId: input.messages.at(-1)?.externalId } : {}),
+            latestMessage: input.consolidatedText,
+            transcript: context.transcript.map((message) => ({ direction: message.direction, content: message.content })),
+            channel: input.messages.at(-1)?.channel ?? context.conversation.channel,
+            language: context.contact.preferredLanguage,
+            dealerName,
+            priorFacts,
+            missingObjectives: context.objectivesLedger.filter((objective) => !objective.answered && !objective.skipped).map((objective) => objective.objectiveType),
+            ruleTurn,
+          });
+          result = aiResult.ruleResult;
+          if (this.conversationalAiSendEnabled && tenantFlags.conversationalAiSendEnabled && aiResult.draftAccepted) modelResponse = aiResult.modelResponse;
+          this.logger.info(`Sofia conversational shadow tenant=${input.tenantId} contact=${input.contactId} accepted=${aiResult.draftAccepted ? "yes" : "no"} issues=${aiResult.safetyIssues.length}`);
+        } catch {
+          this.logger.error(`Sofia conversational shadow failed tenant=${input.tenantId} contact=${input.contactId}; deterministic response retained`);
+        }
+      }
       const inboundChannel = input.messages.at(-1)?.channel ?? "missing";
       const handoffEligible =
         this.qualificationHandoff &&
@@ -88,7 +117,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
         !result.hardRuleFailure &&
         result.contactCaptured &&
         !previous?.facts.handoff_completed;
-      const response = result.response?.trim();
+      const response = (modelResponse ?? result.response)?.trim();
       this.logger.info(
         `Sofia decision tenant=${input.tenantId} contact=${input.contactId} channel=${inboundChannel} turn=${(previous?.turnCount ?? 0) + 1} lead=${result.leadLevel} next=${result.nextStep} response=${response ? "yes" : "no"} flags=sofia:${sofiaEnabledForTenant ? "on" : "off"},qualification:${qualificationFlowEnabledForTenant ? "on" : "off"}`,
       );

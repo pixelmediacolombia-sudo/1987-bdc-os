@@ -17,6 +17,13 @@ export type AppConfig = {
   metaCapiDealers: MetaCapiTenantConfig[];
   sofiaEnabled: boolean;
   sofiaDealerName: string;
+  conversationalAiEnabled: boolean;
+  conversationalAiSendEnabled: boolean;
+  conversationalModelBaseUrl: string;
+  conversationalModelApiKey?: string;
+  conversationalExtractionModel: string;
+  conversationalDraftingModel: string;
+  conversationalModelTimeoutMs: number;
   mediaUnderstandingEnabled: boolean;
   whisperCliPath?: string;
   whisperModelPath?: string;
@@ -51,6 +58,9 @@ export function loadAppConfig(): AppConfig {
   const encryptionSecret = required("ENCRYPTION_SECRET");
   const oauthStateSecret = required("OAUTH_STATE_SECRET");
   const metaCapi = loadMetaCapiEnvConfig();
+  const conversationalAiEnabled = booleanEnv("CONVERSATIONAL_AI_ENABLED", false);
+  const conversationalModelApiKey = process.env.CONVERSATIONAL_MODEL_API_KEY?.trim() || undefined;
+  if (conversationalAiEnabled && !conversationalModelApiKey) throw new Error("CONVERSATIONAL_MODEL_API_KEY is required when CONVERSATIONAL_AI_ENABLED=true");
 
   if (Buffer.byteLength(encryptionSecret, "utf8") < 32) {
     throw new Error("ENCRYPTION_SECRET must contain at least 32 UTF-8 bytes");
@@ -75,6 +85,13 @@ export function loadAppConfig(): AppConfig {
     metaCapiDealers: metaCapi.dealers,
     sofiaEnabled: booleanEnv("SOFIA_ENABLED", false),
     sofiaDealerName: process.env.SOFIA_DEALER_NAME?.trim() || "el dealer",
+    conversationalAiEnabled,
+    conversationalAiSendEnabled: booleanEnv("CONVERSATIONAL_AI_SEND_ENABLED", false),
+    conversationalModelBaseUrl: process.env.CONVERSATIONAL_MODEL_BASE_URL?.trim() || "https://api.openai.com/v1",
+    ...(conversationalModelApiKey ? { conversationalModelApiKey } : {}),
+    conversationalExtractionModel: process.env.CONVERSATIONAL_EXTRACTION_MODEL?.trim() || "gpt-5.6-luna",
+    conversationalDraftingModel: process.env.CONVERSATIONAL_DRAFTING_MODEL?.trim() || "gpt-5.6-luna",
+    conversationalModelTimeoutMs: positiveNumberEnv("CONVERSATIONAL_MODEL_TIMEOUT_MS", 20_000),
     mediaUnderstandingEnabled: booleanEnv("MEDIA_UNDERSTANDING_ENABLED", false),
     whisperCliPath: process.env.WHISPER_CLI_PATH?.trim() || undefined,
     whisperModelPath: process.env.WHISPER_MODEL_PATH?.trim() || undefined,

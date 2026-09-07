@@ -12,12 +12,17 @@ import type {
 type TenantRow = {
   id: string;
   ghl_location_id: string | null;
+  dealer_name: string | null;
+  financial_policy: Record<string, unknown>;
+  facebook_page_id: string | null;
   timezone: string;
   policy_version: string;
   status: string;
   sofia_enabled: boolean;
   qualification_flow_enabled: boolean;
   qualification_signal_enabled: boolean;
+  conversational_ai_shadow_enabled: boolean;
+  conversational_ai_send_enabled: boolean;
 };
 type ContactConversationRow = {
   contact_id: string;
@@ -42,8 +47,9 @@ export class PostgresHydrationRepository implements HydrationRepositoryPort {
 
   async loadTenant(tenantId: string): Promise<TenantProfile> {
     const rows = await this.readWithTenant<TenantRow>(tenantId, `
-      SELECT dealer_id::text AS id, ghl_location_id, timezone, policy_version, status,
-             sofia_enabled, qualification_flow_enabled, qualification_signal_enabled
+      SELECT dealer_id::text AS id, ghl_location_id, dealer_name, financial_policy, facebook_page_id,
+             timezone, policy_version, status, sofia_enabled, qualification_flow_enabled,
+             qualification_signal_enabled, conversational_ai_shadow_enabled, conversational_ai_send_enabled
         FROM public.tenants
        WHERE dealer_id = $1
        LIMIT 1`, [tenantId]);
@@ -52,6 +58,9 @@ export class PostgresHydrationRepository implements HydrationRepositoryPort {
     return {
       id: row.id,
       ...(row.ghl_location_id ? { ghlLocationId: row.ghl_location_id } : {}),
+      ...(row.dealer_name ? { dealerName: row.dealer_name } : {}),
+      financialPolicy: row.financial_policy ?? {},
+      ...(row.facebook_page_id ? { facebookPageId: row.facebook_page_id } : {}),
       timezone: row.timezone,
       policyVersion: row.policy_version,
       status: row.status,
@@ -59,6 +68,8 @@ export class PostgresHydrationRepository implements HydrationRepositoryPort {
         sofiaEnabled: row.sofia_enabled,
         qualificationFlowEnabled: row.qualification_flow_enabled,
         qualificationSignalEnabled: row.qualification_signal_enabled,
+        conversationalAiShadowEnabled: row.conversational_ai_shadow_enabled,
+        conversationalAiSendEnabled: row.conversational_ai_send_enabled,
       },
     };
   }

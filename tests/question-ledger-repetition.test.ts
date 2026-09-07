@@ -24,6 +24,9 @@ class Ticket8FakeClient {
     if (normalized.startsWith("SELECT set_config") || normalized === "BEGIN" || normalized === "COMMIT" || normalized === "ROLLBACK") {
       return { rows: [] as T[], rowCount: 0 };
     }
+    if (normalized.includes("FROM public.contacts")) {
+      return { rows: [{ id: CONTACT_ID }] as unknown as T[], rowCount: 1 };
+    }
     if (normalized.includes("FROM public.objectives")) {
       return { rows: [this.objective] as unknown as T[], rowCount: 1 };
     }

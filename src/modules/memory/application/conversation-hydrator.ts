@@ -30,7 +30,7 @@ export class ConversationHydrator {
     const policies = await this.policyPackProvider.load(tenant.policyVersion);
 
     return {
-      tenant: { ...tenant, policies },
+      tenant: { ...tenant, financialPolicy: tenant.financialPolicy ?? {}, policies },
       contact: contactConversation.contact,
       conversation: contactConversation.conversation,
       transcript,

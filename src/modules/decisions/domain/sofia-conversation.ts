@@ -153,6 +153,7 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
     return makeResult(input.priorFacts, classifyLead(input.priorFacts, policy), [], "none", hasCountryClubContactPath(input.priorFacts), false);
   }
   const extractedFacts = extractFacts(input.latestMessage, input.priorFacts, true, input.pendingQuestion);
+  const noTimelineDetected = extractedFacts.purchase_timeline === "none";
   if (!extractedFacts.contact_name && isCountryClubStandaloneName(input.latestMessage, input.priorFacts)) {
     extractedFacts.contact_name = input.latestMessage.trim().replace(/[.!?]+$/, "");
     delete extractedFacts.vehicle_model_interest;
@@ -185,10 +186,13 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
     ], "ask", contactCaptured, hardRuleFailure);
   }
 
-  if (facts.purchase_timeline === "none" && input.priorFacts.purchase_timeline === undefined && /no estoy listo|not ready/i.test(cleanMessage)) {
+  if (facts.purchase_timeline === "none" && noTimelineDetected && /no estoy listo|not ready/i.test(cleanMessage)) {
     return makeResult(facts, "C", [knowledge.notQualifiedClose[language]], "follow_up", contactCaptured, false);
   }
-  if (facts.purchase_timeline === "none" && input.priorFacts.purchase_timeline === undefined) {
+  if (facts.purchase_timeline === "none" && noTimelineDetected && input.priorFacts.purchase_timeline === "none") {
+    return makeResult(facts, "C", [knowledge.notQualifiedClose[language]], "follow_up", contactCaptured, false);
+  }
+  if (facts.purchase_timeline === "none" && noTimelineDetected) {
     return makeResult(
       facts,
       leadLevel,
@@ -206,7 +210,7 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
   const mediaResponse = countryClubMediaResponse(input, facts, language);
   if (mediaResponse) {
     const opening = firstTurn ? countryClubOpening(facts, knowledge, policy, language, directAnswer) : [];
-    const question = countryClubNextQuestion(facts, input.contactChannel, policy, language);
+    const question = countryClubNextQuestion(facts, input.contactChannel, policy, language, input.lastResponse);
     return makeResult(facts, leadLevel, [...opening, mediaResponse, question].filter(Boolean) as string[], "ask", contactCaptured, hardRuleFailure);
   }
 
@@ -232,7 +236,7 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
     return makeResult(facts, "C", [knowledge.notQualifiedClose[language]], "follow_up", contactCaptured, false);
   }
 
-  const question = countryClubNextQuestion(facts, input.contactChannel, policy, language);
+  const question = countryClubNextQuestion(facts, input.contactChannel, policy, language, input.lastResponse);
   if (question) {
     const belowFloor = countryClubBelowFloor(facts, policy);
     const firstPush = belowFloor && facts.down_payment_push_target !== countryClubMinimum(facts, policy);
@@ -280,8 +284,12 @@ function countryClubNextQuestion(
   channel: string | undefined,
   policy: SofiaPolicy,
   language: "es" | "en",
+  lastResponse?: string,
 ): string | undefined {
-  if (!facts.contact_name) return countryClubNameQuestion(language);
+  if (!facts.contact_name) {
+    if (language !== "en" || !lastResponse || !/\b(?:name|nombre|gusto)\b/i.test(lastResponse)) return countryClubNameQuestion(language);
+    return countryClubQuestionAfterName(facts, channel, policy, language);
+  }
   if (!facts.vehicle_category && !facts.vehicle_model_interest) return language === "en" ? "What vehicle are you looking to finance?" : "¿Qué vehículo está buscando financiar?";
   if (!facts.vehicle_category && facts.vehicle_model_interest) return language === "en" ? "Would you describe that as a sedan, SUV, or truck?" : "¿Lo considera un sedán, una SUV o una troca?";
   if (facts.down_payment_declared === undefined) return language === "en" ? "How much would you have for the down payment?" : "¿Con cuánto contaría para el enganche?";
@@ -295,6 +303,26 @@ function countryClubNextQuestion(
   if ((normalizedChannel === "messenger" || normalizedChannel === "facebook" || normalizedChannel === "fb") && !facts.contact_value) {
     return language === "en" ? "May I have the best phone number for you?" : "¿Me comparte el mejor número de teléfono?";
   }
+  return undefined;
+}
+
+function countryClubQuestionAfterName(
+  facts: SofiaFacts,
+  channel: string | undefined,
+  policy: SofiaPolicy,
+  language: "es" | "en",
+): string | undefined {
+  if (!facts.vehicle_category && !facts.vehicle_model_interest) return language === "en" ? "What vehicle are you looking to finance?" : "¿Qué vehículo está buscando financiar?";
+  if (!facts.vehicle_category && facts.vehicle_model_interest) return language === "en" ? "Would you describe that as a sedan, SUV, or truck?" : "¿Lo considera un sedán, una SUV o una troca?";
+  if (facts.down_payment_declared === undefined) return language === "en" ? "How much would you have for the down payment?" : "¿Con cuánto contaría para el enganche?";
+  if (facts.has_trade_in === undefined) return countryClubTradeInQuestion(facts, policy, language);
+  if (facts.has_trade_in === true && !facts.trade_in_description) return language === "en" ? "What year and model is it?" : "¿De qué año y modelo es?";
+  if (facts.first_time_buyer === undefined) return language === "en" ? "Have you financed a vehicle before, or would this be your first time?" : "¿Ha financiado alguna vez o sería su primera vez?";
+  if (facts.purchase_timeline === undefined) return language === "en" ? "How soon are you looking to get into a vehicle?" : "¿En cuánto tiempo piensa tener el vehículo?";
+  if (facts.purchase_timeline === "none") return countryClubNoTimelineQuestion(policy, language);
+  if (facts.has_income_proof === undefined && facts.has_income_proof_document !== true) return language === "en" ? "Do you have pay stubs, bank statements, or an employer letter?" : "¿Cuenta con talones de pago, estados de cuenta o una carta del empleador?";
+  const normalizedChannel = normalizeContactChannel(channel ?? facts.contact_channel);
+  if ((normalizedChannel === "messenger" || normalizedChannel === "facebook" || normalizedChannel === "fb") && !facts.contact_value) return language === "en" ? "May I have the best phone number for you?" : "¿Me comparte el mejor número de teléfono?";
   return undefined;
 }
 
@@ -688,7 +716,7 @@ function extractFacts(message: string, priorFacts: SofiaFacts, countryClub = fal
   else if (years) facts.employment_months = Math.round(Number(years[1].replace(",", ".")) * 12);
   if (/\b(esta semana|este mes|this week|this month)\b/.test(normalized)) facts.purchase_timeline = /this week|esta semana/.test(normalized) ? "this_week" : "this_month";
   else if (/\b(pronto|soon)\b/.test(normalized)) facts.purchase_timeline = "none";
-  else if (/\b(solo estoy mirando|s[oó]lo estoy mirando|sin fecha|no estoy listo|just looking|no timeline)\b/.test(normalized)) facts.purchase_timeline = "none";
+  else if (/\b(solo estoy mirando|s[oó]lo estoy mirando|sin fecha|no estoy listo|no estoy seguro|no estoy segura|just looking|maybe later|maybe next year|next year|not sure|not ready|no timeline)\b/.test(normalized)) facts.purchase_timeline = "none";
   if (/\b(co[- ]?signer|cosigner|codeudor)\b/.test(normalized)) facts.has_co_signer = true;
   const hasIncomeProof = hasIncomeProofMention(normalized);
   const usableIncomeProof = hasUsableIncomeProof(normalized);
@@ -796,14 +824,17 @@ function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, no
     .replace(/^(?:un|una|el|la)\s+/i, "")
     .replace(/\s+/g, " ")
     .trim();
-  if (!cleaned || /^(?:suv|suvcita|camioneta|camioneta\s+(?:grande|familiar)|sedan|carro|carrito|cochecito|auto|troca|troka|trocka|trokita|troque|camion|truck|pickup|van|vanesita|minivan)(?:\s+(?:barato|barata|usado|usada|familiar|grande))?$/i.test(cleaned) || /^(?:m[aá]s\s+informaci[oó]n|informaci[oó]n|ayuda)$/i.test(cleaned)) return undefined;
+  if (!cleaned || /^(?:suv|suvcita|camioneta|camioneta\s+(?:grande|familiar)|sedan|carro|carrito|cochecito|auto|troca|troka|trocka|trokita|troque|camion|truck|pickup|van|vanesita|minivan)(?:\s+(?:barato|barata|usado|usada|familiar|grande))?$/i.test(cleaned) || /^(?:m[aá]s\s+informaci[oó]n|informaci[oó]n|ayuda|not sure|i am not sure|maybe later|maybe next year|just looking|not ready|i am not ready|next year|looking|busco)$/i.test(cleaned)) return undefined;
   return cleaned;
 }
 
 function isCountryClubStandaloneName(message: string, priorFacts: SofiaFacts): boolean {
   const trimmed = message.trim();
+  const normalized = normalizeClientText(trimmed);
   if (priorFacts.contact_name || !trimmed || trimmed.length > 40) return false;
   if (!priorFacts.vehicle_category && !priorFacts.vehicle_model_interest) return false;
+  if (priorFacts.vehicle_model_interest && normalized === normalizeClientText(priorFacts.vehicle_model_interest)) return false;
+  if (/^(?:not sure|i am not sure|maybe later|just looking|not ready|i am not ready|next year|busco|looking)$/i.test(normalized)) return false;
   if (/^(?:sí|si|yes|no|ok|okay|claro|gracias|thanks|hola)$/i.test(trimmed)) return false;
   return /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:[\s-]+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)?$/.test(trimmed);
 }
@@ -829,6 +860,7 @@ function extractContactName(message: string): string | undefined {
 
 function isValidContactName(candidate: string): boolean {
   const normalized = candidate.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (/\b(?:not sure|not ready|maybe later|just looking|next year|looking for|i am)\b/.test(normalized)) return false;
   if (/\b(?:con|de|para|por|como|esta|est[aá]|soy|habla|busco|quiero|tengo|mucho|gusto|down|payment|deposit|enganche|suv|troca|troka|trokita|truck|pickup|carro|auto|camioneta)\b/.test(normalized)) return false;
   if (SPANISH_NUMBER_WORDS.some((word) => new RegExp(`\\b${word}\\b`).test(normalized))) return false;
   return /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:[-\s][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){0,2}$/.test(candidate);

@@ -29,6 +29,20 @@ services:
         value: "false"
       - key: SOFIA_DEALER_NAME
         value: Koons Automotive of Culpeper
+      - key: CONVERSATIONAL_AI_ENABLED
+        value: "false"
+      - key: CONVERSATIONAL_AI_SEND_ENABLED
+        value: "false"
+      - key: CONVERSATIONAL_MODEL_BASE_URL
+        value: https://api.openai.com/v1
+      - key: CONVERSATIONAL_MODEL_API_KEY
+        sync: false
+      - key: CONVERSATIONAL_EXTRACTION_MODEL
+        value: gpt-5.6-luna
+      - key: CONVERSATIONAL_DRAFTING_MODEL
+        value: gpt-5.6-luna
+      - key: CONVERSATIONAL_MODEL_TIMEOUT_MS
+        value: "20000"
       - key: COUNTRY_CLUB_GHL_LOCATION_ID
         value: k9DePpsNBu9qWT1C6pW0
       - key: MEDIA_UNDERSTANDING_ENABLED

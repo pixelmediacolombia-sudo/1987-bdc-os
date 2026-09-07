@@ -6,6 +6,8 @@ export type TenantFeatureFlags = {
   sofiaEnabled: boolean;
   qualificationFlowEnabled: boolean;
   qualificationSignalEnabled: boolean;
+  conversationalAiShadowEnabled?: boolean;
+  conversationalAiSendEnabled?: boolean;
 };
 
 export type PolicyPack = {
@@ -38,6 +40,9 @@ export interface HydratedContext {
   tenant: {
     id: string;
     ghlLocationId?: string;
+    dealerName?: string;
+    financialPolicy?: Record<string, unknown>;
+    facebookPageId?: string;
     timezone: string;
     policyVersion: string;
     status: string;
