@@ -686,12 +686,12 @@ function extractFacts(message: string, priorFacts: SofiaFacts, countryClub = fal
   if (!priorFacts.vehicle_category && !isGenericVehicleFinancingCall(normalized)) {
     if (/\b(?:suv|suvcita|camioneta\s+(?:grande|familiar))\b/.test(normalized)) facts.vehicle_category = "suv";
     else if (/\b(?:sedan|carro|carrito|cochecito|auto)\b/.test(normalized)) facts.vehicle_category = "sedan";
-    else if (/\b(?:troca|troka|trocka|trokita|troque|camioneta\s+de\s+trabajo|camion|truck|pickup|trabajo)\b/.test(normalized)) facts.vehicle_category = "work truck";
+    else if (/\b(?:troca|troka|trocka|trokita|troque|camioneta\s+de\s+trabajo|camion|truck|pickup)\b/.test(normalized)) facts.vehicle_category = "work truck";
     else if (/\b(?:van|vanesita|minivan)\b/.test(normalized)) facts.vehicle_category = "van";
     if (/\bno s[eé] si\b[\s\S]*\b(?:carro|auto|suv|troca)\b/.test(normalized)) delete facts.vehicle_category;
   }
   const explicitVehicleYear = normalizedWithoutPhone.match(/\b(?:19|20)\d{2}\b/)?.[0];
-  if (countryClub && explicitVehicleYear && (priorFacts.vehicle_model_interest || /\b(?:tienen|tiene|disponible|disponibilidad|do you have|available)\b/i.test(userMessage))) {
+  if (countryClub && explicitVehicleYear && ((!hasDownPaymentContext(normalizedWithoutPhone) && priorFacts.vehicle_model_interest) || /\b(?:tienen|tiene|disponible|disponibilidad|do you have|available)\b/i.test(userMessage))) {
     facts.vehicle_year = Number(explicitVehicleYear);
   }
   const vehicleModel = contactName && !hasVehicleInterestCue(userMessage)
@@ -723,8 +723,10 @@ function extractFacts(message: string, priorFacts: SofiaFacts, countryClub = fal
   if (/\b(co[- ]?signer|cosigner|codeudor)\b/.test(normalized)) facts.has_co_signer = true;
   const hasIncomeProof = hasIncomeProofMention(normalized);
   const usableIncomeProof = hasUsableIncomeProof(normalized);
-  const deniesIncomeProof = /\b(no tengo|sin|do not have|don't have|dont have)\b.*\b(comprobantes?|estados de cuenta|talones?|carta del empleador|carta laboral|pay ?stubs?|bank statements?|employer letter)\b/.test(normalized);
-  if (usableIncomeProof || (pendingQuestion === "has_income_proof" && /^(?:s[ií]|yes|claro)$/i.test(normalized))) facts.has_income_proof = true;
+  const proofTerms = "(?:comprobantes?|estados de cuenta|talones?|carta del empleador|carta laboral|carta del trabajo|pay ?stubs?|bank statements?|employer letter)";
+  const affirmativeIncomeProof = new RegExp(`(?:pero\\s+)?(?:s[ií]|si|yes)\\s+(?:(?:tengo|cuento con)\\s+)?(?:${proofTerms})`, "i").test(normalized);
+  const deniesIncomeProof = new RegExp(`\\b(no tengo|sin|do not have|don't have|dont have)\\b.*\\b${proofTerms}\\b`).test(normalized) && !new RegExp(`\\b(?:pero|but)\\s+(?:s[ií]|yes)\\b.*\\b${proofTerms}\\b`).test(normalized);
+  if (usableIncomeProof || affirmativeIncomeProof || (pendingQuestion === "has_income_proof" && /^(?:s[ií]|yes|claro)$/i.test(normalized))) facts.has_income_proof = true;
   else if (deniesIncomeProof) facts.has_income_proof = false;
   else if (pendingQuestion === "has_income_proof" && /^(?:no|nop)$/i.test(normalized)) facts.has_income_proof = false;
   else if (hasIncomeProof) facts.has_income_proof = true;
@@ -751,6 +753,9 @@ function normalizeClientText(message: string): string {
     .replace(/\bkiero\b/g, "quiero")
     .replace(/\bpoko\b/g, "poco")
     .replace(/\bfinanciao\b/g, "financiado")
+    .replace(/\bcorrola\b/g, "corolla")
+    .replace(/\btayota\b/g, "toyota")
+    .replace(/\benganshe\b/g, "enganche")
     .replace(/\bpal\b/g, "para el")
     .replace(/\bpa\b/g, "para");
 }
@@ -760,7 +765,7 @@ function isStandaloneVehicleYear(message: string): boolean {
 }
 
 function hasIncomeProofMention(message: string): boolean {
-  return /\b(?:comprobantes?|estados de cuenta|talones?|carta del empleador|carta laboral|pay ?stubs?|bank statements?|employer letter)\b/.test(message);
+  return /\b(?:comprobantes?|estados de cuenta|talones?|carta del empleador|carta laboral|carta del trabajo|pay ?stubs?|bank statements?|employer letter)\b/.test(message);
 }
 
 function hasUsableIncomeProof(message: string): boolean {
@@ -770,6 +775,7 @@ function hasUsableIncomeProof(message: string): boolean {
     /talones?/,
     /carta del empleador/,
     /carta laboral/,
+    /carta del trabajo/,
     /pay ?stubs?/,
     /bank statements?/,
     /employer letter/,
@@ -779,16 +785,18 @@ function hasUsableIncomeProof(message: string): boolean {
 
 function extractDownPaymentNumber(message: string, expectsDownPayment: boolean): number | undefined {
   const matches = [...message.matchAll(/(?:\$|usd\s*)?(\d{1,3}(?:[,.]\d{3})+|\d{3,5})(?:\s*(?:d[oó]lares|usd))?/gi)];
-  const explicit = matches.find((match) => {
+  const isExplicit = (match: RegExpMatchArray): boolean => {
     const start = match.index ?? 0;
     const end = start + match[0].length;
     const before = message.slice(Math.max(0, start - 32), start);
     const after = message.slice(end, Math.min(message.length, end + 24));
     return /^\s*(?:\$|usd\b)/i.test(match[0]) ||
-      /(?:\$|\busd\b|d[oó]lares?|enganche|anticipo|inicial|parte de pago|down(?:\s+payment)?|deposit|cuento con|\b(?:con|with)\b|tengo|dispongo|ahorrad[oa])\s*$/i.test(before) ||
+      /(?:\$|\busd\b|d[oó]lares?|enganche|anticipo|inicial|parte de pago|down(?:\s+payment)?(?:\s+de)?|deposit|cuento con|\b(?:con|with)\b|tengo|dispongo|ahorrad[oa])\s*$/i.test(before) ||
       /^\s*(?:d[oó]lares?|\busd\b|down(?:\s+payment)?|deposit|de\s+(?:el\s+)?enganche|para\s+(?:el\s+)?enganche)\b/i.test(after);
-  });
-  const selected = explicit ?? (
+  };
+  const explicitMatches = matches.filter(isExplicit);
+  const correction = /\b(?:mejor|ahora|en realidad|actually|rather|correcci[oó]n|dije)\b/i.test(message);
+  const selected = (correction ? explicitMatches.at(-1) : explicitMatches[0]) ?? (
     expectsDownPayment && matches.length === 1 &&
     (/^(?:(?:con|with|tengo|cuento con|dispongo de|puedo dar|son)\s+)?(?:\$\s*)?\d[\d,.]*(?:\s*(?:d[oó]lares|usd|down(?:\s+payment)?|deposit))?(?:\s+como\s+down(?:\s+payment)?)?[.!?]?$/i.test(message.trim()) || /\bcomo\b[\s\S]*\bm[aá]s\s+o\s+menos\b/i.test(message))
       ? matches[0]
@@ -812,6 +820,7 @@ function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, no
     !priorFacts.vehicle_category && !priorFacts.vehicle_model_interest &&
     normalized.split(/\s+/).length <= 5 &&
     !/[¿?]/.test(message) &&
+    !hasDownPaymentContext(normalized) &&
     !/\b(?:hola|gracias|informaci[oó]n|ayuda|quiero(?:\s+m[aá]s)?|busco|buscando|looking|requisit|d[oó]nde|donde|cu[aá]nto|horario|mensualidad|document|piden|necesito|buenas|buenos d[ií]as|buenas tardes|buenas noches)\b/i.test(normalized) &&
     !/^(?:si|sí|no|ok|okay|claro|un carro|un auto|una camioneta|una suv|un sedan)$/i.test(normalized)
       ? message.trim()
@@ -831,8 +840,12 @@ function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, no
     .replace(/^(?:un|una|el|la)\s+/i, "")
     .replace(/\s+/g, " ")
     .trim();
-  if (!cleaned || /^(?:suv|suvcita|camioneta|camioneta\s+(?:grande|familiar)|sedan|carro|carrito|cochecito|auto|troca|troka|trocka|trokita|troque|camion|truck|pickup|van|vanesita|minivan)(?:\s+(?:barato|barata|usado|usada|familiar|grande))?$/i.test(cleaned) || /^(?:m[aá]s\s+informaci[oó]n|informaci[oó]n|ayuda|no\s+s[eé]|no\s+s[eé]\s+todav[ií]a|todav[ií]a|quiz[aá]s|talvez\s+despu[eé]s|tal\s+vez\s+despu[eé]s|solo\s+miro|solo\s+estoy\s+mirando|not sure|i am not sure|maybe later|maybe next year|just looking|not ready|i am not ready|next year|looking|busco)$/i.test(cleaned)) return undefined;
-  return cleaned;
+  const normalizedVehicle = cleaned
+    .replace(/\bcorrola\b/gi, "Corolla")
+    .replace(/\btayota\b/gi, "Toyota")
+    .replace(/\benganshe\b/gi, "enganche");
+  if (!normalizedVehicle || /^(?:suv|suvcita|camioneta|camioneta\s+(?:grande|familiar)|sedan|carro|carrito|cochecito|auto|troca|troka|trocka|trokita|troque|camion|truck|pickup|van|vanesita|minivan)(?:\s+(?:barato|barata|usado|usada|familiar|grande))?$/i.test(normalizedVehicle) || /^(?:m[aá]s\s+informaci[oó]n|informaci[oó]n|ayuda|no\s+s[eé]|no\s+s[eé]\s+todav[ií]a|todav[ií]a|quiz[aá]s|talvez\s+despu[eé]s|tal\s+vez\s+despu[eé]s|solo\s+miro|solo\s+estoy\s+mirando|not sure|i am not sure|maybe later|maybe next year|just looking|not ready|i am not ready|next year|looking|busco)$/i.test(normalizedVehicle)) return undefined;
+  return normalizedVehicle;
 }
 
 function isCountryClubStandaloneName(message: string, priorFacts: SofiaFacts): boolean {
@@ -892,7 +905,9 @@ const SPANISH_NUMBER_WORDS = [
   "mil",
 ];
 const SPANISH_NUMBER_WORD = `(?:${SPANISH_NUMBER_WORDS.join("|")})`;
-const SPANISH_THOUSANDS_AMOUNT_PATTERN = new RegExp(`\\b${SPANISH_NUMBER_WORD}(?:\\s+${SPANISH_NUMBER_WORD})*\\s+mil(?:\\s+${SPANISH_NUMBER_WORD})?\\b|\\bmil(?:\\s+${SPANISH_NUMBER_WORD})?\\b`, "i");
+const SPANISH_AMOUNT_WORDS = SPANISH_NUMBER_WORDS.filter((word) => !["un", "uno", "una"].includes(word));
+const SPANISH_AMOUNT_WORD = `(?:${SPANISH_AMOUNT_WORDS.join("|")})`;
+const SPANISH_THOUSANDS_AMOUNT_PATTERN = new RegExp(`\\b${SPANISH_AMOUNT_WORD}(?:\\s+${SPANISH_AMOUNT_WORD})*\\b`, "i");
 
 function parseSpanishAmount(value: string): number | undefined {
   const units: Record<string, number> = {
@@ -903,17 +918,17 @@ function parseSpanishAmount(value: string): number | undefined {
     cien: 100, ciento: 100, doscientos: 200, trescientos: 300, cuatrocientos: 400, quinientos: 500, seiscientos: 600, setecientos: 700, ochocientos: 800, novecientos: 900,
   };
   let total = 0;
-  let current = 0;
+  let group = 0;
   for (const token of value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/)) {
     if (token === "mil") {
-      total += (current || 1) * 1000;
-      current = 0;
+      total += (group || 1) * 1000;
+      group = 0;
       continue;
     }
     const amount = units[token];
     if (amount === undefined) return undefined;
-    current += amount;
+    group += amount;
   }
-  const result = total + current;
-  return total > 0 ? result : undefined;
+  const result = total + group;
+  return result > 0 ? result : undefined;
 }

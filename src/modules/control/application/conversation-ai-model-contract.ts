@@ -1,6 +1,6 @@
 import type { SofiaFacts } from "@/modules/decisions/domain/sofia-conversation";
 
-export const CONVERSATIONAL_PROMPT_VERSION = "conversation-ai-shadow-v2-ledger-guard";
+export const CONVERSATIONAL_PROMPT_VERSION = "conversation-ai-shadow-v3-extraction-only";
 
 export type ConversationalModelTranscriptMessage = {
   direction: "inbound" | "outbound";
@@ -23,22 +23,6 @@ export type ConversationalModelExtraction = {
   missingFields: string[];
 };
 
-export type ConversationalModelDraftInput = {
-  latestMessage: string;
-  transcript: ConversationalModelTranscriptMessage[];
-  knownFacts: SofiaFacts;
-  resolvedFacts: SofiaFacts;
-  pendingObjectives: string[];
-  requiredAction: "ask" | "handoff" | "follow_up" | "none";
-  requiredQuestion?: string;
-  recentOutboundResponses: string[];
-  nextQuestion?: string;
-  ruleResponse?: string;
-  language: string;
-  dealerName: string;
-  channel: string;
-};
-
 export type ConversationalModelUsage = {
   inputTokens?: number;
   outputTokens?: number;
@@ -46,13 +30,10 @@ export type ConversationalModelUsage = {
 
 export type ConversationalModelPort = {
   readonly extractionModel: string;
+  /** Kept as historical database metadata; v3 never calls a drafting model. */
   readonly draftingModel: string;
   extract(input: ConversationalModelExtractionInput): Promise<{
     value: ConversationalModelExtraction;
-    usage?: ConversationalModelUsage;
-  }>;
-  draft(input: ConversationalModelDraftInput): Promise<{
-    value: string;
     usage?: ConversationalModelUsage;
   }>;
 };
@@ -69,6 +50,7 @@ export type ConversationAiShadowRecord = {
   ruleFacts: SofiaFacts;
   requiredAction?: "ask" | "handoff" | "follow_up" | "none";
   requiredQuestion?: string;
+  responseSource: "deterministic_rule";
   ruleResponse?: string;
   modelResponse?: string;
   draftAccepted: boolean;

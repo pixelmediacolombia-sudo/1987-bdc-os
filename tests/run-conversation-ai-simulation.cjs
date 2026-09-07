@@ -26,9 +26,6 @@ class FakeOpenAI {
     return { value: { facts, intent: "qualification", missingFields: input.missingObjectives }, usage: { inputTokens: 20, outputTokens: 8 } };
   }
 
-  async draft(input) {
-    return { value: input.ruleResponse || "Thanks. Let me get the next detail.", usage: { inputTokens: 40, outputTokens: 12 } };
-  }
 }
 
 async function main() {
@@ -75,17 +72,17 @@ async function main() {
         }),
       });
       facts = result.ruleResult.facts;
-      turns.push({ customer: latestMessage, sofia: result.modelResponse || result.ruleResult.response || "(no response)", lead: result.ruleResult.leadLevel, next: result.ruleResult.nextStep, shadow: result.draftAccepted ? "accepted" : result.safetyIssues.join(",") || "fallback" });
+      turns.push({ customer: latestMessage, sofia: result.ruleResult.response || "(no response)", lead: result.ruleResult.leadLevel, next: result.ruleResult.nextStep, shadow: result.responseSource, extraction: result.extractionSucceeded ? "ok" : result.extractionIssues.join(",") || "fallback" });
       if (result.ruleResult.response) transcript.push({ direction: "outbound", content: result.ruleResult.response });
       transcript.push({ direction: "inbound", content: latestMessage });
       previous = result.ruleResult.response;
     }
     console.log(`\n=== ${scenario.id} channel=${scenario.channel} final=${turns.at(-1).lead} ===`);
-    for (const turn of turns) console.log(`CLIENT: ${turn.customer}\nSOFIA: ${turn.sofia}\nSTATE: lead=${turn.lead} next=${turn.next} shadow=${turn.shadow}`);
+    for (const turn of turns) console.log(`CLIENT: ${turn.customer}\nSOFIA: ${turn.sofia}\nSTATE: lead=${turn.lead} next=${turn.next} source=${turn.shadow} extraction=${turn.extraction}`);
     assert.ok(["A", "B", "C"].includes(turns.at(-1).lead));
     outcomes.push({ id: scenario.id, finalLead: turns.at(-1).lead, finalNext: turns.at(-1).next });
   }
-  console.log(`\nSIMULATION_SUMMARY ${JSON.stringify({ conversations: scenarios.length, shadowRuns: records.length, acceptedDrafts: records.filter((record) => record.draftAccepted).length, finalLeads: outcomes })}`);
+  console.log(`\nSIMULATION_SUMMARY ${JSON.stringify({ conversations: scenarios.length, shadowRuns: records.length, successfulExtractions: records.filter((record) => record.extraction).length, responseSource: "deterministic_rule", finalLeads: outcomes })}`);
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

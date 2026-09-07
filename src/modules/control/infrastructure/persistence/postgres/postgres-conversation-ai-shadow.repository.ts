@@ -12,9 +12,9 @@ export class PostgresConversationAiShadowRepository implements ConversationAiSha
       await client.query(
         `INSERT INTO public.conversation_ai_shadow_runs
           (tenant_id, contact_id, inbound_external_id, extraction_model, drafting_model, prompt_version,
-           extraction, model_facts, rule_facts, rule_response, model_response, draft_accepted, safety_issues,
+           extraction, model_facts, rule_facts, response_source, rule_response, model_response, draft_accepted, safety_issues,
            input_tokens, output_tokens)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12, $13, $14::jsonb, $15, $16)`,
         [
           record.tenantId,
           record.contactId,
@@ -25,6 +25,7 @@ export class PostgresConversationAiShadowRepository implements ConversationAiSha
           JSON.stringify(record.extraction ?? null),
           JSON.stringify(record.modelFacts),
           JSON.stringify(record.ruleFacts),
+          record.responseSource,
           record.ruleResponse ?? null,
           record.modelResponse ?? null,
           record.draftAccepted,

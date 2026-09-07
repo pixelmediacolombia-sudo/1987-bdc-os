@@ -65,11 +65,12 @@ async function runScenario(scenario, records) {
     facts = result.ruleResult.facts;
     conversation.turns.push({
       customer: latestMessage,
-      sofia: result.modelResponse || result.ruleResult.response || "(no response)",
+      sofia: result.ruleResult.response || "(no response)",
       lead: result.ruleResult.leadLevel,
       next: result.ruleResult.nextStep,
-      model: result.modelResponse ? "completed" : "fallback",
-      safety: result.safetyIssues,
+      model: result.responseSource,
+      extraction: result.extractionSucceeded ? "ok" : "fallback",
+      issues: result.extractionIssues,
     });
     if (result.ruleResult.response) transcript.push({ direction: "outbound", content: result.ruleResult.response });
     transcript.push({ direction: "inbound", content: latestMessage });
@@ -86,14 +87,12 @@ async function main() {
   for (const outcome of outcomes) {
     console.log(`\n=== ${outcome.id} channel=${outcome.channel} final=${outcome.turns.at(-1).lead} ===`);
     for (const turn of outcome.turns) {
-      console.log(`CLIENT: ${turn.customer}\nSOFIA: ${turn.sofia}\nSTATE: lead=${turn.lead} next=${turn.next} model=${turn.model}${turn.safety.length ? ` safety=${turn.safety.join(",")}` : ""}`);
+      console.log(`CLIENT: ${turn.customer}\nSOFIA: ${turn.sofia}\nSTATE: lead=${turn.lead} next=${turn.next} source=${turn.model} extraction=${turn.extraction}${turn.issues.length ? ` issues=${turn.issues.join(",")}` : ""}`);
     }
   }
 
   const completedExtractions = records.filter((record) => record.extraction).length;
-  const completedDrafts = records.filter((record) => record.modelResponse).length;
-  const safetyRejected = records.filter((record) => !record.draftAccepted && record.safetyIssues.length > 0).length;
-  const failures = records.filter((record) => record.safetyIssues.includes("draft_call_failed")).length;
+  const extractionCallFailures = records.filter((record) => record.safetyIssues.includes("extraction_call_failed")).length;
   const totalInputTokens = records.reduce((sum, record) => sum + record.inputTokens, 0);
   const totalOutputTokens = records.reduce((sum, record) => sum + record.outputTokens, 0);
   const summary = {
@@ -101,14 +100,13 @@ async function main() {
     turns: outcomes.reduce((sum, outcome) => sum + outcome.turns.length, 0),
     shadowRuns: records.length,
     completedExtractions,
-    completedDrafts,
-    safetyRejected,
-    callFailures: failures,
+    extractionCallFailures,
+    responseSource: "deterministic_rule",
     totalInputTokens,
     totalOutputTokens,
     elapsedMs: Date.now() - startedAt,
     automaticSending: sendEnabled,
-    model: model.draftingModel,
+    model: model.extractionModel,
   };
   console.log(`\nOPENAI_LOCAL_SIMULATION_SUMMARY ${JSON.stringify(summary)}`);
   assert.equal(outcomes.length, 8);

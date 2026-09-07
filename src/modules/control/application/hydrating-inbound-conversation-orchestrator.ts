@@ -87,7 +87,6 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
       });
       const aiShadowEnabled = Boolean(this.conversationalAi && tenantFlags.conversationalAiShadowEnabled);
       let result = ruleTurn(priorFacts);
-      let modelResponse: string | undefined;
       if (aiShadowEnabled && this.conversationalAi) {
         try {
           const aiResult = await this.conversationalAi.process({
@@ -104,8 +103,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
             ruleTurn,
           });
           result = aiResult.ruleResult;
-          if (this.conversationalAiSendEnabled && tenantFlags.conversationalAiSendEnabled && aiResult.draftAccepted) modelResponse = aiResult.modelResponse;
-          this.logger.info(`Sofia conversational shadow tenant=${input.tenantId} contact=${input.contactId} accepted=${aiResult.draftAccepted ? "yes" : "no"} issues=${aiResult.safetyIssues.length}`);
+          this.logger.info(`Sofia conversational shadow tenant=${input.tenantId} contact=${input.contactId} extraction=${aiResult.extractionSucceeded ? "ok" : "fallback"} response_source=${aiResult.responseSource} issues=${aiResult.extractionIssues.length}`);
         } catch {
           this.logger.error(`Sofia conversational shadow failed tenant=${input.tenantId} contact=${input.contactId}; deterministic response retained`);
         }
@@ -117,7 +115,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
         !result.hardRuleFailure &&
         result.contactCaptured &&
         !previous?.facts.handoff_completed;
-      const response = (modelResponse ?? result.response)?.trim();
+      const response = result.response?.trim();
       this.logger.info(
         `Sofia decision tenant=${input.tenantId} contact=${input.contactId} channel=${inboundChannel} turn=${(previous?.turnCount ?? 0) + 1} lead=${result.leadLevel} next=${result.nextStep} response=${response ? "yes" : "no"} flags=sofia:${sofiaEnabledForTenant ? "on" : "off"},qualification:${qualificationFlowEnabledForTenant ? "on" : "off"}`,
       );

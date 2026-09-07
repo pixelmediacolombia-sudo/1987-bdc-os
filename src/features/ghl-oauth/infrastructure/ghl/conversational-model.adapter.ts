@@ -1,5 +1,4 @@
 import type {
-  ConversationalModelDraftInput,
   ConversationalModelExtraction,
   ConversationalModelExtractionInput,
   ConversationalModelPort,
@@ -29,10 +28,16 @@ export class OpenAICompatibleConversationalModel implements ConversationalModelP
       {
         role: "system",
         content: [
-          "You are the extraction component of a dealership qualification assistant.",
+          "You are the language understanding and extraction component of a dealership qualification assistant.",
           "Return JSON only with exactly: facts, intent, missingFields.",
-          "Extract only facts explicitly present in the customer message; do not infer approval, price, inventory, lead level, or a next action.",
-          "Use null or omit fields that are not explicit. Facts are advisory and code validates them.",
+          "Extract facts explicitly present in the latest customer message, including facts embedded in combined sentences and facts sent before the question was asked.",
+          "Return only facts newly stated or corrected in the latest customer message; do not echo unchanged values from knownFacts.",
+          "Normalize common loose spelling and dealership shorthand: corrola/tayota -> Corolla/Toyota, enganshe -> enganche, troca -> work truck category, down/de enganche -> down_payment_declared.",
+          "Convert Spanish number words and mixed language amounts to canonical numbers: quinientos=500, mil quinientos=1500, dos mil=2000. Prefer the latest value when the customer corrects a previous amount, for example 'dije 1500, mejor 2000'.",
+          "Understand negations and corrections: 'no tengo talones pero sí carta del trabajo' means has_income_proof=true; never overwrite a fact with an inference.",
+          "Use only these fact names: contact_name, vehicle_category, vehicle_model_interest, vehicle_year, down_payment_declared, has_trade_in, first_time_buyer, purchase_timeline, has_income_proof, contact_value, employment_months, trade_in_description, trade_in_model, trade_in_year, trade_in_financed, has_co_signer, vehicle_use. Use down_payment_declared, never 'enganche' or 'down_payment'.",
+          "Do not infer approval, price, inventory, lead level, or a next action.",
+          "Facts are advisory and code validates them. Return canonical values, omit unknown fields, and never return prose outside the JSON object.",
         ].join(" "),
       },
       { role: "user", content: JSON.stringify(input) },
@@ -46,27 +51,6 @@ export class OpenAICompatibleConversationalModel implements ConversationalModelP
       },
       ...(response.usage ? { usage: response.usage } : {}),
     };
-  }
-
-  async draft(input: ConversationalModelDraftInput): Promise<{ value: string; usage?: ConversationalModelUsage }> {
-    const response = await this.complete(this.draftingModel, [
-      {
-        role: "system",
-        content: [
-          "You write one short Spanish or English dealership qualification reply as Sofía.",
-          "The supplied resolvedFacts, pendingObjectives, requiredAction, requiredQuestion, deterministicResponse, and recentOutboundResponses are authoritative.",
-          "The Question Ledger and deterministic rules already decided what happens next. You must not choose a different question, action, lead level, or handoff state.",
-          "If requiredAction is ask, ask only requiredQuestion, rephrasing it briefly if needed. If requiredAction is handoff or follow_up, do not ask a question. If the instruction is unclear, return deterministicResponse exactly.",
-          "Acknowledge the customer before asking at most one question. Match the customer's length and use their own vehicle wording when available.",
-          "Do not reuse recentOutboundResponses or any question already answered by resolvedFacts.",
-          "Never invent numbers, prices, down payments, monthly payments, URLs, inventory availability, approval promises, appointments, calls, or alternative vehicles.",
-          "Do not decide qualification or what to send. Follow the supplied deterministicResponse and required action; if uncertain, reproduce the deterministicResponse exactly.",
-          "Return plain text only, with no labels or analysis.",
-        ].join(" "),
-      },
-      { role: "user", content: JSON.stringify(input) },
-    ], false);
-    return { value: response.content.trim(), ...(response.usage ? { usage: response.usage } : {}) };
   }
 
   private async complete(model: string, messages: Array<{ role: "system" | "user"; content: string }>, jsonMode: boolean): Promise<{ content: string; usage?: ConversationalModelUsage }> {

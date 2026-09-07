@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS public.conversation_ai_shadow_runs (
   extraction JSONB,
   model_facts JSONB NOT NULL DEFAULT '{}'::jsonb,
   rule_facts JSONB NOT NULL DEFAULT '{}'::jsonb,
+  response_source TEXT NOT NULL DEFAULT 'deterministic_rule',
   rule_response TEXT,
   model_response TEXT,
   draft_accepted BOOLEAN NOT NULL DEFAULT false,
@@ -27,6 +28,9 @@ CREATE TABLE IF NOT EXISTS public.conversation_ai_shadow_runs (
   output_tokens INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE public.conversation_ai_shadow_runs
+  ADD COLUMN IF NOT EXISTS response_source TEXT NOT NULL DEFAULT 'deterministic_rule';
 
 CREATE INDEX IF NOT EXISTS conversation_ai_shadow_tenant_contact_idx
   ON public.conversation_ai_shadow_runs (tenant_id, contact_id, created_at DESC);
