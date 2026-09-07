@@ -51,7 +51,11 @@ export async function enrichInboundMedia(
     }
   }
 
-  const content = [inbound.content.trim(), ...understood].filter(Boolean).join("\n");
+  const originalContent = inbound.content.trim();
+  const content = [
+    originalContent && !(understood.length > 0 && /^adjunto de audio$/i.test(originalContent)) ? originalContent : "",
+    ...understood,
+  ].filter(Boolean).join("\n");
   const enrichedMessage: InboundMessage = {
     ...inbound,
     content,
