@@ -1093,7 +1093,6 @@ const SPANISH_NUMBER_WORDS = [
   "cien", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos", "seiscientos", "setecientos", "ochocientos", "novecientos",
   "mil",
 ];
-const SPANISH_NUMBER_WORD = `(?:${SPANISH_NUMBER_WORDS.join("|")})`;
 const SPANISH_AMOUNT_WORDS = SPANISH_NUMBER_WORDS.filter((word) => !["un", "uno", "una"].includes(word));
 const SPANISH_AMOUNT_WORD = `(?:${SPANISH_AMOUNT_WORDS.join("|")})`;
 const SPANISH_THOUSANDS_AMOUNT_PATTERN = new RegExp(`\\b${SPANISH_AMOUNT_WORD}(?:\\s+${SPANISH_AMOUNT_WORD})*\\b`, "i");
