@@ -106,7 +106,7 @@ export class SofiaConversationEngine {
 
   processTurn(input: SofiaTurnInput): SofiaTurnResult {
     if (this.policy.knowledge?.id === "country_club_cars") {
-      return processCountryClubTurn(input, this.policy, this.policy.knowledge);
+      return processDealerTurn(input, this.policy, this.policy.knowledge);
     }
     const extractedFacts = extractFacts(input.latestMessage, input.priorFacts);
     const facts = mergeFacts(input.priorFacts, factsFromMedia(input.mediaContext), extractedFacts);
@@ -150,24 +150,24 @@ export class SofiaConversationEngine {
 
 }
 
-function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, knowledge: SofiaKnowledge): SofiaTurnResult {
+function processDealerTurn(input: SofiaTurnInput, policy: SofiaPolicy, knowledge: SofiaKnowledge): SofiaTurnResult {
   const cleanMessage = stripAdMetadata(input.latestMessage);
   if ((!cleanMessage || !/[\p{L}\p{N}]/u.test(cleanMessage) || input.isAdvertisementMetadata) && !input.mediaContext?.audioTranscriptionFailed) {
-    return makeResult(input.priorFacts, classifyLead(input.priorFacts, policy), [], "none", hasCountryClubContactPath(input.priorFacts), false);
+    return makeResult(input.priorFacts, classifyLead(input.priorFacts, policy), [], "none", hasDealerContactPath(input.priorFacts), false);
   }
   const extractedFacts = extractFacts(
     input.latestMessage,
     input.priorFacts,
     true,
-    input.pendingQuestion ?? countryClubPendingQuestion(input.priorFacts.negotiation_step),
+    input.pendingQuestion ?? dealerPendingQuestion(input.priorFacts.negotiation_step),
   );
   const noTimelineDetected = extractedFacts.purchase_timeline === "none";
-  if (!extractedFacts.contact_name && isCountryClubStandaloneName(input.latestMessage, input.priorFacts)) {
+  if (!extractedFacts.contact_name && isDealerStandaloneName(input.latestMessage, input.priorFacts)) {
     extractedFacts.contact_name = input.latestMessage.trim().replace(/[.!?]+$/, "");
     delete extractedFacts.vehicle_model_interest;
   }
   const facts = mergeFacts(input.priorFacts, factsFromMedia(input.mediaContext, true), extractedFacts);
-  const vehicleCorrection = isCountryClubVehicleCorrection(cleanMessage);
+  const vehicleCorrection = isDealerVehicleCorrection(cleanMessage);
   if (vehicleCorrection) {
     delete facts.vehicle_category;
     delete facts.vehicle_model_interest;
@@ -179,24 +179,24 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
     facts.has_trade_in = false;
     delete facts.trade_in_description;
   }
-  applyCountryClubCategoryFromModel(facts, knowledge);
+  applyDealerCategoryFromModel(facts, knowledge);
   const contactChannel = normalizeContactChannel(input.contactChannel);
   if (contactChannel) facts.contact_channel = contactChannel;
-  const language = countryClubLanguage(input.language);
+  const language = dealerLanguage(input.language);
   const amountChanged = extractedFacts.down_payment_declared !== undefined &&
     extractedFacts.down_payment_declared !== input.priorFacts.down_payment_declared;
-  if (amountChanged && countryClubBelowFloor(facts, policy)) {
-    facts.negotiation_step = "reach_floor";
-    facts.down_payment_push_target = countryClubMinimum(facts, policy);
+  if (amountChanged && dealerBelowFloor(facts, policy)) {
+    facts.negotiation_step = "none";
+    facts.down_payment_push_target = dealerMinimum(facts, policy);
     delete facts.push_accepted;
     delete facts.down_payment_accepted;
   }
   applyPushDecision(facts, cleanMessage);
-  const contactCaptured = hasCountryClubContactPath(facts);
+  const contactCaptured = hasDealerContactPath(facts);
   const hardRuleFailure = hasHardRuleFailure(facts);
   const leadLevel = classifyLead(facts, policy);
-  const directAnswer = countryClubAnswer(input.latestMessage, facts, policy, knowledge, language);
-  const acknowledgement = countryClubAcknowledgement(extractedFacts, facts, language, input.priorFacts);
+  const directAnswer = dealerAnswer(input.latestMessage, facts, policy, knowledge, language);
+  const acknowledgement = dealerAcknowledgement(extractedFacts, facts, language, input.priorFacts);
   const firstTurn = input.isFirstTurn || (input.turnCount === 1 && Object.keys(input.priorFacts).length === 0);
 
   if (input.mediaContext?.audioTranscriptionFailed) {
@@ -215,7 +215,7 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
     return makeResult(
       facts,
       leadLevel,
-      [language === "en" ? "I understand, you are still looking." : "Entiendo, todavía está revisando opciones.", countryClubNoTimelineQuestion(policy, language)],
+      [language === "en" ? "I understand, you are still looking." : "Entiendo, todavía está revisando opciones.", dealerNoTimelineQuestion(policy, language)],
       "ask",
       contactCaptured,
       false,
@@ -223,23 +223,23 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
   }
 
   if (facts.handoff_completed && !directAnswer) {
-    return makeResult(facts, leadLevel, [countryClubSafeExit(knowledge, language)], "follow_up", contactCaptured, hardRuleFailure);
+    return makeResult(facts, leadLevel, [dealerSafeExit(knowledge, language)], "follow_up", contactCaptured, hardRuleFailure);
   }
 
-  const mediaResponse = countryClubMediaResponse(input, facts, language);
+  const mediaResponse = dealerMediaResponse(input, facts, language);
   if (mediaResponse) {
-    const opening = firstTurn ? countryClubOpening(facts, knowledge, policy, language, directAnswer) : [];
-    const question = countryClubNextQuestion(facts, input.contactChannel, policy, language, input.lastResponse);
+    const opening = firstTurn ? dealerOpening(facts, knowledge, language, directAnswer) : [];
+    const question = dealerNextQuestion(facts, input.contactChannel, policy, language, input.lastResponse);
     return makeResult(facts, leadLevel, [...opening, mediaResponse, question].filter(Boolean) as string[], "ask", contactCaptured, hardRuleFailure);
   }
 
   if (firstTurn) {
-    const opening = countryClubOpening(facts, knowledge, policy, language, directAnswer);
-    const staircase = countryClubNegotiationStaircase(facts, input.priorFacts, policy, knowledge, language, extractedFacts);
+    const opening = dealerOpening(facts, knowledge, language, directAnswer);
+    const staircase = dealerNegotiationStaircase(facts, input.priorFacts, policy, knowledge, language, extractedFacts);
     if (staircase) {
       return makeResult(facts, staircase.leadLevel ?? leadLevel, [...opening, ...staircase.messages], staircase.nextStep, contactCaptured, false);
     }
-    const question = facts.contact_name ? countryClubNextQuestion(facts, input.contactChannel, policy, language) : countryClubNameQuestion(language);
+    const question = facts.contact_name ? dealerNextQuestion(facts, input.contactChannel, policy, language) : dealerNameQuestion(language);
     return makeResult(facts, leadLevel, [...opening, question].filter(Boolean) as string[], "ask", contactCaptured, hardRuleFailure);
   }
 
@@ -248,69 +248,65 @@ function processCountryClubTurn(input: SofiaTurnInput, policy: SofiaPolicy, know
       language === "en" ? "You are right, I am sorry. We have not established the vehicle yet." : "Tiene toda la razón, disculpe. Todavía no hemos definido el vehículo.",
       language === "en" ? "Are you looking for a car, an SUV, or a truck?" : "¿Qué tipo de vehículo anda buscando: carro, SUV o troca?",
     ];
-    return makeResult(facts, classifyLead(facts, policy), countryClubAvoidLiteralRepeat(correctionMessages, input.lastResponse, language), "ask", contactCaptured, false);
+    return makeResult(facts, classifyLead(facts, policy), dealerAvoidLiteralRepeat(correctionMessages, input.lastResponse, language), "ask", contactCaptured, false);
   }
 
   if (hardRuleFailure) {
-    return makeResult(facts, "C", [acknowledgement ?? countryClubThanks(language), countryClubSafeExit(knowledge, language)], "follow_up", contactCaptured, true);
+    return makeResult(facts, "C", [acknowledgement ?? dealerThanks(language), dealerSafeExit(knowledge, language)], "follow_up", contactCaptured, true);
   }
 
   if (input.priorFacts.purchase_timeline === "none" && /^(?:no|nop|todav[ií]a no|no estoy listo|not yet|not right now)\b/.test(stripAdMetadata(input.latestMessage).trim().toLowerCase())) {
     return makeResult(facts, "C", [knowledge.notQualifiedClose[language]], "follow_up", contactCaptured, false);
   }
 
-  const staircase = countryClubNegotiationStaircase(facts, input.priorFacts, policy, knowledge, language, extractedFacts, directAnswer);
+  const staircase = dealerNegotiationStaircase(facts, input.priorFacts, policy, knowledge, language, extractedFacts, directAnswer);
   if (staircase) {
     return makeResult(
       facts,
       staircase.leadLevel ?? leadLevel,
-      countryClubAvoidLiteralRepeat(staircase.messages, input.lastResponse, language),
+      dealerAvoidLiteralRepeat(staircase.messages, input.lastResponse, language),
       staircase.nextStep,
       contactCaptured,
       false,
     );
   }
 
-  const question = countryClubNextQuestion(facts, input.contactChannel, policy, language, input.lastResponse);
+  const question = dealerNextQuestion(facts, input.contactChannel, policy, language, input.lastResponse);
   if (question) {
-    const categoryJustCaptured = Boolean(extractedFacts.vehicle_category && !input.priorFacts.vehicle_category);
     const messages = [
       directAnswer,
       acknowledgement,
-      categoryJustCaptured ? countryClubCategoryFloorMessage(facts, policy, language) : undefined,
       question,
     ].filter(Boolean) as string[];
-    return makeResult(facts, leadLevel, countryClubAvoidLiteralRepeat(dedupeMessages(messages), input.lastResponse, language), "ask", contactCaptured, false);
+    return makeResult(facts, leadLevel, dealerAvoidLiteralRepeat(dedupeMessages(messages), input.lastResponse, language), "ask", contactCaptured, false);
   }
 
   if (leadLevel === "A" || leadLevel === "B") {
     facts.handoff_completed = true;
-    return makeResult(facts, leadLevel, [countryClubQualifiedHandoff(knowledge, language, facts.contact_name)], "handoff", contactCaptured, false);
+    return makeResult(facts, leadLevel, [dealerQualifiedHandoff(knowledge, language, facts.contact_name)], "handoff", contactCaptured, false);
   }
-  return makeResult(facts, leadLevel, countryClubAvoidLiteralRepeat([knowledge.notQualifiedClose[language]], input.lastResponse, language), "follow_up", contactCaptured, false);
+  return makeResult(facts, leadLevel, dealerAvoidLiteralRepeat([knowledge.notQualifiedClose[language]], input.lastResponse, language), "follow_up", contactCaptured, false);
 }
 
-function countryClubOpening(
+function dealerOpening(
   facts: SofiaFacts,
   knowledge: SofiaKnowledge,
-  policy: SofiaPolicy,
   language: "es" | "en",
   directAnswer?: string,
 ): string[] {
   const greeting = language === "en"
     ? `Hi, this is Sofía with ${knowledge.dealer.name.replace(/[.!?]+$/, "")}.`
     : `Hola, soy Sofía de ${knowledge.dealer.name.replace(/[.!?]+$/, "")}.`;
-  const vehicle = facts.vehicle_model_interest ?? (facts.vehicle_category ? displayCountryClubCategory(facts.vehicle_category, language) : undefined);
-  const category = facts.vehicle_category ? countryClubMinimumForCategory(facts.vehicle_category, policy) : undefined;
-  const vehicleLine = vehicle && category
+  const vehicle = facts.vehicle_model_interest ?? (facts.vehicle_category ? displayDealerCategory(facts.vehicle_category, language) : undefined);
+  const vehicleLine = vehicle
     ? language === "en"
-      ? `I see you are looking at ${vehicle}. We normally start around $${category.toLocaleString("en-US")} down for that category, although the final down payment depends on your credit.`
-      : `Veo que busca ${vehicle}. Normalmente trabajamos alrededor de $${category.toLocaleString("en-US")} de enganche para esa categoría, aunque el enganche final depende de su crédito.`
+      ? `I see you are looking at ${vehicle}.`
+      : `Veo que busca ${vehicle}.`
     : undefined;
   return [greeting, vehicleLine, directAnswer].filter(Boolean) as string[];
 }
 
-function countryClubNextQuestion(
+function dealerNextQuestion(
   facts: SofiaFacts,
   channel: string | undefined,
   policy: SofiaPolicy,
@@ -318,17 +314,17 @@ function countryClubNextQuestion(
   lastResponse?: string,
 ): string | undefined {
   if (!facts.contact_name) {
-    if (language !== "en" || !lastResponse || !/\b(?:name|nombre|gusto)\b/i.test(lastResponse)) return countryClubNameQuestion(language);
-    return countryClubQuestionAfterName(facts, channel, policy, language);
+    if (language !== "en" || !lastResponse || !/\b(?:name|nombre|gusto)\b/i.test(lastResponse)) return dealerNameQuestion(language);
+    return dealerQuestionAfterName(facts, channel, policy, language);
   }
   if (!facts.vehicle_category && !facts.vehicle_model_interest) return language === "en" ? "What vehicle are you looking to finance?" : "¿Qué vehículo está buscando financiar?";
   if (!facts.vehicle_category && facts.vehicle_model_interest) return language === "en" ? "Would you describe that as a sedan, SUV, or truck?" : "¿Lo considera un sedán, una SUV o una troca?";
   if (facts.down_payment_declared === undefined) return language === "en" ? "How much would you have for the down payment?" : "¿Con cuánto contaría para el enganche?";
-  if (facts.has_trade_in === undefined) return countryClubTradeInQuestion(facts, policy, language);
+  if (facts.has_trade_in === undefined) return dealerTradeInQuestion(facts, policy, language);
   if (facts.has_trade_in === true && !facts.trade_in_description) return language === "en" ? "What year and model is it?" : "¿De qué año y modelo es?";
   if (facts.first_time_buyer === undefined) return language === "en" ? "Have you financed a vehicle before, or would this be your first time?" : "¿Ha financiado alguna vez o sería su primera vez?";
   if (facts.purchase_timeline === undefined) return language === "en" ? "How soon are you looking to get into a vehicle?" : "¿En cuánto tiempo piensa tener el vehículo?";
-  if (facts.purchase_timeline === "none") return countryClubNoTimelineQuestion(policy, language);
+  if (facts.purchase_timeline === "none") return dealerNoTimelineQuestion(policy, language);
   if (facts.has_income_proof === undefined && facts.has_income_proof_document !== true) return language === "en" ? "Do you have pay stubs, bank statements, or an employer letter?" : "¿Cuenta con talones de pago, estados de cuenta o una carta del empleador?";
   const normalizedChannel = normalizeContactChannel(channel ?? facts.contact_channel);
   if ((normalizedChannel === "messenger" || normalizedChannel === "facebook" || normalizedChannel === "fb") && !facts.contact_value) {
@@ -337,12 +333,12 @@ function countryClubNextQuestion(
   return undefined;
 }
 
-function countryClubPendingQuestion(step: SofiaNegotiationStep | undefined): SofiaTurnInput["pendingQuestion"] | undefined {
+function dealerPendingQuestion(step: SofiaNegotiationStep | undefined): SofiaTurnInput["pendingQuestion"] | undefined {
   if (step === "trade_in") return "has_trade_in";
   return undefined;
 }
 
-type CountryClubStaircaseResult = {
+type DealerStaircaseResult = {
   messages: string[];
   nextStep: SofiaTurnResult["nextStep"];
   leadLevel?: SofiaLeadLevel;
@@ -353,7 +349,7 @@ type CountryClubStaircaseResult = {
  * and is persisted to the facts ledger as `negotiation_step`; prompt wording
  * alone cannot prevent a repeated or skipped card after a new inbound turn.
  */
-function countryClubNegotiationStaircase(
+function dealerNegotiationStaircase(
   facts: SofiaFacts,
   priorFacts: SofiaFacts,
   policy: SofiaPolicy,
@@ -361,20 +357,20 @@ function countryClubNegotiationStaircase(
   language: "es" | "en",
   extractedFacts: SofiaFacts,
   directAnswer?: string,
-): CountryClubStaircaseResult | undefined {
-  if (!countryClubBelowFloor(facts, policy)) {
+): DealerStaircaseResult | undefined {
+  if (!dealerBelowFloor(facts, policy)) {
     if (facts.negotiation_step !== "closed") facts.negotiation_step = "none";
     return undefined;
   }
 
-  const minimum = countryClubMinimum(facts, policy);
-  const floorReference = countryClubBelowFloorMessage(facts, policy, language);
-  const acknowledgement = countryClubAcknowledgement(extractedFacts, facts, language, priorFacts);
+  const minimum = dealerMinimum(facts, policy);
+  const floorReference = dealerBelowFloorMessage(facts, policy, language);
+  const acknowledgement = dealerAcknowledgement(extractedFacts, facts, language, priorFacts);
   const withDirectAnswer = (messages: string[]): string[] => [directAnswer, ...messages].filter(Boolean) as string[];
   const step = facts.negotiation_step ?? priorFacts.negotiation_step ?? "none";
 
   if (step === "closed") {
-    return { messages: withDirectAnswer([knowledge.notQualifiedClose[language]]), nextStep: "follow_up", leadLevel: "C" };
+    return { messages: withDirectAnswer([dealerStaircaseClose(language)]), nextStep: "follow_up", leadLevel: "C" };
   }
 
   if (step === "reach_floor") {
@@ -385,7 +381,7 @@ function countryClubNegotiationStaircase(
     if (facts.push_accepted === false) {
       facts.negotiation_step = "trade_in";
       return {
-        messages: withDirectAnswer([acknowledgement, floorReference, countryClubTradeInStaircaseQuestion(language)]),
+        messages: withDirectAnswer([dealerTradeInStaircaseQuestion(language)]),
         nextStep: "ask",
         leadLevel: "B",
       };
@@ -393,7 +389,7 @@ function countryClubNegotiationStaircase(
     facts.negotiation_step = "reach_floor";
     facts.down_payment_push_target = minimum;
     return {
-      messages: withDirectAnswer([acknowledgement, floorReference, countryClubReachFloorQuestion(language)]),
+      messages: withDirectAnswer([acknowledgement, dealerReachFloorQuestion(language)]),
       nextStep: "ask",
       leadLevel: "B",
     };
@@ -407,13 +403,13 @@ function countryClubNegotiationStaircase(
     if (facts.has_trade_in === false) {
       facts.negotiation_step = "other_options";
       return {
-        messages: withDirectAnswer([acknowledgement, floorReference, countryClubOtherOptionsQuestion(language)]),
+        messages: withDirectAnswer([dealerOtherOptionsQuestion(language)]),
         nextStep: "ask",
         leadLevel: "B",
       };
     }
     return {
-      messages: withDirectAnswer([floorReference, countryClubTradeInStaircaseQuestion(language)]),
+      messages: withDirectAnswer([dealerTradeInStaircaseQuestion(language)]),
       nextStep: "ask",
       leadLevel: "B",
     };
@@ -429,10 +425,10 @@ function countryClubNegotiationStaircase(
     if (answer === false) {
       facts.negotiation_other_options_accepted = false;
       facts.negotiation_step = "closed";
-      return { messages: withDirectAnswer([knowledge.notQualifiedClose[language]]), nextStep: "follow_up", leadLevel: "C" };
+      return { messages: withDirectAnswer([dealerStaircaseClose(language)]), nextStep: "follow_up", leadLevel: "C" };
     }
     return {
-      messages: withDirectAnswer([floorReference, countryClubOtherOptionsQuestion(language)]),
+      messages: withDirectAnswer([dealerOtherOptionsQuestion(language)]),
       nextStep: "ask",
       leadLevel: "B",
     };
@@ -446,22 +442,28 @@ function countryClubNegotiationStaircase(
   facts.negotiation_step = "reach_floor";
   facts.down_payment_push_target = minimum;
   return {
-    messages: withDirectAnswer([acknowledgement, floorReference, countryClubReachFloorQuestion(language)]),
+    messages: withDirectAnswer([acknowledgement, floorReference]),
     nextStep: "ask",
     leadLevel: "B",
   };
 }
 
-function countryClubReachFloorQuestion(language: "es" | "en"): string {
+function dealerReachFloorQuestion(language: "es" | "en"): string {
   return language === "en" ? "Would it be possible to reach that amount?" : "¿Le sería posible llegar a ese monto?";
 }
 
-function countryClubTradeInStaircaseQuestion(language: "es" | "en"): string {
-  return language === "en" ? "Do you have a vehicle to trade in?" : "¿Tiene un vehículo para dar de parte de pago?";
+function dealerTradeInStaircaseQuestion(language: "es" | "en"): string {
+  return language === "en" ? "No problem. Do you have a vehicle you could trade in? That could help with the down payment." : "Sin problema. ¿Y no tiene un carro que pueda entregar? Eso le ayudaría con el enganche.";
 }
 
-function countryClubOtherOptionsQuestion(language: "es" | "en"): string {
-  return language === "en" ? "Would you be open to looking at other vehicle options?" : "¿Estaría dispuesto a considerar otras opciones de vehículo?";
+function dealerOtherOptionsQuestion(language: "es" | "en"): string {
+  return language === "en" ? "I understand. Would you be open to other options?" : "Entiendo. ¿Estaría abierto a otras opciones?";
+}
+
+function dealerStaircaseClose(language: "es" | "en"): string {
+  return language === "en"
+    ? "No problem. If anything changes, message me and I will look for something that works for you."
+    : "Sin problema. Cualquier cosa me escribe y le busco algo que le sirva.";
 }
 
 function extractYesNo(extractedFacts: SofiaFacts, facts: SofiaFacts): boolean | undefined {
@@ -470,7 +472,7 @@ function extractYesNo(extractedFacts: SofiaFacts, facts: SofiaFacts): boolean | 
   return undefined;
 }
 
-function countryClubQuestionAfterName(
+function dealerQuestionAfterName(
   facts: SofiaFacts,
   channel: string | undefined,
   policy: SofiaPolicy,
@@ -479,23 +481,34 @@ function countryClubQuestionAfterName(
   if (!facts.vehicle_category && !facts.vehicle_model_interest) return language === "en" ? "What vehicle are you looking to finance?" : "¿Qué vehículo está buscando financiar?";
   if (!facts.vehicle_category && facts.vehicle_model_interest) return language === "en" ? "Would you describe that as a sedan, SUV, or truck?" : "¿Lo considera un sedán, una SUV o una troca?";
   if (facts.down_payment_declared === undefined) return language === "en" ? "How much would you have for the down payment?" : "¿Con cuánto contaría para el enganche?";
-  if (facts.has_trade_in === undefined) return countryClubTradeInQuestion(facts, policy, language);
+  if (facts.has_trade_in === undefined) return dealerTradeInQuestion(facts, policy, language);
   if (facts.has_trade_in === true && !facts.trade_in_description) return language === "en" ? "What year and model is it?" : "¿De qué año y modelo es?";
   if (facts.first_time_buyer === undefined) return language === "en" ? "Have you financed a vehicle before, or would this be your first time?" : "¿Ha financiado alguna vez o sería su primera vez?";
   if (facts.purchase_timeline === undefined) return language === "en" ? "How soon are you looking to get into a vehicle?" : "¿En cuánto tiempo piensa tener el vehículo?";
-  if (facts.purchase_timeline === "none") return countryClubNoTimelineQuestion(policy, language);
+  if (facts.purchase_timeline === "none") return dealerNoTimelineQuestion(policy, language);
   if (facts.has_income_proof === undefined && facts.has_income_proof_document !== true) return language === "en" ? "Do you have pay stubs, bank statements, or an employer letter?" : "¿Cuenta con talones de pago, estados de cuenta o una carta del empleador?";
   const normalizedChannel = normalizeContactChannel(channel ?? facts.contact_channel);
   if ((normalizedChannel === "messenger" || normalizedChannel === "facebook" || normalizedChannel === "fb") && !facts.contact_value) return language === "en" ? "May I have the best phone number for you?" : "¿Me comparte el mejor número de teléfono?";
   return undefined;
 }
 
-function countryClubAvoidLiteralRepeat(messages: string[], lastResponse: string | undefined, language: "es" | "en"): string[] {
+function dealerAvoidLiteralRepeat(messages: string[], lastResponse: string | undefined, language: "es" | "en"): string[] {
   const previous = lastResponse?.trim();
   if (!previous) return messages;
   const current = messages.join("\n").trim();
-  if (current !== previous && !messages.some((message) => message.trim() === previous)) return messages;
+  const repeated = current === previous || messages.some((message) => message.trim() === previous);
+  const semanticRepeat = dealerTokenDice(current, previous) >= 0.78;
+  if (!repeated && !semanticRepeat) return messages;
   const last = messages.at(-1) ?? "";
+  if (/\b(?:work around|start around|down payment depends|reach that amount|alrededor de|enganche final depende|llegar a esa cantidad)\b/i.test(last)) {
+    return [...messages.slice(0, -1), language === "en" ? "Could you confirm whether you could reach that amount?" : "¿Me confirma si podría llegar a esa cantidad?"];
+  }
+  if (/\b(?:vehicle|carro|carro|trade in|entregar|parte de pago)\b/i.test(last)) {
+    return [...messages.slice(0, -1), language === "en" ? "Could you confirm whether you have a vehicle to trade in?" : "¿Me confirma si tiene un vehículo para entregar?"];
+  }
+  if (/\b(?:open to other options|abierto a otras opciones)\b/i.test(last)) {
+    return [...messages.slice(0, -1), language === "en" ? "Could you confirm whether you would be open to another option?" : "¿Me confirma si estaría abierto a otra opción?"];
+  }
   if (/con qui[eé]n tengo el gusto|may i have your name/i.test(last)) {
     return [...messages.slice(0, -1), language === "en" ? "Could you please confirm your name?" : "Disculpe, ¿me confirma su nombre?"];
   }
@@ -511,7 +524,23 @@ function countryClubAvoidLiteralRepeat(messages: string[], lastResponse: string 
   return [language === "en" ? "I am still here to help with the next detail." : "Sigo aquí para ayudarle con el siguiente dato."];
 }
 
-function countryClubAnswer(message: string, facts: SofiaFacts, policy: SofiaPolicy, knowledge: SofiaKnowledge, language: "es" | "en"): string | undefined {
+function dealerTokenDice(left: string, right: string): number {
+  const leftTokens = new Set(dealerResponseTokens(left));
+  const rightTokens = new Set(dealerResponseTokens(right));
+  if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+  let overlap = 0;
+  for (const token of leftTokens) if (rightTokens.has(token)) overlap += 1;
+  return (2 * overlap) / (leftTokens.size + rightTokens.size);
+}
+
+function dealerResponseTokens(value: string): string[] {
+  return normalizeClientText(value)
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((token) => token.length > 1);
+}
+
+function dealerAnswer(message: string, facts: SofiaFacts, policy: SofiaPolicy, knowledge: SofiaKnowledge, language: "es" | "en"): string | undefined {
   const normalized = stripAdMetadata(message).toLowerCase();
   if (/requisit|qué necesito|que necesito|document|what do i need|requirements/.test(normalized)) return knowledge.requirements[language];
   if (/dónde|donde|ubicación|ubicacion|horario|domingo|abierto|where are you|hours|open/.test(normalized)) {
@@ -527,7 +556,7 @@ function countryClubAnswer(message: string, facts: SofiaFacts, policy: SofiaPoli
   }
   const model = facts.vehicle_model_interest;
   if (model && /tienen|tienen el|manejan|disponib|do you have|carry|available/.test(normalized)) {
-    const category = facts.vehicle_category ? countryClubMinimumForCategory(facts.vehicle_category, policy) : undefined;
+    const category = facts.vehicle_category ? dealerMinimumForCategory(facts.vehicle_category, policy) : undefined;
     return language === "en"
       ? `Yes, we can help with ${model}${category ? `; that category normally starts around $${category.toLocaleString("en-US")} down, although the final down payment depends on your credit.` : "."}`
       : `Sí, le ayudamos con ${model}${category ? `; esa categoría normalmente trabaja alrededor de $${category.toLocaleString("en-US")} de enganche, aunque el enganche final depende de su crédito.` : "."}`;
@@ -535,14 +564,14 @@ function countryClubAnswer(message: string, facts: SofiaFacts, policy: SofiaPoli
   return undefined;
 }
 
-function isCountryClubVehicleCorrection(message: string): boolean {
+function isDealerVehicleCorrection(message: string): boolean {
   const normalized = normalizeClientText(message).replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
   return /enganche de qu[eé]/.test(normalized) ||
     /no (?:te )?he dicho (?:qu[eé] )?(?:auto|carro|veh[ií]culo|suv|troca)/.test(normalized) ||
     /no (?:te )?dije (?:qu[eé] )?(?:auto|carro|veh[ií]culo|suv|troca)/.test(normalized);
 }
 
-function countryClubAcknowledgement(newFacts: SofiaFacts, facts: SofiaFacts, language: "es" | "en", priorFacts: SofiaFacts): string {
+function dealerAcknowledgement(newFacts: SofiaFacts, facts: SofiaFacts, language: "es" | "en", priorFacts: SofiaFacts): string {
   if (newFacts.contact_name) {
     return priorFacts.contact_name === facts.contact_name
       ? language === "en" ? `Thanks, ${facts.contact_name}.` : `Claro, ${facts.contact_name}.`
@@ -550,7 +579,7 @@ function countryClubAcknowledgement(newFacts: SofiaFacts, facts: SofiaFacts, lan
   }
   if (newFacts.down_payment_declared !== undefined) return language === "en" ? `Thank you. I have noted $${newFacts.down_payment_declared.toLocaleString("en-US")} for the down payment.` : `Gracias. Anoto $${newFacts.down_payment_declared.toLocaleString("en-US")} para el enganche.`;
   if (newFacts.vehicle_model_interest || newFacts.vehicle_category) {
-    const vehicle = newFacts.vehicle_model_interest ?? displayCountryClubCategory(facts.vehicle_category ?? "vehicle", language);
+    const vehicle = newFacts.vehicle_model_interest ?? displayDealerCategory(facts.vehicle_category ?? "vehicle", language);
     return language === "en" ? `Got it, you are looking at ${vehicle}.` : `Perfecto, entonces busca ${vehicle}.`;
   }
   if (newFacts.has_trade_in === false) return language === "en" ? "Understood. We will continue without a trade-in." : "Entendido. Seguimos sin vehículo de parte de pago.";
@@ -561,63 +590,56 @@ function countryClubAcknowledgement(newFacts: SofiaFacts, facts: SofiaFacts, lan
   return language === "en" ? "Got it, thanks." : "Entiendo, gracias.";
 }
 
-function countryClubCategoryFloorMessage(facts: SofiaFacts, policy: SofiaPolicy, language: "es" | "en"): string {
-  const minimum = countryClubMinimum(facts, policy).toLocaleString("en-US");
-  const category = displayCountryClubCategory(facts.vehicle_category ?? "vehicle", language);
-  return language === "en"
-    ? `For ${category}, we normally start around $${minimum} down, although the final down payment depends on your credit.`
-    : `Para ${category}, normalmente trabajamos alrededor de $${minimum} de enganche, aunque el enganche final depende de su crédito.`;
-}
-
-function countryClubTradeInQuestion(facts: SofiaFacts, policy: SofiaPolicy, language: "es" | "en"): string {
-  const reachesFloor = !countryClubBelowFloor(facts, policy);
+function dealerTradeInQuestion(facts: SofiaFacts, policy: SofiaPolicy, language: "es" | "en"): string {
+  const reachesFloor = !dealerBelowFloor(facts, policy);
   return reachesFloor
     ? language === "en" ? "Do you have a vehicle to trade in?" : "¿Tiene un vehículo para dar de parte de pago?"
     : language === "en" ? "Do you have a vehicle to trade in? That would help with your down payment." : "¿Tiene un carro para dar de parte de pago? Eso le ayudaría con su enganche.";
 }
 
-function countryClubBelowFloor(facts: SofiaFacts, policy: SofiaPolicy): boolean {
+function dealerBelowFloor(facts: SofiaFacts, policy: SofiaPolicy): boolean {
   const amount = facts.down_payment_accepted ?? facts.down_payment_declared;
-  return amount !== undefined && amount < countryClubMinimum(facts, policy);
+  return amount !== undefined && amount < dealerMinimum(facts, policy);
 }
 
-function countryClubMinimum(facts: SofiaFacts, policy: SofiaPolicy): number {
+function dealerMinimum(facts: SofiaFacts, policy: SofiaPolicy): number {
   const range = rangeFor(facts.vehicle_category, policy);
   return range.min;
 }
 
-function countryClubMinimumForCategory(category: string, policy: SofiaPolicy): number {
+function dealerMinimumForCategory(category: string, policy: SofiaPolicy): number {
   return rangeFor(category, policy).min;
 }
 
-function countryClubBelowFloorMessage(facts: SofiaFacts, policy: SofiaPolicy, language: "es" | "en"): string {
-  const minimum = countryClubMinimum(facts, policy).toLocaleString("en-US");
+function dealerBelowFloorMessage(facts: SofiaFacts, policy: SofiaPolicy, language: "es" | "en"): string {
+  const minimum = dealerMinimum(facts, policy).toLocaleString("en-US");
+  const category = displayDealerCategory(facts.vehicle_category ?? "vehicle", language);
   return language === "en"
-    ? `For this category, we normally start around $${minimum} down, although the final down payment depends on your credit.`
-    : `Para esta categoría, normalmente trabajamos alrededor de $${minimum} de enganche, aunque el enganche final depende de su crédito.`;
+    ? `For ${category}, we normally work around $${minimum} down. The final down payment depends on financing, but do not worry, we will help you - do you think you could reach that amount?`
+    : `Para ${category} normalmente andamos alrededor de $${minimum} de enganche. El enganche final depende del financiamiento, pero no se preocupe, nosotros le ayudamos - ¿cree que pueda llegar a esa cantidad?`;
 }
 
-function countryClubNameQuestion(language: "es" | "en"): string {
+function dealerNameQuestion(language: "es" | "en"): string {
   return language === "en" ? "May I have your name, please?" : "¿Con quién tengo el gusto?";
 }
 
-function countryClubNoTimelineQuestion(policy: SofiaPolicy, language: "es" | "en"): string {
+function dealerNoTimelineQuestion(policy: SofiaPolicy, language: "es" | "en"): string {
   return policy.knowledge?.noTimeline[language] ?? (language === "en" ? "Would this week or this month work for you?" : "¿Le interesaría venir esta semana o este mes?");
 }
 
-function countryClubSafeExit(knowledge: SofiaKnowledge, language: "es" | "en"): string {
+function dealerSafeExit(knowledge: SofiaKnowledge, language: "es" | "en"): string {
   return knowledge.safeExit[language];
 }
 
-function countryClubQualifiedHandoff(knowledge: SofiaKnowledge, language: "es" | "en", contactName?: string): string {
+function dealerQualifiedHandoff(knowledge: SofiaKnowledge, language: "es" | "en", contactName?: string): string {
   return knowledge.qualifiedHandoff[language].replace("{name}", contactName ?? "");
 }
 
-function countryClubThanks(language: "es" | "en"): string {
+function dealerThanks(language: "es" | "en"): string {
   return language === "en" ? "Thank you for the information." : "Gracias por la información.";
 }
 
-function countryClubMediaResponse(input: SofiaTurnInput, _facts: SofiaFacts, language: "es" | "en"): string | undefined {
+function dealerMediaResponse(input: SofiaTurnInput, _facts: SofiaFacts, language: "es" | "en"): string | undefined {
   const classifications = input.mediaContext?.imageClassifications ?? [];
   if (classifications.length === 0) return undefined;
   if (classifications.includes("vehicle_photo")) {
@@ -639,10 +661,10 @@ function dedupeMessages(messages: string[]): string[] {
   return messages.filter((message, index) => messages.indexOf(message) === index);
 }
 
-function classifyCountryClubLead(facts: SofiaFacts, policy: SofiaPolicy): SofiaLeadLevel {
-  if (!hasCountryClubContactPath(facts)) return "C";
+function classifyDealerLead(facts: SofiaFacts, policy: SofiaPolicy): SofiaLeadLevel {
+  if (!hasDealerContactPath(facts)) return "C";
   if (hasHardRuleFailure(facts) || facts.purchase_timeline === "none") return "C";
-  const minimum = countryClubMinimum(facts, policy);
+  const minimum = dealerMinimum(facts, policy);
   const amount = facts.down_payment_accepted ?? facts.down_payment_declared;
   const reachesFloor = amount !== undefined && amount >= minimum;
   const timelineSupportsA = facts.purchase_timeline === "this_week" || facts.purchase_timeline === "this_month";
@@ -652,20 +674,20 @@ function classifyCountryClubLead(facts: SofiaFacts, policy: SofiaPolicy): SofiaL
   return "C";
 }
 
-function applyCountryClubCategoryFromModel(facts: SofiaFacts, knowledge: SofiaKnowledge): void {
+function applyDealerCategoryFromModel(facts: SofiaFacts, knowledge: SofiaKnowledge): void {
   if (facts.vehicle_category || !facts.vehicle_model_interest) return;
   const normalized = facts.vehicle_model_interest.toLowerCase();
   const found = Object.entries(knowledge.modelCategories).find(([model]) => normalized.includes(model));
   if (found) facts.vehicle_category = found[1];
 }
 
-function displayCountryClubCategory(category: string, language: "es" | "en"): string {
+function displayDealerCategory(category: string, language: "es" | "en"): string {
   const normalized = category.trim().toLowerCase();
   if (language === "en") return normalized === "work truck" ? "a truck" : normalized === "suv" ? "an SUV" : normalized === "sedan" ? "a sedan" : normalized === "van" ? "a minivan" : category;
   return normalized === "work truck" ? "una troca" : normalized === "suv" ? "una SUV" : normalized === "sedan" ? "un sedán" : normalized === "van" ? "una minivan" : category;
 }
 
-function countryClubLanguage(language: string | undefined): "es" | "en" {
+function dealerLanguage(language: string | undefined): "es" | "en" {
   return language?.trim().toLowerCase().startsWith("en") ? "en" : "es";
 }
 
@@ -689,7 +711,7 @@ function hasVerifiedHardRules(facts: SofiaFacts): boolean {
 }
 
 export function classifyLead(facts: SofiaFacts, policy: SofiaPolicy = DEFAULT_SOFIA_POLICY): SofiaLeadLevel {
-  if (policy.knowledge?.id === "country_club_cars") return classifyCountryClubLead(facts, policy);
+  if (policy.knowledge?.id === "country_club_cars") return classifyDealerLead(facts, policy);
   if (!hasContactPath(facts)) return "C";
   if (hasHardRuleFailure(facts)) return "C";
   const range = rangeFor(facts.vehicle_category, policy);
@@ -740,7 +762,7 @@ function hasContactPath(facts: SofiaFacts): boolean {
   return channel === "whatsapp" || channel === "whatsapp_business";
 }
 
-function hasCountryClubContactPath(facts: SofiaFacts): boolean {
+function hasDealerContactPath(facts: SofiaFacts): boolean {
   if (Boolean(facts.contact_value?.trim())) return true;
   const channel = normalizeContactChannel(facts.contact_channel);
   return channel === "whatsapp" || channel === "whatsapp_business";
@@ -763,14 +785,14 @@ function tradeInQuestion(facts: SofiaFacts, policy: SofiaPolicy): string {
     : "¿Tienes algún carro que puedas dar de parte de pago? Eso te ayudaría bastante con el enganche.";
 }
 
-function factsFromMedia(media: SofiaTurnInput["mediaContext"], countryClub = false): SofiaFacts {
+function factsFromMedia(media: SofiaTurnInput["mediaContext"], dealerMode = false): SofiaFacts {
   const classifications = media?.imageClassifications ?? [];
   const vehicleCategory = media?.imageVehicleCategories?.find((category) => category.trim());
   return {
     ...(vehicleCategory ? { vehicle_category: vehicleCategory } : {}),
     ...(classifications.includes("identity_document") ? { has_id_document: true } : {}),
     ...(classifications.includes("income_proof_document") ? { has_income_proof_document: true } : {}),
-    ...(!countryClub && classifications.includes("vehicle_photo") ? { has_trade_in: true } : {}),
+    ...(!dealerMode && classifications.includes("vehicle_photo") ? { has_trade_in: true } : {}),
   };
 }
 
@@ -823,7 +845,7 @@ function applyPushDecision(facts: SofiaFacts, message: string): void {
   }
 }
 
-function extractFacts(message: string, priorFacts: SofiaFacts, countryClub = false, pendingQuestion?: SofiaTurnInput["pendingQuestion"]): SofiaFacts {
+function extractFacts(message: string, priorFacts: SofiaFacts, dealerMode = false, pendingQuestion?: SofiaTurnInput["pendingQuestion"]): SofiaFacts {
   const userMessage = stripAdMetadata(message);
   const normalized = normalizeClientText(userMessage);
   const facts: SofiaFacts = {};
@@ -835,7 +857,7 @@ function extractFacts(message: string, priorFacts: SofiaFacts, countryClub = fal
     !priorFacts.down_payment_declared &&
     (priorFacts.vehicle_category || priorFacts.vehicle_model_interest),
   );
-  const numericValue = countryClub && isStandaloneVehicleYear(normalizedWithoutPhone)
+  const numericValue = dealerMode && isStandaloneVehicleYear(normalizedWithoutPhone)
     ? undefined
     : extractDownPaymentNumber(normalizedWithoutPhone, expectsDownPayment);
   const wordAmount = normalizedWithoutPhone.match(SPANISH_THOUSANDS_AMOUNT_PATTERN);
@@ -855,12 +877,12 @@ function extractFacts(message: string, priorFacts: SofiaFacts, countryClub = fal
     if (/\bno s[eé] si\b[\s\S]*\b(?:carro|auto|suv|troca)\b/.test(normalized)) delete facts.vehicle_category;
   }
   const explicitVehicleYear = normalizedWithoutPhone.match(/\b(?:19|20)\d{2}\b/)?.[0];
-  if (countryClub && explicitVehicleYear && ((!hasDownPaymentContext(normalizedWithoutPhone) && priorFacts.vehicle_model_interest) || /\b(?:tienen|tiene|disponible|disponibilidad|do you have|available)\b/i.test(userMessage))) {
+  if (dealerMode && explicitVehicleYear && ((!hasDownPaymentContext(normalizedWithoutPhone) && priorFacts.vehicle_model_interest) || /\b(?:tienen|tiene|disponible|disponibilidad|do you have|available)\b/i.test(userMessage))) {
     facts.vehicle_year = Number(explicitVehicleYear);
   }
   const vehicleModel = contactName && !hasVehicleInterestCue(userMessage)
     ? undefined
-    : extractVehicleModelInterest(userMessage, priorFacts, normalizedWithoutPhone, countryClub);
+    : extractVehicleModelInterest(userMessage, priorFacts, normalizedWithoutPhone, dealerMode);
   if (vehicleModel) facts.vehicle_model_interest = vehicleModel;
   if (/\bpara m[ií] mismo\b|\bsolo para m[ií]\b|\bpara m[ií]\b(?!\s+familia)/.test(normalized)) facts.vehicle_use = "solo";
   else if (/\bpara la familia|para mi familia|familia\b/.test(normalized)) facts.vehicle_use = "familia";
@@ -870,7 +892,7 @@ function extractFacts(message: string, priorFacts: SofiaFacts, countryClub = fal
     facts.trade_in_description = message.trim();
   }
   if (pendingQuestion === "has_trade_in" && /^(?:s[ií]|yes|claro)$/i.test(normalized)) facts.has_trade_in = true;
-  if (countryClub && priorFacts.negotiation_step === "other_options" && /^(?:s[ií]|si|yes|claro|ok|okay|no|nop|no puedo|ahorita no)$/i.test(normalized)) {
+  if (dealerMode && priorFacts.negotiation_step === "other_options" && /^(?:s[ií]|si|yes|claro|ok|okay|no|nop|no puedo|ahorita no)$/i.test(normalized)) {
     facts.negotiation_other_options_accepted = /^(?:s[ií]|si|yes|claro|ok|okay)$/i.test(normalized);
   }
   const hasTradeInContext = facts.has_trade_in === true || priorFacts.has_trade_in === true;
@@ -976,11 +998,11 @@ function hasDownPaymentContext(message: string): boolean {
   return /\$|\busd\b|d[oó]lares?|enganche|anticipo|inicial|parte de pago|down(?:\s+payment)?|deposit|cuento con|\b(?:con|with)\b|tengo|dispongo|ahorrad[oa]/i.test(message);
 }
 
-function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, normalized: string, countryClub = false): string | undefined {
+function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, normalized: string, dealerMode = false): string | undefined {
   if (priorFacts.vehicle_model_interest) return undefined;
   if (isGenericVehicleFinancingCall(normalized)) return undefined;
   const explicit = message.match(/\b(?:quiero|busco|quisiera|necesito|me interesa|interested in|estoy buscando|looking for|ando buscando)\s+(?:(?:un|una|el|la|a)\s+)?([\s\S]+?)(?:\s+(?:para|con|porque|y|so|because)\b[\s\S]*)?$/i);
-  const inventoryQuery = countryClub
+  const inventoryQuery = dealerMode
     ? message.match(/\b(?:tienen|tiene|disponible|disponibilidad|do you have|available)\s+(?:(?:el|la|a|an)\s+)?([\s\S]+?)(?:\?|$)/i)
     : undefined;
   const candidate = explicit?.[1]?.trim() ?? (
@@ -994,14 +1016,14 @@ function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, no
       : undefined
   );
   const selectedCandidateBeforeCleanup = candidate ?? inventoryQuery?.[1]?.trim();
-  const countryClubUnknownCandidate = countryClub && !candidate
+  const dealerUnknownCandidate = dealerMode && !candidate
     ? message.match(/\b(?:de|marca)\s+([A-Za-z0-9-]+)/i)?.[1] ?? (/\bmodelo\b[\s\S]*\btabla\b/i.test(message) ? "modelo desconocido" : undefined)
     : undefined;
-  const selectedCandidate = selectedCandidateBeforeCleanup ?? countryClubUnknownCandidate;
+  const selectedCandidate = selectedCandidateBeforeCleanup ?? dealerUnknownCandidate;
   if (!selectedCandidate) return undefined;
   const cleaned = selectedCandidate
     .split(/[?!.:,]/, 1)[0]
-    .replace(countryClub ? /\b(?:19|20)\d{2}\b.*$/i : /$^/, "")
+    .replace(dealerMode ? /\b(?:19|20)\d{2}\b.*$/i : /$^/, "")
     .replace(/[,:;]+$/, "")
     .replace(/\b(?:usado|usada|de segunda mano)\b/gi, "")
     .replace(/^(?:un|una|el|la)\s+/i, "")
@@ -1015,7 +1037,7 @@ function extractVehicleModelInterest(message: string, priorFacts: SofiaFacts, no
   return normalizedVehicle;
 }
 
-function isCountryClubStandaloneName(message: string, priorFacts: SofiaFacts): boolean {
+function isDealerStandaloneName(message: string, priorFacts: SofiaFacts): boolean {
   const trimmed = message.trim();
   const normalized = normalizeClientText(trimmed);
   if (priorFacts.contact_name || !trimmed || trimmed.length > 40) return false;

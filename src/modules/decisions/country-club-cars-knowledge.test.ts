@@ -19,7 +19,7 @@ test("Country Club policy loads the Spanish source as the business authority", a
   assert.doesNotMatch(policy.sofia?.knowledge?.requirements.es ?? "", /referencias/i);
 });
 
-test("Country Club greeting anchors the category and asks for the name formally", async () => {
+test("Country Club greeting anchors the category and asks for the name formally without a floor", async () => {
   const engine = await countryClubEngine();
   const result = engine.processTurn({
     dealerName: "ignored fallback",
@@ -33,7 +33,7 @@ test("Country Club greeting anchors the category and asks for the name formally"
 
   assert.equal(result.facts.vehicle_category, "work truck");
   assert.match(result.response ?? "", /Country Club Cars Inc\./);
-  assert.match(result.response ?? "", /\$2,500/);
+  assert.doesNotMatch(result.response ?? "", /\$2,500/);
   assert.match(result.response ?? "", /¿Con quién tengo el gusto\?/);
   assert.doesNotMatch(result.response ?? "", /te llamas|¿cómo/);
 });
@@ -51,7 +51,7 @@ test("Country Club normalizes 1k, does not reopen the down-payment box, and star
 
   assert.equal(result.facts.down_payment_declared, 1000);
   assert.doesNotMatch(result.response ?? "", /¿Con cuánto contaría para el enganche\?/i);
-  assert.match(result.response ?? "", /llegar a ese monto/);
+  assert.match(result.response ?? "", /llegar a esa cantidad/);
   assert.equal(result.facts.negotiation_step, "reach_floor");
 });
 
@@ -67,8 +67,8 @@ test("Country Club advances the below-floor negotiation staircase one card at a 
     language: "es",
   });
   assert.equal(stepOne.facts.negotiation_step, "reach_floor");
-  assert.match(stepOne.response ?? "", /depende de su cr[eé]dito/i);
-  assert.match(stepOne.response ?? "", /¿Le sería posible llegar a ese monto\?/i);
+  assert.match(stepOne.response ?? "", /depende del financiamiento/i);
+  assert.match(stepOne.response ?? "", /¿cree que pueda llegar a esa cantidad\?/i);
   assert.doesNotMatch(stepOne.response ?? "", /es necesario|tiene que llegar/i);
   assert.equal((stepOne.response?.match(/\?/g) ?? []).length, 1);
 
@@ -81,7 +81,8 @@ test("Country Club advances the below-floor negotiation staircase one card at a 
     language: "es",
   });
   assert.equal(stepTwo.facts.negotiation_step, "trade_in");
-  assert.match(stepTwo.response ?? "", /¿Tiene un vehículo para dar de parte de pago\?/i);
+  assert.match(stepTwo.response ?? "", /¿Y no tiene un carro que pueda entregar\? Eso le ayudaría con el enganche\./i);
+  assert.doesNotMatch(stepTwo.response ?? "", /alrededor de|\$2,000/i);
   assert.equal((stepTwo.response?.match(/\?/g) ?? []).length, 1);
 
   const stepThree = engine.processTurn({
@@ -93,7 +94,8 @@ test("Country Club advances the below-floor negotiation staircase one card at a 
     language: "es",
   });
   assert.equal(stepThree.facts.negotiation_step, "other_options");
-  assert.match(stepThree.response ?? "", /¿Estaría dispuesto a considerar otras opciones de vehículo\?/i);
+  assert.match(stepThree.response ?? "", /¿Estaría abierto a otras opciones\?/i);
+  assert.doesNotMatch(stepThree.response ?? "", /alrededor de|\$2,000/i);
 
   const closed = engine.processTurn({
     dealerName: "Country Club Cars Inc.",
@@ -106,6 +108,24 @@ test("Country Club advances the below-floor negotiation staircase one card at a 
   assert.equal(closed.facts.negotiation_step, "closed");
   assert.equal(closed.leadLevel, "C");
   assert.equal(closed.nextStep, "follow_up");
+  assert.match(closed.response ?? "", /Cualquier cosa me escribe y le busco algo que le sirva\./i);
+});
+
+test("Dealer deterministic repetition guard changes a repeated staircase floor output", async () => {
+  const engine = await countryClubEngine();
+  const previous = "Para SUVs normalmente andamos alrededor de $2,000 de enganche. El enganche final depende del financiamiento, pero no se preocupe, nosotros le ayudamos - ¿cree que pueda llegar a esa cantidad?";
+  const result = engine.processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "todavía no",
+    priorFacts: { contact_name: "Juan", vehicle_category: "suv", down_payment_declared: 1000, negotiation_step: "none" },
+    turnCount: 3,
+    contactChannel: "WhatsApp",
+    language: "es",
+    lastResponse: previous,
+  });
+
+  assert.match(result.response ?? "", /me confirma si podría llegar a esa cantidad/i);
+  assert.doesNotMatch(result.response ?? "", /andamos alrededor de \$2,000/i);
 });
 
 test("Country Club does not restart the staircase after the customer accepts the reference amount", async () => {

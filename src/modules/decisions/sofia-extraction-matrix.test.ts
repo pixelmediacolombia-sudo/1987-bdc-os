@@ -42,14 +42,14 @@ caseTest("A-10", async () => { const result = await run("lo que sea necesario", 
 caseTest("A-11", async () => { const result = await run("2015", { ...withVehicle, vehicle_model_interest: "CR-V" }); assert.equal(result.facts.vehicle_year, 2015); assert.equal(result.facts.down_payment_declared, undefined); });
 caseTest("A-12", async () => { const result = await run("$200 Seguro", {}, { isAdvertisementMetadata: true, isFirstTurn: true }); assert.equal(result.response, undefined); assert.equal(result.facts.down_payment_declared, undefined); });
 
-caseTest("B-01", async () => { const result = await run("Busco una Tacoma", { contact_name: "Ana" }, { isFirstTurn: true, turnCount: 1 }); assert.equal(result.facts.vehicle_model_interest, "Tacoma"); assert.equal(result.facts.vehicle_category, "work truck"); assert.match(result.response ?? "", /2,?500/); });
+caseTest("B-01", async () => { const result = await run("Busco una Tacoma", { contact_name: "Ana" }, { isFirstTurn: true, turnCount: 1 }); assert.equal(result.facts.vehicle_model_interest, "Tacoma"); assert.equal(result.facts.vehicle_category, "work truck"); assert.doesNotMatch(result.response ?? "", /2,?500/); });
 caseTest("B-02", async () => { const result = await run("un Crv", {}); assert.equal(result.facts.vehicle_category, "suv"); });
 caseTest("B-03", async () => { const result = await run("una Odyssey para la familia", {}); assert.equal(result.facts.vehicle_category, "van"); });
 caseTest("B-04", async () => { const result = await run("quiero un Camry", {}); assert.equal(result.facts.vehicle_category, "sedan"); });
 caseTest("B-05", async () => { const result = await run("una Toyota", { contact_name: "Ana" }); assert.equal(result.facts.vehicle_category, undefined); assert.match(result.response ?? "", /sedán|SUV|troca|vehículo/i); });
 caseTest("B-06", async () => { const result = await run("algo de Mazda, no sé si carro o SUV", { contact_name: "Ana" }); assert.equal(result.facts.vehicle_category, undefined); assert.match(result.response ?? "", /sedán|SUV|troca/i); });
 caseTest("B-07", async () => { const result = await run("un carrito barato", {}); assert.equal(result.facts.vehicle_category, "sedan"); });
-caseTest("B-08", async () => { const result = await run("una troca", { contact_name: "Ana" }, { isFirstTurn: true, turnCount: 1 }); assert.equal(result.facts.vehicle_category, "work truck"); assert.match(result.response ?? "", /2,?500/); });
+caseTest("B-08", async () => { const result = await run("una troca", { contact_name: "Ana" }, { isFirstTurn: true, turnCount: 1 }); assert.equal(result.facts.vehicle_category, "work truck"); assert.doesNotMatch(result.response ?? "", /2,?500/); });
 caseTest("B-09", async () => { const result = await run("un modelo que no existe en la tabla", { contact_name: "Ana" }); assert.equal(result.facts.vehicle_category, undefined); assert.match(result.response ?? "", /categoría|sedán|SUV|troca/i); });
 
 caseTest("C-01", async () => { const result = await run("Soy Ana, busco un Camry y tengo $2,000", {}, { isFirstTurn: true, turnCount: 1 }); assert.equal(result.facts.contact_name, "Ana"); assert.equal(result.facts.vehicle_model_interest, "Camry"); assert.equal(result.facts.vehicle_category, "sedan"); assert.equal(result.facts.down_payment_declared, 2000); });
