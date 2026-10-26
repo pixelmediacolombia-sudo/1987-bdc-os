@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHash,createCipheriv,randomBytes} from 'node:crypto';
+import {decryptContext,createSessions,LOCATION,AGENT} from './access.mjs';
+const secret='synthetic-test-secret-not-a-production-key';
+function encrypted(user){const salt=randomBytes(8);let out=Buffer.alloc(0),previous=Buffer.alloc(0);while(out.length<48){previous=createHash('md5').update(Buffer.concat([previous,Buffer.from(secret),salt])).digest();out=Buffer.concat([out,previous]);}const cipher=createCipheriv('aes-256-cbc',out.subarray(0,32),out.subarray(32,48));return Buffer.concat([Buffer.from('Salted__'),salt,cipher.update(JSON.stringify(user)),cipher.final()]).toString('base64');}
+test('accepts encrypted Johanna context only in Lucki',()=>{assert.equal(decryptContext(encrypted({userId:AGENT,activeLocation:LOCATION}),secret).userId,AGENT);assert.throws(()=>decryptContext(encrypted({userId:AGENT,activeLocation:'other-dealer'}),secret));});
+test('rejects another agent, plaintext claims and wrong decryption key',()=>{assert.throws(()=>decryptContext(encrypted({userId:'other',activeLocation:LOCATION}),secret));assert.throws(()=>decryptContext(JSON.stringify({userId:AGENT,activeLocation:LOCATION}),secret));assert.throws(()=>decryptContext(encrypted({userId:AGENT,activeLocation:LOCATION}),'wrong-key'));});
+test('owner access requires encrypted owner flag and exact owner email',()=>{assert.equal(decryptContext(encrypted({userId:'owner',activeLocation:LOCATION,isAgencyOwner:true,email:'pixelmediacolombia@gmail.com'}),secret).userId,'owner');assert.throws(()=>decryptContext(encrypted({userId:'other',activeLocation:LOCATION,isAgencyOwner:true,email:'other@example.com'}),secret));});
+test('session tokens are random, server-held and expire',()=>{let now=1000;const sessions=createSessions(()=>now);const first=sessions.issue({userId:AGENT,locationId:LOCATION}),second=sessions.issue({userId:AGENT,locationId:LOCATION});assert.notEqual(first,second);assert.equal(sessions.verify(first).locationId,LOCATION);assert.equal(sessions.verify('forged'),null);now+=1800001;assert.equal(sessions.verify(first),null);});
