@@ -29,14 +29,11 @@ test("Marketplace receipt verifies provider code, exact read scope and only Luck
   assert.equal(posts,6);
   payload={access_token:"synthetic-company-token",scope:"users.readonly",userType:"Company",companyId:"synthetic-company"};
   axios.defaults.adapter=async request=>{
-   if(request.url?.endsWith("/oauth/locationToken")){
-    assert.equal(new URLSearchParams(request.data).get("locationId"),lucki);
-    assert.equal(request.headers.Authorization,"Bearer synthetic-company-token");
-    return {data:{access_token:"synthetic-location-token",scope:"users.readonly",locationId:lucki},status:200,statusText:"OK",headers:{},config:request};
-   }
+   assert.equal(request.url,config.ghlTokenUrl,"installation receipt must not request location tokens or expanded permissions");
    return {data:payload,status:200,statusText:"OK",headers:{},config:request};
   };
   await client.verifyDashboardInstall("synthetic-code",redirectUri);
+  payload={...payload,approvedLocations:[]};await client.verifyDashboardInstall("synthetic-code",redirectUri);
  }finally{axios.defaults.adapter=original;}
 });
 
