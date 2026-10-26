@@ -46,3 +46,30 @@ export function buildConversationFollowups(conversations,tasks,now=new Date()){
  }
  return [...byContact.values()].sort((a,b)=>Number(b.kind==='RESPONDER')-Number(a.kind==='RESPONDER')||Date.parse(b.dueDate)-Date.parse(a.dueDate));
 }
+
+// Provider completion is not proof of a human answer. Only a fresh, explicit
+// result note authored by the same BDC may classify her latest call to a person.
+export function classifyCallOutcomes(calls,conversations){
+ if(!calls)return calls;
+ const latest=new Map();for(const c of calls.rows)if(!latest.has(c.contactId)||Date.parse(c.dateAdded)>Date.parse(latest.get(c.contactId).dateAdded))latest.set(c.contactId,c);
+ const notes=new Map((conversations||[]).filter(c=>c.contactId&&c.latestInternal).map(c=>[c.contactId,c.latestInternal]));
+ const rows=calls.rows.map(c=>{
+  let outcome=['no-answer','busy','voicemail','failed','canceled'].includes(c.status)?c.status:'unverified';
+  let outcomeSource=outcome==='unverified'?'sin confirmar':'registro de GHL',outcomeNote='';
+  const note=notes.get(c.contactId),delta=Date.parse(note?.at)-Date.parse(c.dateAdded);
+  if(outcome==='unverified'&&latest.get(c.contactId)?.id===c.id&&note?.authorId===AGENT&&delta>=0&&delta<=30*60*1000){
+   const text=String(note.text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+   if(/\bno (?:me )?(?:contesta|contesto|respondio|respondieron|responde)\b/i.test(text))outcome='no-answer';
+   else if(/\b(?:linea ocupada|numero ocupado|ocupado al llamar)\b/i.test(text))outcome='busy';
+   else if(/\b(?:me contesto|contesto (?:el|la) cliente|hable con (?:el|la) cliente|hablamos por (?:telefono|llamada))\b/i.test(text))outcome='human-confirmed';
+   if(outcome!=='unverified'){outcomeSource='nota de Johanna';outcomeNote=String(note.text).slice(0,160)}
+  }
+  return {...c,outcome,outcomeSource,outcomeNote};
+ });
+ return {...calls,rows,outcomes:{noAnswer:rows.filter(c=>c.outcome==='no-answer').length,busy:rows.filter(c=>c.outcome==='busy').length,humanConfirmed:rows.filter(c=>c.outcome==='human-confirmed').length,unverified:rows.filter(c=>c.outcome==='unverified').length,voicemail:rows.filter(c=>c.outcome==='voicemail').length}};
+}
+export function excludeCallsAlreadyWorked(queues,calls){
+ if(!queues||!calls)return queues;
+ const called=new Set(calls.rows.map(c=>c.contactId));
+ return {...queues,fresh:queues.fresh.filter(c=>!called.has(c.id)),october:queues.october.filter(c=>!called.has(c.id)),september:queues.september.filter(c=>!called.has(c.id)),retry:queues.retry.filter(c=>!called.has(c.id)||(c.result===''&&['REINTENTO DÍA 1','REINTENTO DÍA 2'].includes(c.cycle)))};
+}
