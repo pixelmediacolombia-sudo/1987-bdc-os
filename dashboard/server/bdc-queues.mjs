@@ -21,8 +21,9 @@ export function buildQueues(contacts,now=new Date()){
    fresh.push({...row,reason:'Primer intento pendiente. Revisa el hilo antes de marcar; una casilla vacía no demuestra ausencia de llamadas históricas.'});
   }else{
    const key=/^\d{4}-\d{2}-\d{2}$/.test(next)?next:null;
-   if(!key||!last||!['NO CONTESTÓ','OCUPADO'].includes(result)){review.push({...row,reason:'Falta fecha o resultado verificable para el reintento.'});continue}
-   if(key<=today)retry.push({...row,reason:`${result==='OCUPADO'?'Ocupado':'No contestó'} · ${key<today?'pendiente vencido':'reintento de hoy'}. Comprueba que la acción anterior esté cerrada y que no haya nueva respuesta o cita.`});
+   const awaitingResult=result===''&&['REINTENTO DÍA 1','REINTENTO DÍA 2'].includes(row.cycle);
+   if(!key||!last||(!['NO CONTESTÓ','OCUPADO'].includes(result)&&!awaitingResult)){review.push({...row,reason:'Falta fecha o resultado verificable para el reintento.'});continue}
+   if(key<=today)retry.push({...row,reason:awaitingResult?'Reintento listo en GHL. Registra el resultado de esta nueva llamada; el historial anterior se conserva.':`${result==='OCUPADO'?'Ocupado':'No contestó'} · ${key<today?'pendiente vencido':'reintento de hoy'}. Comprueba que la acción anterior esté cerrada y que no haya nueva respuesta o cita.`});
   }
  }
  fresh.sort((a,b)=>a.name.localeCompare(b.name));retry.sort((a,b)=>a.next.localeCompare(b.next));
