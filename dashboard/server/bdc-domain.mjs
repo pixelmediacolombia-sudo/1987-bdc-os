@@ -25,3 +25,22 @@ export function countCalls(messages,contacts,now=new Date()){
  return {count:unverified?null:rows.length,verifiedCount:rows.length,unverified,excluded,uniqueContacts:new Set(rows.map(x=>x.contactId)).size,rows,answeredHuman:null};
 }
 export function conversationState(c){const inbound=c.lastMessageDirection==='inbound';const body=String(c.lastMessageBody||'').trim();const noContact=inbound&&/^(stop|unsubscribe|cancelar|baja|no contactar|no me (escribas|escriban|llames|llamen)( m[aá]s)?)[.!\s]*$/i.test(body);const textChannel=['TYPE_WHATSAPP','TYPE_INSTAGRAM','TYPE_FACEBOOK','TYPE_SMS','TYPE_EMAIL','TYPE_WEBCHAT'].includes(c.lastMessageType);const needsReview=inbound&&textChannel&&!c.isLastMessageInternalComment&&!noContact;return {noContact,needsReview,state:noContact?'NO CONTACTAR':needsReview?'ÚLTIMO MENSAJE ENTRANTE':c.lastMessageDirection==='outbound'&&textChannel?'ESPERANDO CLIENTE':'REVISAR GESTIÓN'}}
+
+// Derived work cards, not persisted GHL Tasks. One next action per verified contact.
+export function buildConversationFollowups(conversations,tasks,now=new Date()){
+ const today=dayKey(now), byContact=new Map();
+ for(const c of conversations||[]){
+  if(!c.contactId)continue;
+  const activity=c.publicMessageAt||c.lastMessageDate;
+  const activeToday=dayKey(activity)===today||dayKey(c.createdAt)===today||dayKey(c.latestInternal?.at)===today;
+  const due=(tasks||[]).filter(t=>!t.internal&&t.contactId===c.contactId&&t.today);
+  if(!activeToday&&!c.needsReview&&!due.length)continue;
+  const restricted=c.noContact||c.dnd;
+  const kind=restricted?'REVISAR':c.needsReview?'RESPONDER':due.length?'SEGUIMIENTO':'ESPERANDO';
+  const title=restricted?'Revisar restricción de contacto; no llamar ni escribir.':c.messagesError?'Revisar el hilo en GHL: no se pudieron comprobar los mensajes.':c.needsReview?'Revisar y responder el último mensaje del cliente.':due.length?'Revisar el compromiso de hoy y confirmar el siguiente paso.':'El equipo respondió. Esperar al cliente; no enviar otra recuperación ahora.';
+  const card={id:'conversation:'+c.contactId,contactId:c.contactId,name:c.name,title,kind,body:c.preview||'',phone:restricted?'':c.phone||'',createdAt:c.createdAt||null,dueDate:activity||null,dueKey:dayKey(activity),overdue:false,today:activeToday,internal:false,initials:c.name.split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase(),href:`${BASE}/contacts/detail/${encodeURIComponent(c.contactId)}`,sameContactTasks:1,derived:true,conversationId:c.id};
+  const prior=byContact.get(c.contactId);
+  if(!prior||Date.parse(card.dueDate)>Date.parse(prior.dueDate))byContact.set(c.contactId,card);
+ }
+ return [...byContact.values()].sort((a,b)=>Number(b.kind==='RESPONDER')-Number(a.kind==='RESPONDER')||Date.parse(b.dueDate)-Date.parse(a.dueDate));
+}
