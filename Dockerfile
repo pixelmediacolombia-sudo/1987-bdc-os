@@ -65,6 +65,8 @@ COPY --from=app-build /app/package*.json ./
 COPY --from=app-build /app/node_modules ./node_modules
 COPY --from=app-build /app/dist ./dist
 COPY --from=app-build /app/policies ./policies
+COPY dashboard/compiled ./dashboard/compiled
+COPY dashboard/public ./dashboard/public
 COPY --from=whisper-build /out/bin/whisper-cli /opt/whisper/bin/whisper-cli
 COPY --from=whisper-build /out/lib/ /opt/whisper/lib/
 COPY --from=whisper-build /out/models/ggml-base.bin /opt/whisper/models/ggml-base.bin
