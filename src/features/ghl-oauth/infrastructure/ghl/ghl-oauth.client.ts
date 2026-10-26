@@ -55,7 +55,7 @@ export class GhlOAuthClientAdapter implements GhlOAuthClient {
     // Agency-only installs return Company credentials without approvedLocations.
     // Confirm only the fixed Lucki installation through GHL's location-token exchange.
     let exactLocation=data.locationId===lucki;
-    if(data.userType==="Company"&&data.approvedLocations===undefined&&data.installToFutureLocations!==true){
+    if(data.userType==="Company"&&locations.length===0&&data.installToFutureLocations!==true){
       const locationResponse=await axios.post<GhlTokenResponse>(
         new URL("/oauth/locationToken",this.config.ghlTokenUrl).toString(),
         new URLSearchParams({companyId:requiredString(data.companyId,"companyId"),locationId:lucki}).toString(),
