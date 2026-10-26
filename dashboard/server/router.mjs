@@ -1,6 +1,6 @@
 import express from 'express';
 import path from 'node:path';
-import {decryptContext,createSessions,ORIGIN,LOCATION} from './access.mjs';
+import {decryptContext,createSessions,ORIGIN,LOCATION,AGENT} from './access.mjs';
 import {loadDashboard} from './ghl-live.mjs';
 import {updateContexts} from './conversation-context.mjs';
 import {generateFocus} from './bdc-ai.mjs';
@@ -21,6 +21,13 @@ export function createDashboardRouter({pool,publicDirectory,config=process.env})
  const router=express.Router(),sessions=createSessions(),attempts=new Map(),db=contextStorage(pool);
  router.use((_req,res,next)=>{res.set({'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors ${ORIGIN}; object-src 'none'; base-uri 'self'; form-action 'none'`});next();});
  router.use(express.json({limit:'24kb'}));
+ // Login landing is scoped to Johanna; it never changes the subaccount-wide default.
+ router.options('/entry',(req,res)=>{if(req.get('origin')!==ORIGIN)return res.sendStatus(403);res.set({'Access-Control-Allow-Origin':ORIGIN,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Content-Type','Vary':'Origin'});res.sendStatus(204);});
+ router.post('/entry',(req,res)=>{
+  if(req.get('origin')!==ORIGIN)return res.status(403).json({error:'origin'});
+  res.set({'Access-Control-Allow-Origin':ORIGIN,'Vary':'Origin'});
+  try{const user=decryptContext(req.body?.encryptedData,config.GHL_APP_SHARED_SECRET);res.json({entry:user.userId===AGENT?'/v2/location/'+LOCATION+'/dashboard/6add8337dc4b01c8b1e5bd51':null});}catch{return res.status(403).json({error:'access_denied'});}
+ });
  router.post('/session',(req,res)=>{
   if(req.get('origin')!=='https://bdc.1987marketing.com')return res.status(403).json({error:'origin'});
   const now=Date.now(),ip=req.ip||'unknown';for(const[k,v]of attempts)if(v.until<now)attempts.delete(k);
