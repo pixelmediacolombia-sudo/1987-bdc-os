@@ -36,8 +36,10 @@ export function buildConversationFollowups(conversations,tasks,now=new Date()){
   const due=(tasks||[]).filter(t=>!t.internal&&t.contactId===c.contactId&&t.today);
   if(!activeToday&&!c.needsReview&&!due.length)continue;
   const restricted=c.noContact||c.dnd;
-  const kind=restricted?'REVISAR':c.needsReview?'RESPONDER':due.length?'SEGUIMIENTO':'ESPERANDO';
-  const title=restricted?'Revisar restricción de contacto; no llamar ni escribir.':c.messagesError?'Revisar el hilo en GHL: no se pudieron comprobar los mensajes.':c.needsReview?'Revisar y responder el último mensaje del cliente.':due.length?'Revisar el compromiso de hoy y confirmar el siguiente paso.':'El equipo respondió. Esperar al cliente; no enviar otra recuperación ahora.';
+  const newNote=dayKey(c.latestInternal?.at)===today&&Date.parse(c.latestInternal.at)>Date.parse(activity||'');
+  const handoff=c.direction==='outbound'&&/(?:asesor[ae].*(?:enviar|escrib|contact|ayud|fotos)|te (?:enviar[aá]|escribir[aá])|devolv.*llamada)/i.test(c.preview||'');
+  const kind=restricted||newNote||handoff?'REVISAR':c.needsReview?'RESPONDER':due.length?'SEGUIMIENTO':'ESPERANDO';
+  const title=restricted?'Revisar restricción de contacto; no llamar ni escribir.':c.messagesError?'Revisar el hilo en GHL: no se pudieron comprobar los mensajes.':newNote?'Revisar la nota interna nueva y coordinar la acción con la responsable.':handoff?'Atender la entrega a la asesora: comprobar y cumplir lo que el equipo prometió.':c.needsReview?'Revisar y responder el último mensaje del cliente.':due.length?'Revisar el compromiso de hoy y confirmar el siguiente paso.':'El equipo respondió. Esperar al cliente; no enviar otra recuperación ahora.';
   const card={id:'conversation:'+c.contactId,contactId:c.contactId,name:c.name,title,kind,body:c.preview||'',phone:restricted?'':c.phone||'',createdAt:c.createdAt||null,dueDate:activity||null,dueKey:dayKey(activity),overdue:false,today:activeToday,internal:false,initials:c.name.split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase(),href:`${BASE}/contacts/detail/${encodeURIComponent(c.contactId)}`,sameContactTasks:1,derived:true,conversationId:c.id};
   const prior=byContact.get(c.contactId);
   if(!prior||Date.parse(card.dueDate)>Date.parse(prior.dueDate))byContact.set(c.contactId,card);
