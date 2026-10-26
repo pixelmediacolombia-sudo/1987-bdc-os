@@ -54,19 +54,20 @@ export function classifyCallOutcomes(calls,conversations){
  const latest=new Map();for(const c of calls.rows)if(!latest.has(c.contactId)||Date.parse(c.dateAdded)>Date.parse(latest.get(c.contactId).dateAdded))latest.set(c.contactId,c);
  const notes=new Map((conversations||[]).filter(c=>c.contactId&&c.latestInternal).map(c=>[c.contactId,c.latestInternal]));
  const rows=calls.rows.map(c=>{
-  let outcome=['no-answer','busy','voicemail','failed','canceled'].includes(c.status)?c.status:'unverified';
+  let outcome=['ringing','in-progress','queued','initiated'].includes(c.status)?'in-progress':['no-answer','busy','voicemail','failed','canceled'].includes(c.status)?c.status:'unverified';
   let outcomeSource=outcome==='unverified'?'sin confirmar':'registro de GHL',outcomeNote='';
   const note=notes.get(c.contactId),delta=Date.parse(note?.at)-Date.parse(c.dateAdded);
   if(outcome==='unverified'&&latest.get(c.contactId)?.id===c.id&&note?.authorId===AGENT&&delta>=0&&delta<=30*60*1000){
    const text=String(note.text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-   if(/\bno (?:me )?(?:contesta|contesto|respondio|respondieron|responde)\b/i.test(text))outcome='no-answer';
-   else if(/\b(?:linea ocupada|numero ocupado|ocupado al llamar)\b/i.test(text))outcome='busy';
-   else if(/\b(?:me contesto|contesto (?:el|la) cliente|hable con (?:el|la) cliente|hablamos por (?:telefono|llamada))\b/i.test(text))outcome='human-confirmed';
+   const callNote=!/\b(?:whatsapp|mensajes?|escrib)/i.test(text)||/\b(?:llamada|llame|telefono|al llamar)\b/i.test(text);
+   if(callNote&&/\bno (?:me )?(?:contesta|contesto|respondio|respondieron|responde)\b/i.test(text))outcome='no-answer';
+   else if(callNote&&/\b(?:linea ocupada|numero ocupado|ocupado al llamar)\b/i.test(text))outcome='busy';
+   else if(callNote&&/(?:^\s*contesto\b|\b(?:me contesto|si contesto|hable con (?:el|la) cliente|hablamos por (?:telefono|llamada))\b)/i.test(text))outcome='human-confirmed';
    if(outcome!=='unverified'){outcomeSource='nota de Johanna';outcomeNote=String(note.text).slice(0,160)}
   }
   return {...c,outcome,outcomeSource,outcomeNote};
  });
- return {...calls,rows,outcomes:{noAnswer:rows.filter(c=>c.outcome==='no-answer').length,busy:rows.filter(c=>c.outcome==='busy').length,humanConfirmed:rows.filter(c=>c.outcome==='human-confirmed').length,unverified:rows.filter(c=>c.outcome==='unverified').length,voicemail:rows.filter(c=>c.outcome==='voicemail').length}};
+ return {...calls,rows,outcomes:{noAnswer:rows.filter(c=>c.outcome==='no-answer').length,busy:rows.filter(c=>c.outcome==='busy').length,humanConfirmed:rows.filter(c=>c.outcome==='human-confirmed').length,unverified:rows.filter(c=>c.outcome==='unverified').length,voicemail:rows.filter(c=>c.outcome==='voicemail').length,inProgress:rows.filter(c=>c.outcome==='in-progress').length}};
 }
 export function excludeCallsAlreadyWorked(queues,calls){
  if(!queues||!calls)return queues;
