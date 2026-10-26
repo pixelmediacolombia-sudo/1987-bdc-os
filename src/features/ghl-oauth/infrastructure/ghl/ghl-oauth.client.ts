@@ -12,6 +12,7 @@ type GhlTokenResponse = {
   expires_in?: unknown;
   expires_at?: unknown;
   userType?: unknown;
+  companyId?: unknown;
   approvedLocations?: unknown;
   installToFutureLocations?: unknown;
 };
@@ -51,7 +52,18 @@ export class GhlOAuthClientAdapter implements GhlOAuthClient {
     requiredString(data.access_token,"access_token");
     if(scopes.length!==1||scopes[0]!=="users.readonly")throw new Error("Dashboard installation scope rejected",{cause:{scopeCount:scopes.length,scopes:scopes.filter(s=>/^[a-zA-Z0-9_./-]+$/.test(s)).slice(0,20)}});
     const locations=Array.isArray(data.approvedLocations)?data.approvedLocations:[];
-    const exactLocation=data.locationId===lucki;
+    // Agency-only installs return Company credentials without approvedLocations.
+    // Confirm only the fixed Lucki installation through GHL's location-token exchange.
+    let exactLocation=data.locationId===lucki;
+    if(data.userType==="Company"&&data.approvedLocations===undefined&&data.installToFutureLocations!==true){
+      const locationResponse=await axios.post<GhlTokenResponse>(
+        new URL("/oauth/locationToken",this.config.ghlTokenUrl).toString(),
+        new URLSearchParams({companyId:requiredString(data.companyId,"companyId"),locationId:lucki}).toString(),
+        {timeout:15_000,headers:{Accept:"application/json","Content-Type":"application/x-www-form-urlencoded",Version:"2021-07-28",Authorization:"Bearer "+requiredString(data.access_token,"access_token")}});
+      const locationScopes=scopesFrom(locationResponse.data);
+      requiredString(locationResponse.data.access_token,"access_token");
+      exactLocation=locationResponse.data.locationId===lucki&&locationScopes.length===1&&locationScopes[0]==="users.readonly";
+    }
     const exactCompanySelection=data.userType==="Company"&&locations.length===1&&locations[0]===lucki;
     if((!exactLocation&&!exactCompanySelection)||data.installToFutureLocations===true)throw new Error("Dashboard installation location rejected",{cause:{locationMatches:exactLocation,tokenType:data.userType==="Company"?"Company":data.userType==="Location"?"Location":"unknown",approvedLocationCount:locations.length,luckiApproved:locations.includes(lucki),futureLocations:data.installToFutureLocations===true}});
     // The read-only dashboard uses its separate, already-approved Lucki integration.
