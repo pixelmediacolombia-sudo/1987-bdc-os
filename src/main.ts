@@ -79,7 +79,8 @@ async function start(): Promise<void> {
     new InitiateGhlOAuthUseCase(oauthClient, stateService, locationRouteRepository),
     new CompleteGhlOAuthUseCase(oauthClient, stateService, cryptor, repository),
   );
-  const controller = new GhlOAuthController(presentationService);
+  const controller = new GhlOAuthController(presentationService,
+    (code,redirectUri)=>oauthClient.verifyDashboardInstall(code,redirectUri));
   const policyPackProvider = new LocalPolicyPackProvider();
   const hydrator = new ConversationHydrator(
     new PostgresHydrationRepository(pool),
