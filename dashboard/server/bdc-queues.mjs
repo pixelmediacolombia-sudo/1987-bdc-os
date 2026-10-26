@@ -27,5 +27,5 @@ export function buildQueues(contacts,now=new Date()){
   }
  }
  fresh.sort((a,b)=>a.name.localeCompare(b.name));retry.sort((a,b)=>a.next.localeCompare(b.next));
- return {fresh,retry,review,updatedAt:now.toISOString(),automationStatus:'draft',manualActionsVerified:false};
+ return {fresh,retry,review,updatedAt:now.toISOString(),automationStatus:'published',manualActionsVerified:false};
 }
