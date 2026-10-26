@@ -11,6 +11,9 @@ type GhlTokenResponse = {
   scopes?: unknown;
   expires_in?: unknown;
   expires_at?: unknown;
+  userType?: unknown;
+  approvedLocations?: unknown;
+  installToFutureLocations?: unknown;
 };
 
 function requiredString(value: unknown, field: string): string {
@@ -37,6 +40,23 @@ function expiresAtFrom(response: GhlTokenResponse): Date | undefined {
 
 export class GhlOAuthClientAdapter implements GhlOAuthClient {
   constructor(private readonly config: AppConfig) {}
+
+  /** Marketplace code-only receipt: never creates an app session or stores tokens. */
+  async verifyDashboardInstall(code: string, redirectUri: string): Promise<void> {
+    const response = await axios.post<GhlTokenResponse>(this.config.ghlTokenUrl,
+      new URLSearchParams({client_id:this.config.ghlClientId,client_secret:this.config.ghlClientSecret,
+        grant_type:"authorization_code",code,redirect_uri:redirectUri}).toString(),
+      {timeout:15_000,headers:{Accept:"application/json","Content-Type":"application/x-www-form-urlencoded",Version:"2021-07-28"}});
+    const data=response.data,scopes=scopesFrom(data),lucki="cd9Slb2Fk2vNY3l4ukG9";
+    requiredString(data.access_token,"access_token");
+    if(scopes.length!==1||scopes[0]!=="users.readonly")throw new Error("Dashboard installation scope rejected");
+    const locations=Array.isArray(data.approvedLocations)?data.approvedLocations:[];
+    const exactLocation=data.locationId===lucki;
+    const exactCompanySelection=data.userType==="Company"&&locations.length===1&&locations[0]===lucki;
+    if((!exactLocation&&!exactCompanySelection)||data.installToFutureLocations===true)throw new Error("Dashboard installation location rejected");
+    // The read-only dashboard uses its separate, already-approved Lucki integration.
+    // Deliberately discard both OAuth credentials; this receipt cannot log a visitor in.
+  }
 
   createAuthorizationUrl(input: { state: string }): string {
     const url = new URL(this.config.ghlAuthorizationUrl);
