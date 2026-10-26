@@ -4748,6 +4748,29 @@ function createDashboardRouter({ pool, publicDirectory, config = process.env }) 
 		next();
 	});
 	router.use(express.default.json({ limit: "24kb" }));
+	router.options("/entry", (req, res) => {
+		if (req.get("origin") !== "https://app.1987marketing.com") return res.sendStatus(403);
+		res.set({
+			"Access-Control-Allow-Origin": ORIGIN,
+			"Access-Control-Allow-Methods": "POST",
+			"Access-Control-Allow-Headers": "Content-Type",
+			"Vary": "Origin"
+		});
+		res.sendStatus(204);
+	});
+	router.post("/entry", (req, res) => {
+		if (req.get("origin") !== "https://app.1987marketing.com") return res.status(403).json({ error: "origin" });
+		res.set({
+			"Access-Control-Allow-Origin": ORIGIN,
+			"Vary": "Origin"
+		});
+		try {
+			const user = decryptContext(req.body?.encryptedData, config.GHL_APP_SHARED_SECRET);
+			res.json({ entry: user.userId === "bNf6DGx9F0ZWT8pYbIro" ? "/v2/location/" + LOCATION$1 + "/dashboard/6add8337dc4b01c8b1e5bd51" : null });
+		} catch {
+			return res.status(403).json({ error: "access_denied" });
+		}
+	});
 	router.post("/session", (req, res) => {
 		if (req.get("origin") !== "https://bdc.1987marketing.com") return res.status(403).json({ error: "origin" });
 		const now = Date.now(), ip = req.ip || "unknown";
