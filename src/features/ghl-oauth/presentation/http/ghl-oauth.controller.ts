@@ -15,6 +15,7 @@ function oauthFailureCode(error: unknown): string {
 export class GhlOAuthController {
   constructor(
     private readonly service: GhlOAuthPresentationService,
+    private readonly dashboardInstallReceipt?: (code: string, redirectUri: string) => Promise<void>,
   ) {}
 
   initiateHandler = (req: Request, res: Response): void => {
@@ -40,6 +41,25 @@ export class GhlOAuthController {
     if (oauthError) {
       res.status(400).json({ error: "GHL OAuth authorization was denied" });
       return;
+    }
+    // The developer-portal Marketplace link supplies code only. Accept it ONLY as
+    // a narrowly verified dashboard-install receipt, never as tenant onboarding,
+    // a user login, or a fallback after a failed state verification.
+    if(code && req.query.state===undefined && this.dashboardInstallReceipt){
+      const callbacks:Record<string,string>={
+        "one987-bdc-os.onrender.com/callback":"https://one987-bdc-os.onrender.com/oauth/callback",
+        "bdc.1987marketing.com/return":"https://bdc.1987marketing.com/oauth/return",
+      };
+      const redirectUri=callbacks[req.hostname+req.path];
+      if(redirectUri){
+        try{
+          await this.dashboardInstallReceipt(code,redirectUri);
+          res.redirect(303,"https://app.1987marketing.com/v2/location/cd9Slb2Fk2vNY3l4ukG9/dashboard/6add8337dc4b01c8b1e5bd51");
+        }catch{
+          res.status(403).json({error:"Dashboard installation could not be verified. Select only Lucki Mazda and the users.readonly permission."});
+        }
+        return;
+      }
     }
     if (!code || !state) {
       res.status(400).json({ error: "Missing OAuth code or state" });
