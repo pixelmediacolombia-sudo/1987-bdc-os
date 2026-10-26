@@ -1,7 +1,7 @@
 import{plain}from'./conversation-context.mjs';
 import{buildQueues}from'./bdc-queues.mjs';
 let queueSnapshot=null;let nextRequestAt=0;let staffEmails=new Set();
-import{LOCATION,AGENT,BASE,dayBounds,dayKey,isExcluded,normalizeTask,countCalls,conversationState}from'./bdc-domain.mjs';
+import{LOCATION,AGENT,BASE,dayBounds,dayKey,isExcluded,normalizeTask,countCalls,conversationState,buildConversationFollowups}from'./bdc-domain.mjs';
 const contactsCache=new Map();let userNames=new Map();const threadLookupCache=new Map();let snapshot=null;let pending=null;let agentVerifiedAt=0;
 export async function loadDashboard(token,location){
  if(location!==LOCATION)throw Error('location_mismatch');
@@ -55,7 +55,7 @@ async function load(token){
    c.messagesCheckedAt=new Date().toISOString();
    if(latest){c.publicMessageAt=latest.dateAdded;c.preview=plain(latest.body).slice(0,600)||'Mensaje sin texto';c.direction=latest.direction;c.channel=String(latest.messageType||'').replace('TYPE_','');Object.assign(c,conversationState({lastMessageDirection:latest.direction,lastMessageBody:latest.body,lastMessageType:latest.messageType}));}
    c.lastMessageDate=messages[0]?.dateAdded||c.lastMessageDate;
-   const co=await contact(c.contactId);c.phone=co.phone||'';c.createdAt=co.dateAdded||null;
+   const co=await contact(c.contactId);c.phone=co.phone||'';c.createdAt=co.dateAdded||null;c.dnd=!!co.dnd||Object.values(co.dndSettings||{}).some(v=>v?.status==='active');
   }catch(e){c.messagesError=true;issues.push('Algunos mensajes recientes no pudieron comprobarse'+(/^GHL_[0-9]{3}$/.test(e.message)?' ('+e.message+')':'')+'.')}}));
   conversations.sort((a,b)=>Number(new Date(b.lastMessageDate))-Number(new Date(a.lastMessageDate)));
   for(const t of tasks||[]){const c=conversations.find(c=>c.contactId===t.contactId);if(c){t.phone=c.phone;t.createdAt=c.createdAt;}}
@@ -63,5 +63,5 @@ async function load(token){
  if(results[2].status==='fulfilled')calls=results[2].value;else issues.push('Llamadas: '+results[2].reason.message);
  if(calls?.unverified)issues.push('Hay llamadas sin contacto verificado; la meta no se presenta como completa.');
  const weekday=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short'}).format(now);
- return {status:issues.length?'partial':'connected',agent:{name:'Johanna Gallo Londoño',id:AGENT},location:{name:'Lucki Mazda of Woodbridge',id:LOCATION},dateKey:dayKey(now),timezone:'America/New_York',workingDay:weekday!=='Sun',goal:50,updatedAt:now.toISOString(),refreshSeconds:20,tasks,conversations,calls,queues,manualActions:{status:'unsupported',count:null,href:BASE+'/conversations/manual_actions',note:'El conteo de Manual Actions no está disponible mediante la conexión pública verificada. Abre la cola de GHL.'},issues:[...new Set(issues)],ai:{status:'automatic',note:'Contextos y prioridades con IA automáticos mientras el panel está visible.'}};
+ return {status:issues.length?'partial':'connected',agent:{name:'Johanna Gallo Londoño',id:AGENT},location:{name:'Lucki Mazda of Woodbridge',id:LOCATION},dateKey:dayKey(now),timezone:'America/New_York',workingDay:weekday!=='Sun',goal:50,updatedAt:now.toISOString(),refreshSeconds:20,tasks,followups:conversations?buildConversationFollowups(conversations,tasks,now):null,conversations,calls,queues,manualActions:{status:'unsupported',count:null,href:BASE+'/conversations/manual_actions',note:'El conteo de Manual Actions no está disponible mediante la conexión pública verificada. Abre la cola de GHL.'},issues:[...new Set(issues)],ai:{status:'automatic',note:'Contextos y prioridades con IA automáticos mientras el panel está visible.'}};
 }
