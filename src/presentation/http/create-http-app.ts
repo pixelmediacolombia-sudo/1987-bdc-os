@@ -20,9 +20,11 @@ export function createHttpApp(
   signatureKeys?: GhlSignatureKeys,
   policyDiagnosticController?: PolicyDiagnosticController,
   redisDiagnosticController?: RedisDiagnosticController,
+  dashboardRouter?: express.Router,
 ): Express {
   const app = express();
   app.disable("x-powered-by");
+  if (dashboardRouter) app.use("/mi-dia", dashboardRouter);
   app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
   app.use("/oauth", createGhlOAuthRouter(controller));
   app.use(
