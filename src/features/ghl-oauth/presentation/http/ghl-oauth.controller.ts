@@ -55,8 +55,18 @@ export class GhlOAuthController {
         try{
           await this.dashboardInstallReceipt(code,redirectUri);
           res.redirect(303,"https://app.1987marketing.com/v2/location/cd9Slb2Fk2vNY3l4ukG9/dashboard/6add8337dc4b01c8b1e5bd51");
-        }catch{
-          res.status(403).json({error:"Dashboard installation could not be verified. Select only Lucki Mazda and the users.readonly permission."});
+        }catch(error){
+          let failureCode="provider_exchange_failed";
+          if(error instanceof Error&&error.message==="Dashboard installation scope rejected")failureCode="scope_rejected";
+          if(error instanceof Error&&error.message==="Dashboard installation location rejected")failureCode="location_rejected";
+          // Never log Axios errors, token responses, authorization codes or credentials.
+          const providerError=error as {response?:{status?:number;data?:{error?:unknown}}};
+          const providerStatus=typeof providerError?.response?.status==="number"?providerError.response.status:undefined;
+          const raw=providerError?.response?.data?.error;
+          const providerCode=typeof raw==="string"&&["invalid_grant","invalid_client","unauthorized_client","invalid_request","invalid_scope"].includes(raw)?raw:undefined;
+          const diagnostics=failureCode!=="provider_exchange_failed"&&error instanceof Error?error.cause:undefined;
+          console.warn("GHL dashboard installation receipt rejected",{failureCode,providerStatus,providerCode,diagnostics});
+          res.status(403).json({error:"Dashboard installation could not be verified. Select only Lucki Mazda and the users.readonly permission.",error_code:failureCode,...(providerStatus?{provider_status:providerStatus}:{})});
         }
         return;
       }
