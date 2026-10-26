@@ -1,0 +1,15 @@
+"use client";
+import{z}from'zod';import{Clock3,Info,ArrowUpRight}from'lucide-react';
+export const briefSchema=z.object({request:z.string(),situation:z.string(),nextAction:z.string(),owner:z.string(),action:z.string(),evidence:z.array(z.object({at:z.string(),side:z.string(),quote:z.string(),channel:z.string()})),uncertainty:z.string(),noContact:z.boolean(),restrictedChannels:z.array(z.string()),historyPartial:z.boolean(),messageCount:z.number(),generatedAt:z.string(),checkedAt:z.string().optional(),stale:z.boolean()});
+export const contextsSchema=z.object({records:z.record(briefSchema),total:z.number(),ready:z.number(),remaining:z.number(),updatedAt:z.string(),error:z.string().nullable()});
+export type Brief=z.infer<typeof briefSchema>;
+export function BriefCard({brief,compact=false}:{brief?:Brief;compact?:boolean}){
+ if(!brief)return <div className="brief-pending"><Clock3 size={13}/>Leyendo la conversación para preparar el contexto…</div>;
+ return <div className={'conversation-brief '+(compact?'compact-brief':'')}><div className="brief-heading"><span className={'kind '+(brief.noContact?'no-contact':'responder')}>{brief.action}</span><span>Próximo paso: {brief.owner==='BDC'?'Johanna':brief.owner==='CLIENTE'?'cliente':'revisión humana'}</span></div>
+ {brief.stale&&<p className="brief-warning"><Info size={13}/>Hay cambios o falta comprobar novedades. Resumen anterior; actualización en curso.</p>}
+ {(/\b(hoy|mañana|ayer)\b/i.test(brief.request+' '+brief.situation+' '+brief.nextAction))&&<p className="brief-limits"><Clock3 size={12}/>Las referencias a hoy, mañana o ayer pertenecen al mensaje original. Verifica su fecha en los mensajes de respaldo.</p>}<dl><div><dt>QUÉ PIDIÓ EL CLIENTE</dt><dd>{brief.request}</dd></div><div><dt>DÓNDE QUEDÓ LA CONVERSACIÓN</dt><dd>{brief.situation}</dd></div><div className="next-action"><dt>SIGUIENTE ACCIÓN PARA LA BDC</dt><dd>{brief.nextAction}</dd></div></dl>
+ {!compact&&<details className="brief-evidence"><summary>Ver mensajes que sustentan el resumen ({brief.evidence.length})</summary>{brief.evidence.map((e,i)=><blockquote key={i}><span>{e.side==='CLIENTE'?'Cliente':e.side==='EQUIPO'?'Equipo':'Registro'} · {new Intl.DateTimeFormat('es-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(e.at))}</span><p>“{e.quote}”</p></blockquote>)}</details>}
+ {(brief.uncertainty||brief.historyPartial||brief.restrictedChannels.length>0)&&<p className="brief-limits"><Info size={12}/>{[brief.uncertainty,brief.historyPartial?'Lectura limitada a los 80 mensajes más recientes; puede faltar contexto anterior.':'',brief.restrictedChannels.length?'Hay canales restringidos; revisar DND antes de contactar.':''].filter(Boolean).join(' ')}</p>}
+ <p className="brief-time">Resumen con IA · {brief.messageCount} registros leídos · Revisado {new Intl.DateTimeFormat('es-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit'}).format(new Date(brief.checkedAt||brief.generatedAt))}</p>
+ </div>
+}
