@@ -1,4 +1,5 @@
 import { createHttpApp } from "@/presentation/http/create-http-app";
+import path from "node:path";
 import { loadAppConfig } from "@/features/ghl-oauth/infrastructure/config/env.config";
 import { Aes256GcmTokenCryptor } from "@/features/ghl-oauth/infrastructure/crypto/aes256-gcm-token.cryptor";
 import { GhlOAuthClientAdapter } from "@/features/ghl-oauth/infrastructure/ghl/ghl-oauth.client";
@@ -200,7 +201,10 @@ async function start(): Promise<void> {
   );
   const policyDiagnosticController = new PolicyDiagnosticController(policyEvaluator, config.policyDiagnosticToken);
   const redisDiagnosticController = new RedisDiagnosticController(redis, config.policyDiagnosticToken);
-  const app = createHttpApp(controller, webhookController, undefined, policyDiagnosticController, redisDiagnosticController);
+  // The dashboard is read-only, isolated to Lucki, and does not alter conversation automation.
+  const { createDashboardRouter } = require("../dashboard/compiled/router.cjs");
+  const dashboardRouter = createDashboardRouter({pool, publicDirectory:path.resolve(__dirname,"../dashboard/public")});
+  const app = createHttpApp(controller, webhookController, undefined, policyDiagnosticController, redisDiagnosticController, dashboardRouter);
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
   const shutdown = (signal: string) => {
