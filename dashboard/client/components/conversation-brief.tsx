@@ -4,6 +4,7 @@ export const briefSchema=z.object({request:z.string(),situation:z.string(),nextA
 export const contextsSchema=z.object({records:z.record(briefSchema),total:z.number(),ready:z.number(),remaining:z.number(),updatedAt:z.string(),error:z.string().nullable()});
 export type Brief=z.infer<typeof briefSchema>;
 export function BriefCard({brief,compact=false}:{brief?:Brief;compact?:boolean}){
+ if(compact&&brief)return <div className="brief-short"><p>{brief.request.length>120?brief.request.slice(0,117)+'…':brief.request}</p><p><strong>{brief.stale?'Actualizando…':brief.noContact?'No contactar':brief.owner==='CLIENTE'?'Esperando al cliente':'Acción'}:</strong> {brief.stale?'Revisa el último mensaje mientras se renueva el resumen.':brief.nextAction.length>120?brief.nextAction.slice(0,117)+'…':brief.nextAction}</p></div>;
  if(!brief)return <div className="brief-pending"><Clock3 size={13}/>Leyendo la conversación para preparar el contexto…</div>;
  return <div className={'conversation-brief '+(compact?'compact-brief':'')}><div className="brief-heading"><span className={'kind '+(brief.noContact?'no-contact':'responder')}>{brief.action}</span><span>Próximo paso: {brief.owner==='BDC'?'Johanna':brief.owner==='CLIENTE'?'cliente':'revisión humana'}</span></div>
  {brief.stale&&<p className="brief-warning"><Info size={13}/>Hay cambios o falta comprobar novedades. Resumen anterior; actualización en curso.</p>}
