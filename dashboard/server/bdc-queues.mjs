@@ -3,6 +3,15 @@ import {LOCATION,AGENT,BASE,dayKey,isExcluded} from './bdc-domain.mjs';
 // IDs verified in Lucki's native field settings; never reuse across locations.
 export const BDC_FIELDS={state:'LoPqik7jHvQqtz05nIWi',next:'hA97WMfmsKHXaDEoAn80',result:'y4FpYdFuVfczIClWooLw',last:'wseqHLTzm9DueAkMkNte',count:'wfPHm7u9yBXeN8qzPavp',cycle:'0mqF6U2ojJ7BcTR8rVgL',processed:'qTGUweg19qRJAc5veMvV'};
 const value=(c,k)=>c.customFields?.find(f=>f.id===BDC_FIELDS[k])?.value??'';
+// GHL date-only fields use UTC-midnight epoch milliseconds in native edits.
+// Preserve the calendar date: converting to Virginia time would shift it back a day.
+export function queueDate(value){
+ const raw=String(value??'');
+ if(/^\d{4}-\d{2}-\d{2}$/.test(raw))return raw;
+ if(!/^\d{13}$/.test(raw))return null;
+ const date=new Date(Number(raw));
+ return Number.isFinite(+date)?date.toISOString().slice(0,10):null;
+}
 export function buildQueues(contacts,now=new Date()){
  const today=dayKey(now),fresh=[],retry=[],october=[],september=[],review=[];const seen=new Set();
  for(const c of contacts){
@@ -27,10 +36,10 @@ export function buildQueues(contacts,now=new Date()){
    else if(dayKey(created)?.startsWith('2026-09-'))september.push({...row,reason:'Reactivación de septiembre · gestión de llamada pendiente.'});
    else review.push({...row,reason:'Ingreso fuera de los meses aprobados para esta campaña.'});
   }else{
-   const key=/^\d{4}-\d{2}-\d{2}$/.test(next)?next:null;
+   const key=queueDate(next);
    const awaitingResult=result===''&&['REINTENTO DÍA 1','REINTENTO DÍA 2'].includes(row.cycle);
    if(!key||!last||(!['NO CONTESTÓ','OCUPADO'].includes(result)&&!awaitingResult)){review.push({...row,reason:'Falta fecha o resultado verificable para el reintento.'});continue}
-   if(key<=today)retry.push({...row,reason:awaitingResult?'Reintento listo en GHL. Registra el resultado de esta nueva llamada; el historial anterior se conserva.':`${result==='OCUPADO'?'Ocupado':'No contestó'} · ${key<today?'pendiente vencido':'reintento de hoy'}. Comprueba que la acción anterior esté cerrada y que no haya nueva respuesta o cita.`});
+   if(key<=today)retry.push({...row,next:key,reason:awaitingResult?'Reintento listo en GHL. Registra el resultado de esta nueva llamada; el historial anterior se conserva.':`${result==='OCUPADO'?'Ocupado':'No contestó'} · ${key<today?'pendiente vencido':'reintento de hoy'}. Comprueba que la acción anterior esté cerrada y que no haya nueva respuesta o cita.`});
   }
  }
  fresh.sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt));
