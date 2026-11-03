@@ -75,6 +75,7 @@ async function start(): Promise<void> {
   const locationRouteRepository = new PostgresTenantLocationRouteRepository(pool);
   const tokenRefresh = new GhlTokenRefreshUseCase(oauthClient, repository, cryptor);
   const ghlApiClient = new GhlApiClient(tokenRefresh);
+  const qualificationHandoff = new GhlQualificationTagProvider(ghlApiClient);
   const presentationService = new GhlOAuthPresentationService(
     new InitiateGhlOAuthUseCase(oauthClient, stateService, locationRouteRepository),
     new CompleteGhlOAuthUseCase(oauthClient, stateService, cryptor, repository),
@@ -133,6 +134,7 @@ async function start(): Promise<void> {
     sofiaRepository,
     qualificationLedger: questionLedger,
     qualificationSignalEnabled: config.qualificationSignalEnabled,
+    qualificationHandoff: config.qualificationFlowEnabled ? qualificationHandoff : undefined,
     conversationalAi,
     conversationalAiSendEnabled: config.conversationalAiSendEnabled,
   });
@@ -187,7 +189,7 @@ async function start(): Promise<void> {
     qualificationSignalWorker = new QualificationSignalWorker(
       qualificationSignalRepository,
       new MetaCapiProvider(),
-      new GhlQualificationTagProvider(ghlApiClient),
+      qualificationHandoff,
       cryptor,
       config.nodeEnv,
       config.qualificationSignalPollMs,

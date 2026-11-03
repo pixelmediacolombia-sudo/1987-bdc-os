@@ -204,3 +204,33 @@ test("accepted push is persisted with the selected one-step target", async () =>
   assert.equal(savedState?.pushAccepted, true);
   assert.equal(savedState?.facts.down_payment_accepted, 2000);
 });
+
+test("active corrected facts take precedence over a stale Sofia snapshot", async () => {
+  let savedState: Awaited<ReturnType<SofiaStateRepositoryPort["load"]>>;
+  const base = context();
+  const hydrator = {
+    hydrate: async () => ({
+      ...base,
+      activeFacts: { down_payment_declared: "2500", contact_channel: "whatsapp" },
+    }),
+  } as unknown as ConversationHydrator;
+  const repository: SofiaStateRepositoryPort = {
+    load: async () => ({
+      turnCount: 2,
+      facts: { vehicle_category: "suv", down_payment_declared: 1000 },
+      leadLevel: "B",
+      hardRuleFailure: false,
+    }),
+    save: async (_tenantId, _contactId, state) => { savedState = state; },
+  };
+  const flow = { sendSofiaResponse: async () => ({ providerMessageId: "unused" }) } as unknown as QualificationFlowService;
+  const orchestrator = new HydratingInboundConversationOrchestrator(
+    hydrator,
+    flow,
+    { engine: new SofiaConversationEngine(), repository, dealerName: "Test Dealer" },
+  );
+
+  await orchestrator.process(inbound());
+
+  assert.equal(savedState?.facts.down_payment_declared, 2500);
+});

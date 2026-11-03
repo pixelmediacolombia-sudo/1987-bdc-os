@@ -1,8 +1,9 @@
 import axios from "axios";
 import type { GhlApiClient } from "@/features/ghl-oauth/infrastructure/ghl/ghl-api.client";
 import { QualificationDeliveryError } from "@/modules/control/infrastructure/meta-capi.provider";
+import type { QualificationHandoffInput, QualificationHandoffPort } from "@/modules/control/application/ports/qualification-handoff.port";
 
-export class GhlQualificationTagProvider {
+export class GhlQualificationTagProvider implements QualificationHandoffPort {
   constructor(private readonly apiClient: GhlApiClient) {}
 
   async addQualificationCompletedTag(input: {
@@ -27,5 +28,9 @@ export class GhlQualificationTagProvider {
       }
       throw error;
     }
+  }
+
+  async markQualified(input: QualificationHandoffInput): Promise<void> {
+    await this.addQualificationCompletedTag({ tenantId: input.tenantId, ghlContactId: input.contactId });
   }
 }

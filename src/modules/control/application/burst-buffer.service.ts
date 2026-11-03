@@ -203,7 +203,6 @@ export class BurstBufferService implements BurstBufferPort, BurstBufferCancellat
       const messages = serializedMessages
         .map((serialized) => this.parseStoredMessage(serialized))
         .sort((left, right) => left.receivedAt.localeCompare(right.receivedAt));
-      await this.redis.del(messageKey);
       try {
         const tenantIds = new Set(messages.map((item) => item.tenantId));
         if (tenantIds.size !== 1) throw new Error("Burst buffer contains multiple tenant IDs for one contact");

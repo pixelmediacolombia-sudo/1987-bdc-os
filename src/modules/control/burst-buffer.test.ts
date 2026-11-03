@@ -84,6 +84,16 @@ class FakeRedis implements RedisClientPort {
   }
 }
 
+class RaceRedis extends FakeRedis {
+  constructor(private readonly lateMessage: string) { super(); }
+
+  async drainList(key: string): Promise<string[]> {
+    const drained = await super.drainList(key);
+    await this.rpush(key, this.lateMessage);
+    return drained;
+  }
+}
+
 class CapturingOrchestrator implements InboundConversationOrchestratorPort {
   result?: ConsolidatedInboundConversation;
   calls = 0;
@@ -190,6 +200,37 @@ test("reintentar el mismo webhook no duplica el mensaje y repara el timer durabl
   assert.equal(durableJobs.length, 2);
   assert.match(logs.join("\n"), /deduplicated message/);
   assert.match(logs.join("\n"), /ensuring durable schedule/);
+});
+
+test("conserva un mensaje que llega después del vaciado atómico para el siguiente lote", async () => {
+  const lateMessage = JSON.stringify({
+    ...createMessage("message-late", "Llego mientras se procesaba"),
+    tenantId: "tenant-42",
+    receivedAt: "2026-11-03T12:00:01.000Z",
+  });
+  const redis = new RaceRedis(lateMessage);
+  const mutex = new ContactMutex(redis, 30_000);
+  const orchestrator = new CapturingOrchestrator();
+  const scheduled: Array<() => void> = [];
+  const service = new BurstBufferService(redis, mutex, orchestrator, {
+    bufferSeconds: 1,
+    controlTtlSeconds: 10,
+    timerScheduler: (callback) => {
+      scheduled.push(callback);
+      return setTimeout(() => undefined, 60_000).unref();
+    },
+  });
+
+  await service.add(createMessage("message-first", "Primer lote"), "tenant-42");
+  scheduled[0]?.();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(orchestrator.result?.messages.map((message) => message.content), ["Primer lote"]);
+  assert.deepEqual(
+    redis.lists.get("buffer:messages:tenant:tenant-42:contact:contact-42")?.map((value) => JSON.parse(value).content),
+    ["Llego mientras se procesaba"],
+  );
+  assert.equal(scheduled.length, 2);
 });
 
 test("webhooks con delivery distinto pero el mismo providerMessageId o semanticHash no generan otro turno", async () => {

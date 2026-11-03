@@ -542,7 +542,15 @@ function dealerResponseTokens(value: string): string[] {
 
 function dealerAnswer(message: string, facts: SofiaFacts, policy: SofiaPolicy, knowledge: SofiaKnowledge, language: "es" | "en"): string | undefined {
   const normalized = stripAdMetadata(message).toLowerCase();
-  if (/requisit|qué necesito|que necesito|document|what do i need|requirements/.test(normalized)) return knowledge.requirements[language];
+  if (/requisit|qué necesito|que necesito|document|what do i need|requirements/.test(normalized)) {
+    const categoryMinimum = facts.vehicle_category ? dealerMinimumForCategory(facts.vehicle_category, policy) : undefined;
+    const downPaymentLine = categoryMinimum
+      ? language === "en"
+        ? ` For this category, we normally work around $${categoryMinimum.toLocaleString("en-US")} down; final terms depend on financing.`
+        : ` Para esta categoría normalmente trabajamos alrededor de $${categoryMinimum.toLocaleString("en-US")} de enganche; el monto final depende del financiamiento.`
+      : "";
+    return `${knowledge.requirements[language]}${downPaymentLine}`;
+  }
   if (/dónde|donde|ubicación|ubicacion|horario|domingo|abierto|where are you|hours|open/.test(normalized)) {
     return language === "en"
       ? `${knowledge.dealer.address}. Our hours are ${knowledge.dealer.hours.en}.`
@@ -550,6 +558,13 @@ function dealerAnswer(message: string, facts: SofiaFacts, policy: SofiaPolicy, k
   }
   if (/mensualidad|mensualida|pago mensual|monthly payment/.test(normalized)) {
     return language === "en" ? "The monthly payment depends on financing; the advisor confirms the exact numbers." : "La mensualidad depende del financiamiento; el asesor confirma los números exactos.";
+  }
+  if (/poco cr[eé]dito|mal cr[eé]dito|bad credit|low credit|poor credit/.test(normalized)) {
+    const categoryMinimum = facts.vehicle_category ? dealerMinimumForCategory(facts.vehicle_category, policy) : undefined;
+    const minimum = categoryMinimum ? ` ${language === "en" ? `This category normally starts around $${categoryMinimum.toLocaleString("en-US")} down.` : `Esta categoría normalmente trabaja alrededor de $${categoryMinimum.toLocaleString("en-US")} de enganche.`}` : "";
+    return language === "en"
+      ? `We can review options with limited credit; the advisor confirms the exact requirements.${minimum}`
+      : `Podemos revisar opciones aunque el crédito sea limitado; el asesor confirma los requisitos exactos.${minimum}`;
   }
   if (/licencia|license|itin/.test(normalized)) {
     return language === "en" ? "We can review options with an ITIN; the advisor confirms the exact requirements." : "Podemos revisar opciones con ITIN; el asesor confirma los requisitos exactos.";

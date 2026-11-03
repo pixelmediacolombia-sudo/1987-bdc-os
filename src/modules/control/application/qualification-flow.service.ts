@@ -3,7 +3,10 @@ import type {
   PolicyEvaluatorPort,
 } from "@/modules/decisions/application/policy-evaluation.service";
 import type { NextBestAction } from "@/modules/decisions/domain/next-best-action";
-import { RegisteredOutboundMessageSender } from "@/modules/control/application/registered-outbound-message-sender";
+import {
+  OutboundMessageRejectedError,
+  RegisteredOutboundMessageSender,
+} from "@/modules/control/application/registered-outbound-message-sender";
 import type {
   OutboundMessageRequest,
   ProviderOutboundMessage,
@@ -39,7 +42,18 @@ export class QualificationFlowService {
     return this.outboundSender.send(input);
   }
 
-  sendSofiaResponse(input: OutboundMessageRequest): Promise<ProviderOutboundMessage> {
+  async sendSofiaResponse(input: OutboundMessageRequest): Promise<ProviderOutboundMessage> {
+    const decision = await this.policyEvaluator.evaluateForContact({
+      tenantId: input.tenantId,
+      ghlContactId: input.contactId,
+      requestedAction: "REPLY",
+      ...(input.externalId ? { externalId: input.externalId } : {}),
+      source: "qualification-flow",
+    });
+    if (decision.replyBlocked || !decision.allowedActions.includes("REPLY")) {
+      const action = decision.selectedAction === "HANDOFF" ? "HANDOFF" : "WAIT";
+      throw new OutboundMessageRejectedError(action, `Final outbound policy blocked Sofia response: ${decision.reason}`);
+    }
     return this.outboundSender.send(input);
   }
 }

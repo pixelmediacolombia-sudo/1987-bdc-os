@@ -47,12 +47,26 @@ export class RegisteredOutboundMessageSender {
       throw error;
     }
 
-    await this.registry.attachProviderMessageId({
-      tenantId: input.tenantId,
-      attemptId: reservation.attemptId,
-      providerMessageId: result.providerMessageId,
-    });
+    try {
+      await this.registry.attachProviderMessageId({
+        tenantId: input.tenantId,
+        attemptId: reservation.attemptId,
+        providerMessageId: result.providerMessageId,
+      });
+    } catch (error) {
+      throw new OutboundMessageDeliveryUncertainError(result.providerMessageId, error);
+    }
     return result;
+  }
+}
+
+export class OutboundMessageDeliveryUncertainError extends Error {
+  constructor(
+    public readonly providerMessageId: string,
+    cause: unknown,
+  ) {
+    super(`Outbound provider accepted message ${providerMessageId}, but local delivery registration failed`, { cause });
+    this.name = "OutboundMessageDeliveryUncertainError";
   }
 }
 

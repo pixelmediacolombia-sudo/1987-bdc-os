@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Pool } from "pg";
 import { PostgresOutboundMessageRegistry } from "@/modules/control/infrastructure/persistence/postgres/postgres-outbound-message-registry";
-import { RegisteredOutboundMessageSender } from "@/modules/control/application/registered-outbound-message-sender";
+import {
+  OutboundMessageDeliveryUncertainError,
+  RegisteredOutboundMessageSender,
+} from "@/modules/control/application/registered-outbound-message-sender";
 
 class FakeClient {
   readonly calls: Array<{ sql: string; values?: unknown[] }> = [];
@@ -91,6 +94,24 @@ test("registered sender marks a reservation failed when the provider fails", asy
     /provider unavailable/,
   );
   assert.deepEqual(events, ["register", "provider", "failed:attempt-failed"]);
+});
+
+test("provider acceptance with registry failure becomes delivery-uncertain and is not retried blindly", async () => {
+  const events: string[] = [];
+  const sender = new RegisteredOutboundMessageSender({
+    register: async () => ({ attemptId: "attempt-uncertain", expiresAt: new Date() }),
+    attachProviderMessageId: async () => { events.push("attach"); throw new Error("database unavailable"); },
+    markFailed: async () => { events.push("failed"); },
+    wasIssuedBy1987: async () => false,
+  }, {
+    send: async () => { events.push("provider"); return { providerMessageId: "provider-accepted" }; },
+  });
+
+  await assert.rejects(
+    sender.send({ tenantId: "tenant-a", contactId: "contact-a", semanticHash: "hash-a", content: "Hola" }),
+    (error: unknown) => error instanceof OutboundMessageDeliveryUncertainError && error.providerMessageId === "provider-accepted",
+  );
+  assert.deepEqual(events, ["provider", "attach"]);
 });
 
 test("repeated text creates independent attempts and attaches each provider id", async () => {
