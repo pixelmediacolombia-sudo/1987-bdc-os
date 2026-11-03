@@ -7,7 +7,10 @@ import type { OutboundMessageChannel } from "@/modules/control/application/ports
 import { SofiaConversationEngine, sofiaPolicyFromPolicyPack, type SofiaFacts } from "@/modules/decisions/domain/sofia-conversation";
 import { resolveDealerDisplayName } from "@/modules/decisions/domain/dealer-identity";
 import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
-import { OutboundMessageRejectedError } from "@/modules/control/application/registered-outbound-message-sender";
+import {
+  OutboundMessageDeliveryUncertainError,
+  OutboundMessageRejectedError,
+} from "@/modules/control/application/registered-outbound-message-sender";
 import type { QualificationHandoffPort } from "@/modules/control/application/ports/qualification-handoff.port";
 import type { ConversationAiService } from "@/modules/control/application/conversation-ai.service";
 
@@ -71,8 +74,8 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
       const previous = await this.sofia.repository.load(input.tenantId, input.contactId);
       const engine = this.sofia.engine.withPolicy(sofiaPolicyFromPolicyPack(context.tenant.policies));
       const priorFacts = {
-        ...factsFromContext(context.activeFacts),
         ...(previous?.facts ?? {}),
+        ...factsFromContext(context.activeFacts),
       };
       const ruleTurn = (facts: SofiaFacts) => engine.processTurn({
         dealerName,
@@ -144,15 +147,6 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
       const outboundChannel = toOutboundChannel(input.messages.at(-1)?.channel);
       if (response && outboundChannel && qualificationFlowEnabledForTenant && this.qualificationFlow) {
         try {
-          await this.qualificationFlow.sendSofiaResponse({
-            tenantId: input.tenantId,
-            contactId: input.contactId,
-            content: response,
-            semanticHash: createHash("sha256").update(response, "utf8").digest("hex"),
-            externalId: input.messages.at(-1)?.externalId,
-            channel: outboundChannel,
-          });
-          this.logger.info(`Sofia outbound sent tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel}`);
           if (handoffEligible && this.qualificationHandoff) {
             await this.qualificationHandoff.markQualified({
               tenantId: input.tenantId,
@@ -172,7 +166,22 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
             });
             this.logger.info(`Sofia qualification handoff recorded tenant=${input.tenantId} contact=${input.contactId} stage=Calificado`);
           }
+          await this.qualificationFlow.sendSofiaResponse({
+            tenantId: input.tenantId,
+            contactId: input.contactId,
+            content: response,
+            semanticHash: createHash("sha256").update(response, "utf8").digest("hex"),
+            externalId: input.messages.at(-1)?.externalId,
+            channel: outboundChannel,
+          });
+          this.logger.info(`Sofia outbound sent tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel}`);
         } catch (error) {
+          if (error instanceof OutboundMessageDeliveryUncertainError) {
+            this.logger.error(
+              `Sofia outbound delivery uncertain tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel} providerMessageId=${error.providerMessageId}`,
+            );
+            return;
+          }
           if (error instanceof OutboundMessageRejectedError) {
             this.logger.info(
               `Sofia outbound suppressed tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel} action=${error.action}`,
