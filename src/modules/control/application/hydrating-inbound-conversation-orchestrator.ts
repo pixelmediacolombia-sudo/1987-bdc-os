@@ -112,8 +112,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
         }
       }
       const inboundChannel = input.messages.at(-1)?.channel ?? "missing";
-      const handoffEligible =
-        this.qualificationHandoff &&
+      const handoffRequested =
         result.leadLevel === "A" &&
         !result.hardRuleFailure &&
         result.contactCaptured &&
@@ -144,16 +143,32 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
           },
         );
       }
-      const outboundChannel = toOutboundChannel(input.messages.at(-1)?.channel);
-      if (response && outboundChannel && qualificationFlowEnabledForTenant && this.qualificationFlow) {
-        try {
-          if (handoffEligible && this.qualificationHandoff) {
+      let handoffFailed = false;
+      if (
+        handoffRequested &&
+        qualificationFlowEnabledForTenant &&
+        this.qualificationFlow &&
+        this.qualificationHandoff
+      ) {
+        const handoffDecision = typeof this.qualificationFlow.authorizeHandoff === "function"
+          ? await this.qualificationFlow.authorizeHandoff({
+              tenantId: input.tenantId,
+              contactId: input.contactId,
+              externalId: input.messages.at(-1)?.externalId,
+            })
+          : { selectedAction: "HANDOFF" as const, allowedActions: ["HANDOFF" as const] };
+        if (handoffDecision.selectedAction === "STOP" || !handoffDecision.allowedActions.includes("HANDOFF")) {
+          this.logger.info(
+            `Sofia handoff suppressed tenant=${input.tenantId} contact=${input.contactId} reason=${"reason" in handoffDecision ? handoffDecision.reason : "HANDOFF not allowed"}`,
+          );
+        } else {
+          try {
             await this.qualificationHandoff.markQualified({
               tenantId: input.tenantId,
               contactId: input.contactId,
-              leadLevel: result.leadLevel === "A" ? "A" : "B",
+              leadLevel: "A",
               stage: "Calificado",
-              customerMessage: response,
+              customerMessage: response ?? "",
             });
             await this.sofia.repository.save(input.tenantId, input.contactId, {
               turnCount: (previous?.turnCount ?? 0) + 1,
@@ -165,7 +180,17 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
               ...(result.response ? { lastResponse: result.response } : {}),
             });
             this.logger.info(`Sofia qualification handoff recorded tenant=${input.tenantId} contact=${input.contactId} stage=Calificado`);
+          } catch (error) {
+            handoffFailed = true;
+            const detail = error instanceof Error ? error.message : "unknown error";
+            this.logger.error(`Sofia qualification handoff failed tenant=${input.tenantId} contact=${input.contactId}: ${detail}`);
           }
+        }
+      }
+      if (handoffFailed) return;
+      const outboundChannel = toOutboundChannel(input.messages.at(-1)?.channel);
+      if (response && outboundChannel && qualificationFlowEnabledForTenant && this.qualificationFlow) {
+        try {
           await this.qualificationFlow.sendSofiaResponse({
             tenantId: input.tenantId,
             contactId: input.contactId,
@@ -178,7 +203,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
         } catch (error) {
           if (error instanceof OutboundMessageDeliveryUncertainError) {
             this.logger.error(
-              `Sofia outbound delivery uncertain tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel} providerMessageId=${error.providerMessageId}`,
+              `Sofia outbound delivery uncertain tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel} attemptId=${error.attemptId} providerMessageId=${error.providerMessageId} persisted=${error.persisted}`,
             );
             return;
           }

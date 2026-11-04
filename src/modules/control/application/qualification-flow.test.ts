@@ -72,3 +72,22 @@ test("Sofia response never reaches provider when current policy blocks reply", a
   );
   assert.equal(sends, 0);
 });
+
+test("internal handoff authorization is independent from customer reply authorization", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const flow = new QualificationFlowService({
+    evaluateForContact: async (request) => {
+      requests.push(request);
+      if (request.requestedAction === "REPLY") {
+        return decision({ allowedActions: ["WAIT", "HANDOFF"], replyBlocked: true, selectedAction: "WAIT" });
+      }
+      return decision({ allowedActions: ["HANDOFF"], replyBlocked: true, selectedAction: "HANDOFF" });
+    },
+  }, { send: async () => ({ providerMessageId: "unused" }) } as never);
+
+  const handoff = await flow.authorizeHandoff({ tenantId: "tenant-a", contactId: "contact-a" });
+  assert.equal(handoff.selectedAction, "HANDOFF");
+  await assert.rejects(flow.sendSofiaResponse(input()), OutboundMessageRejectedError);
+  assert.equal(requests[0]?.requestedAction, undefined);
+  assert.equal(requests[1]?.requestedAction, "REPLY");
+});

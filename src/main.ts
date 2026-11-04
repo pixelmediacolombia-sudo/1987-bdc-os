@@ -44,6 +44,7 @@ import { MetaCapiProvider } from "@/modules/control/infrastructure/meta-capi.pro
 import { GhlTokenRefreshUseCase } from "@/features/ghl-oauth/application/use-cases/ghl-token-refresh.use-case";
 import { GhlApiClient } from "@/features/ghl-oauth/infrastructure/ghl/ghl-api.client";
 import { GhlQualificationTagProvider } from "@/features/ghl-oauth/infrastructure/ghl/ghl-qualification-tag.provider";
+import { GhlOutboundMessageProvider } from "@/features/ghl-oauth/infrastructure/ghl/ghl-outbound-message.provider";
 import { PostgresSofiaStateRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-sofia-state.repository";
 import { ensureTenantFeatureFlags } from "@/modules/control/infrastructure/persistence/postgres/tenant-flags.migration";
 import { ensureCountryClubPolicy } from "@/modules/control/infrastructure/persistence/postgres/country-club-policy.migration";
@@ -53,6 +54,8 @@ import { GhlInboundMediaResolver } from "@/modules/media/infrastructure/ghl-inbo
 import { OpenAICompatibleConversationalModel } from "@/features/ghl-oauth/infrastructure/ghl/conversational-model.adapter";
 import { ConversationAiService } from "@/modules/control/application/conversation-ai.service";
 import { PostgresConversationAiShadowRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-conversation-ai-shadow.repository";
+import { OutboundDeliveryReconciliationService } from "@/modules/control/application/outbound-delivery-reconciliation.service";
+import { OutboundDeliveryReconciliationController } from "@/presentation/http/outbound-delivery-reconciliation.controller";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -103,6 +106,10 @@ async function start(): Promise<void> {
     questionLedger,
   );
   const outboundRegistry = new PostgresOutboundMessageRegistry(pool);
+  const outboundDeliveryReconciliation = new OutboundDeliveryReconciliationService(
+    outboundRegistry,
+    new GhlOutboundMessageProvider(ghlApiClient),
+  );
   const conversationalAi = config.conversationalAiEnabled
     ? new ConversationAiService(
         new OpenAICompatibleConversationalModel(
@@ -204,10 +211,26 @@ async function start(): Promise<void> {
   );
   const policyDiagnosticController = new PolicyDiagnosticController(policyEvaluator, config.policyDiagnosticToken);
   const redisDiagnosticController = new RedisDiagnosticController(redis, config.policyDiagnosticToken);
+  const outboundDeliveryReconciliationController = new OutboundDeliveryReconciliationController(
+    outboundRegistry,
+    outboundDeliveryReconciliation,
+    config.policyDiagnosticToken,
+  );
   // The dashboard is read-only, isolated to Lucki, and does not alter conversation automation.
   const { createDashboardRouter } = require("../dashboard/compiled/router.cjs");
-  const dashboardRouter = createDashboardRouter({pool, publicDirectory:path.resolve(__dirname,"../dashboard/public")});
-  const app = createHttpApp(controller, webhookController, undefined, policyDiagnosticController, redisDiagnosticController, dashboardRouter);
+  const dashboardRouter = createDashboardRouter({
+    pool,
+    publicDirectory: path.resolve(__dirname, "../dashboard/public"),
+  });
+  const app = createHttpApp(
+    controller,
+    webhookController,
+    undefined,
+    policyDiagnosticController,
+    redisDiagnosticController,
+    outboundDeliveryReconciliationController,
+    dashboardRouter,
+  );
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
   const shutdown = (signal: string) => {

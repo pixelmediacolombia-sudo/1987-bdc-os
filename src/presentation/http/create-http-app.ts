@@ -13,6 +13,8 @@ import type { PolicyDiagnosticController } from "@/modules/decisions/presentatio
 import { createPolicyDiagnosticRouter } from "@/modules/decisions/presentation/http/policy-diagnostic.routes";
 import type { RedisDiagnosticController } from "@/presentation/http/redis-diagnostic.controller";
 import { createRedisDiagnosticRouter } from "@/presentation/http/redis-diagnostic.routes";
+import type { OutboundDeliveryReconciliationController } from "@/presentation/http/outbound-delivery-reconciliation.controller";
+import { createOutboundDeliveryReconciliationRouter } from "@/presentation/http/outbound-delivery-reconciliation.routes";
 
 export function createHttpApp(
   controller: GhlOAuthController,
@@ -20,6 +22,7 @@ export function createHttpApp(
   signatureKeys?: GhlSignatureKeys,
   policyDiagnosticController?: PolicyDiagnosticController,
   redisDiagnosticController?: RedisDiagnosticController,
+  outboundDeliveryReconciliationController?: OutboundDeliveryReconciliationController,
   dashboardRouter?: express.Router,
 ): Express {
   const app = express();
@@ -39,6 +42,9 @@ export function createHttpApp(
   }
   if (redisDiagnosticController) {
     app.use("/tests", createRedisDiagnosticRouter(redisDiagnosticController));
+  }
+  if (outboundDeliveryReconciliationController) {
+    app.use("/tests", createOutboundDeliveryReconciliationRouter(outboundDeliveryReconciliationController));
   }
   app.use((_req, res) => res.status(404).json({ error: "Not found" }));
   return app;

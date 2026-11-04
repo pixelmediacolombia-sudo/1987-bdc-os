@@ -38,11 +38,29 @@ export class QualificationFlowService {
     });
   }
 
-  sendCandidate(input: OutboundMessageRequest): Promise<ProviderOutboundMessage> {
-    return this.outboundSender.send(input);
+  /** Internal CRM assignment is authorized independently from customer messaging. */
+  authorizeHandoff(input: {
+    tenantId: string;
+    contactId: string;
+    externalId?: string;
+  }): Promise<LoggedPolicyDecision> {
+    return this.policyEvaluator.evaluateForContact({
+      tenantId: input.tenantId,
+      ghlContactId: input.contactId,
+      ...(input.externalId ? { externalId: input.externalId } : {}),
+      source: "qualification-flow",
+    });
+  }
+
+  async sendCandidate(input: OutboundMessageRequest): Promise<ProviderOutboundMessage> {
+    return this.sendAuthorizedReply(input);
   }
 
   async sendSofiaResponse(input: OutboundMessageRequest): Promise<ProviderOutboundMessage> {
+    return this.sendAuthorizedReply(input);
+  }
+
+  private async sendAuthorizedReply(input: OutboundMessageRequest): Promise<ProviderOutboundMessage> {
     const decision = await this.policyEvaluator.evaluateForContact({
       tenantId: input.tenantId,
       ghlContactId: input.contactId,
@@ -50,7 +68,7 @@ export class QualificationFlowService {
       ...(input.externalId ? { externalId: input.externalId } : {}),
       source: "qualification-flow",
     });
-    if (decision.replyBlocked || !decision.allowedActions.includes("REPLY")) {
+    if (decision.replyBlocked || !decision.allowedActions?.includes("REPLY")) {
       const action = decision.selectedAction === "HANDOFF" ? "HANDOFF" : "WAIT";
       throw new OutboundMessageRejectedError(action, `Final outbound policy blocked Sofia response: ${decision.reason}`);
     }

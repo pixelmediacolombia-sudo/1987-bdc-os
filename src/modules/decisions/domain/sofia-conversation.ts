@@ -851,10 +851,12 @@ function applyPushDecision(facts: SofiaFacts, message: string): void {
   const normalized = message.trim().toLowerCase();
   const target = facts.down_payment_push_target;
   if (target === undefined || facts.push_accepted !== undefined) return;
-  if (/^(sí|si|yes|claro|puedo|de acuerdo|ok|okay)(?:\s|[.!?,;:]|$)/.test(normalized)) {
+  const acceptsPush = /^(?:sí|si|yes|claro|puedo|de acuerdo|ok|okay)(?:\s*[,;:.]?\s*(?:puedo|puede|llego|llegar|alcanzar|de acuerdo|sí|si|yes|ok|okay))?\s*[.!?]?\s*$/.test(normalized);
+  const declinesPush = /^(?:no|no puedo|ahorita no|todavía no)(?:\s*[,;:.]?\s*(?:puedo|puede|llego|llegar|alcanzar))?\s*[.!?]?\s*$/.test(normalized);
+  if (acceptsPush) {
     facts.push_accepted = true;
     facts.down_payment_accepted = target;
-  } else if (/^(no|no puedo|ahorita no)(?:\s|[.!?,;:]|$)/.test(normalized)) {
+  } else if (declinesPush) {
     facts.push_accepted = false;
     facts.down_payment_accepted = facts.down_payment_declared;
   }

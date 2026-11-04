@@ -54,7 +54,26 @@ export class RegisteredOutboundMessageSender {
         providerMessageId: result.providerMessageId,
       });
     } catch (error) {
-      throw new OutboundMessageDeliveryUncertainError(result.providerMessageId, error);
+      let persisted = false;
+      try {
+        if (!this.registry.markDeliveryUncertain) throw new Error("uncertainty persistence is unavailable");
+        await this.registry.markDeliveryUncertain({
+          tenantId: input.tenantId,
+          attemptId: reservation.attemptId,
+          providerMessageId: result.providerMessageId,
+          reason: error instanceof Error ? error.message : "registry association failed",
+        });
+        persisted = true;
+      } catch {
+        // A database outage can prevent even the uncertainty marker from being
+        // written. Keep the provider and attempt ids in the thrown error.
+      }
+      throw new OutboundMessageDeliveryUncertainError(
+        reservation.attemptId,
+        result.providerMessageId,
+        error,
+        persisted,
+      );
     }
     return result;
   }
@@ -62,8 +81,10 @@ export class RegisteredOutboundMessageSender {
 
 export class OutboundMessageDeliveryUncertainError extends Error {
   constructor(
+    public readonly attemptId: string,
     public readonly providerMessageId: string,
     cause: unknown,
+    public readonly persisted: boolean,
   ) {
     super(`Outbound provider accepted message ${providerMessageId}, but local delivery registration failed`, { cause });
     this.name = "OutboundMessageDeliveryUncertainError";

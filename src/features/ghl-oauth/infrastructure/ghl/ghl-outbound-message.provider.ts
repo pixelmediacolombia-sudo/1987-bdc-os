@@ -4,6 +4,8 @@ import type {
   OutboundMessageRequest,
   ProviderOutboundMessage,
 } from "@/modules/control/application/ports/outbound-message-sender.port";
+import type { OutboundDeliveryReconciliationProviderPort } from "@/modules/control/application/ports/outbound-delivery-reconciliation.port";
+import axios from "axios";
 
 type GhlSendMessageResponse = {
   messageId?: unknown;
@@ -11,7 +13,14 @@ type GhlSendMessageResponse = {
 };
 
 /** GHL transport invoked only after the application sender passes its veto. */
-export class GhlOutboundMessageProvider implements OutboundMessageProviderPort {
+type GhlMessageLookupResponse = {
+  id?: unknown;
+  contactId?: unknown;
+  status?: unknown;
+};
+
+export class GhlOutboundMessageProvider
+  implements OutboundMessageProviderPort, OutboundDeliveryReconciliationProviderPort {
   constructor(
     private readonly apiClient: GhlApiClient,
     private readonly defaultChannel: NonNullable<OutboundMessageRequest["channel"]> = "SMS",
@@ -41,5 +50,35 @@ export class GhlOutboundMessageProvider implements OutboundMessageProviderPort {
         : undefined;
     if (!messageId?.trim()) throw new Error("GHL outbound response did not include messageId");
     return { providerMessageId: messageId };
+  }
+
+  async lookup(input: {
+    tenantId: string;
+    contactId: string;
+    providerMessageId: string;
+  }) {
+    try {
+      const response = await this.apiClient.request<GhlMessageLookupResponse>(input.tenantId, {
+        method: "GET",
+        url: `https://services.leadconnectorhq.com/conversations/messages/${encodeURIComponent(input.providerMessageId)}`,
+        headers: { Accept: "application/json", Version: "2023-02-21" },
+      });
+      const contactId = typeof response.data.contactId === "string" ? response.data.contactId : undefined;
+      if (contactId && contactId !== input.contactId) {
+        return { result: "unknown" as const, error: "Provider message belongs to another contact" };
+      }
+      return {
+        result: "found" as const,
+        ...(typeof response.data.status === "string" ? { providerStatus: response.data.status } : {}),
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return { result: "not_found" as const, providerStatus: "404" };
+      }
+      return {
+        result: "unknown" as const,
+        error: error instanceof Error ? error.message : "GHL message lookup failed",
+      };
+    }
   }
 }
