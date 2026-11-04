@@ -15,6 +15,7 @@ function oauthFailureCode(error: unknown): string {
 export class GhlOAuthController {
   constructor(
     private readonly service: GhlOAuthPresentationService,
+    private readonly dashboardInstallReceipt?: (code: string, redirectUri: string) => Promise<void>,
   ) {}
 
   initiateHandler = (req: Request, res: Response): void => {
@@ -40,6 +41,35 @@ export class GhlOAuthController {
     if (oauthError) {
       res.status(400).json({ error: "GHL OAuth authorization was denied" });
       return;
+    }
+    // The developer-portal Marketplace link supplies code only. Accept it ONLY as
+    // a narrowly verified dashboard-install receipt, never as tenant onboarding,
+    // a user login, or a fallback after a failed state verification.
+    if(code && req.query.state===undefined && this.dashboardInstallReceipt){
+      const callbacks:Record<string,string>={
+        "one987-bdc-os.onrender.com/callback":"https://one987-bdc-os.onrender.com/oauth/callback",
+        "bdc.1987marketing.com/return":"https://bdc.1987marketing.com/oauth/return",
+      };
+      const redirectUri=callbacks[req.hostname+req.path];
+      if(redirectUri){
+        try{
+          await this.dashboardInstallReceipt(code,redirectUri);
+          res.redirect(303,"https://app.1987marketing.com/v2/location/cd9Slb2Fk2vNY3l4ukG9/dashboard/6add8337dc4b01c8b1e5bd51");
+        }catch(error){
+          let failureCode="provider_exchange_failed";
+          if(error instanceof Error&&error.message==="Dashboard installation scope rejected")failureCode="scope_rejected";
+          if(error instanceof Error&&error.message==="Dashboard installation location rejected")failureCode="location_rejected";
+          // Never log Axios errors, token responses, authorization codes or credentials.
+          const providerError=error as {response?:{status?:number;data?:{error?:unknown}}};
+          const providerStatus=typeof providerError?.response?.status==="number"?providerError.response.status:undefined;
+          const raw=providerError?.response?.data?.error;
+          const providerCode=typeof raw==="string"&&["invalid_grant","invalid_client","unauthorized_client","invalid_request","invalid_scope"].includes(raw)?raw:undefined;
+          const diagnostics=failureCode!=="provider_exchange_failed"&&error instanceof Error?error.cause:undefined;
+          console.warn("GHL dashboard installation receipt rejected",{failureCode,providerStatus,providerCode,diagnostics});
+          res.status(403).json({error:"Dashboard installation could not be verified. Select only Lucki Mazda and the users.readonly permission.",error_code:failureCode,...(providerStatus?{provider_status:providerStatus}:{})});
+        }
+        return;
+      }
     }
     if (!code || !state) {
       res.status(400).json({ error: "Missing OAuth code or state" });

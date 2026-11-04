@@ -1,4 +1,5 @@
 import { createHttpApp } from "@/presentation/http/create-http-app";
+import path from "node:path";
 import { loadAppConfig } from "@/features/ghl-oauth/infrastructure/config/env.config";
 import { Aes256GcmTokenCryptor } from "@/features/ghl-oauth/infrastructure/crypto/aes256-gcm-token.cryptor";
 import { GhlOAuthClientAdapter } from "@/features/ghl-oauth/infrastructure/ghl/ghl-oauth.client";
@@ -82,7 +83,8 @@ async function start(): Promise<void> {
     new InitiateGhlOAuthUseCase(oauthClient, stateService, locationRouteRepository),
     new CompleteGhlOAuthUseCase(oauthClient, stateService, cryptor, repository),
   );
-  const controller = new GhlOAuthController(presentationService);
+  const controller = new GhlOAuthController(presentationService,
+    (code,redirectUri)=>oauthClient.verifyDashboardInstall(code,redirectUri));
   const policyPackProvider = new LocalPolicyPackProvider();
   const hydrator = new ConversationHydrator(
     new PostgresHydrationRepository(pool),
@@ -214,6 +216,12 @@ async function start(): Promise<void> {
     outboundDeliveryReconciliation,
     config.policyDiagnosticToken,
   );
+  // The dashboard is read-only, isolated to Lucki, and does not alter conversation automation.
+  const { createDashboardRouter } = require("../dashboard/compiled/router.cjs");
+  const dashboardRouter = createDashboardRouter({
+    pool,
+    publicDirectory: path.resolve(__dirname, "../dashboard/public"),
+  });
   const app = createHttpApp(
     controller,
     webhookController,
@@ -221,6 +229,7 @@ async function start(): Promise<void> {
     policyDiagnosticController,
     redisDiagnosticController,
     outboundDeliveryReconciliationController,
+    dashboardRouter,
   );
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
