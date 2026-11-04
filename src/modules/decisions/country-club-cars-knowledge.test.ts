@@ -152,6 +152,31 @@ test("Country Club does not restart the staircase after the customer accepts the
   assert.doesNotMatch(accepted.response ?? "", /Would it be possible to reach/i);
 });
 
+test("Country Club does not treat an income-proof answer as acceptance of the down-payment push", async () => {
+  const engine = await countryClubEngine();
+  const result = engine.processTurn({
+    dealerName: "Country Club Cars Inc.",
+    latestMessage: "si tengo estados de cuenta",
+    priorFacts: {
+      contact_name: "Ana",
+      vehicle_model_interest: "Rav4",
+      vehicle_category: "suv",
+      down_payment_declared: 1000,
+      down_payment_push_target: 2000,
+      negotiation_step: "reach_floor",
+      has_trade_in: false,
+      first_time_buyer: true,
+      purchase_timeline: "this_month",
+    },
+    turnCount: 6,
+    contactChannel: "WhatsApp",
+    language: "es",
+  });
+  assert.equal(result.facts.push_accepted, undefined);
+  assert.equal(result.facts.down_payment_accepted, undefined);
+  assert.notEqual(result.leadLevel, "A");
+});
+
 test("Country Club answers requirements before asking the next missing box", async () => {
   const engine = await countryClubEngine();
   const result = engine.processTurn({

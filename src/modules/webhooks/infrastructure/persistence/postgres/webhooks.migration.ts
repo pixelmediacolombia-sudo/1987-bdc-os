@@ -51,7 +51,17 @@ CREATE TABLE IF NOT EXISTS public.outbound_message_registry (
   provider_message_id TEXT,
   content TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'reserved'
-    CHECK (status IN ('reserved', 'sent', 'failed', 'expired')),
+    CHECK (status IN ('reserved', 'sent', 'failed', 'expired', 'uncertain')),
+  uncertainty_reason TEXT,
+  uncertainty_detected_at TIMESTAMPTZ,
+  reconciliation_attempts INT NOT NULL DEFAULT 0,
+  last_reconciliation_result TEXT,
+  last_reconciliation_error TEXT,
+  last_provider_status TEXT,
+  resolution TEXT,
+  resolved_by TEXT,
+  resolved_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '5 minutes'),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT outbound_registry_attempt_uq UNIQUE (tenant_id, attempt_id)
@@ -81,6 +91,17 @@ ALTER TABLE public.outbound_message_registry
 
 ALTER TABLE public.outbound_message_registry
   ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE public.outbound_message_registry
+  ADD COLUMN IF NOT EXISTS uncertainty_reason TEXT,
+  ADD COLUMN IF NOT EXISTS uncertainty_detected_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS reconciliation_attempts INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS last_reconciliation_result TEXT,
+  ADD COLUMN IF NOT EXISTS last_reconciliation_error TEXT,
+  ADD COLUMN IF NOT EXISTS last_provider_status TEXT,
+  ADD COLUMN IF NOT EXISTS resolution TEXT,
+  ADD COLUMN IF NOT EXISTS resolved_by TEXT,
+  ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 UPDATE public.outbound_message_registry
    SET expires_at = created_at + interval '5 minutes'
  WHERE expires_at IS NULL;
@@ -105,9 +126,21 @@ BEGIN
   ) THEN
     ALTER TABLE public.outbound_message_registry
       ADD CONSTRAINT outbound_registry_status_check
-      CHECK (status IN ('reserved', 'sent', 'failed', 'expired'));
+      CHECK (status IN ('reserved', 'sent', 'failed', 'expired', 'uncertain'));
   END IF;
 END $$;
+
+ALTER TABLE public.outbound_message_registry
+  DROP CONSTRAINT IF EXISTS outbound_registry_status_check;
+ALTER TABLE public.outbound_message_registry
+  ADD CONSTRAINT outbound_registry_status_check
+  CHECK (status IN ('reserved', 'sent', 'failed', 'expired', 'uncertain'));
+
+ALTER TABLE public.outbound_message_registry
+  DROP CONSTRAINT IF EXISTS outbound_registry_resolution_check;
+ALTER TABLE public.outbound_message_registry
+  ADD CONSTRAINT outbound_registry_resolution_check
+  CHECK (resolution IS NULL OR resolution IN ('confirmed', 'not_found', 'cancelled'));
 
 CREATE INDEX IF NOT EXISTS outbound_registry_provider_idx
   ON public.outbound_message_registry (tenant_id, contact_id, provider_message_id);

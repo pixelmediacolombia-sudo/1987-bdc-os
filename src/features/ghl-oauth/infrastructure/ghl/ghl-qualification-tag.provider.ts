@@ -3,6 +3,8 @@ import type { GhlApiClient } from "@/features/ghl-oauth/infrastructure/ghl/ghl-a
 import { QualificationDeliveryError } from "@/modules/control/infrastructure/meta-capi.provider";
 import type { QualificationHandoffInput, QualificationHandoffPort } from "@/modules/control/application/ports/qualification-handoff.port";
 
+type GhlContactResponse = { tags?: unknown };
+
 export class GhlQualificationTagProvider implements QualificationHandoffPort {
   constructor(private readonly apiClient: GhlApiClient) {}
 
@@ -11,6 +13,17 @@ export class GhlQualificationTagProvider implements QualificationHandoffPort {
     ghlContactId: string;
   }): Promise<void> {
     try {
+      const existing = await this.apiClient.request<GhlContactResponse>(input.tenantId, {
+        method: "GET",
+        url: `https://services.leadconnectorhq.com/contacts/${encodeURIComponent(input.ghlContactId)}`,
+        headers: { Accept: "application/json", Version: "2021-07-28" },
+      });
+      const tags = Array.isArray(existing.data.tags)
+        ? existing.data.tags.filter((tag): tag is string => typeof tag === "string")
+        : [];
+      // GHL workflows triggered by tag addition should not be re-fired merely
+      // because a previously qualified lead is evaluated again.
+      if (tags.includes("qualification_completed")) return;
       await this.apiClient.request(input.tenantId, {
         method: "POST",
         url: `https://services.leadconnectorhq.com/contacts/${encodeURIComponent(input.ghlContactId)}/tags`,

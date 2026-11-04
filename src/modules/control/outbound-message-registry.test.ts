@@ -101,6 +101,9 @@ test("provider acceptance with registry failure becomes delivery-uncertain and i
   const sender = new RegisteredOutboundMessageSender({
     register: async () => ({ attemptId: "attempt-uncertain", expiresAt: new Date() }),
     attachProviderMessageId: async () => { events.push("attach"); throw new Error("database unavailable"); },
+    markDeliveryUncertain: async (input: { attemptId: string; providerMessageId: string }) => {
+      events.push(`uncertain:${input.attemptId}:${input.providerMessageId}`);
+    },
     markFailed: async () => { events.push("failed"); },
     wasIssuedBy1987: async () => false,
   }, {
@@ -109,9 +112,10 @@ test("provider acceptance with registry failure becomes delivery-uncertain and i
 
   await assert.rejects(
     sender.send({ tenantId: "tenant-a", contactId: "contact-a", semanticHash: "hash-a", content: "Hola" }),
-    (error: unknown) => error instanceof OutboundMessageDeliveryUncertainError && error.providerMessageId === "provider-accepted",
+    (error: unknown) => error instanceof OutboundMessageDeliveryUncertainError &&
+      error.providerMessageId === "provider-accepted" && error.attemptId === "attempt-uncertain" && error.persisted,
   );
-  assert.deepEqual(events, ["provider", "attach"]);
+  assert.deepEqual(events, ["provider", "attach", "uncertain:attempt-uncertain:provider-accepted"]);
 });
 
 test("repeated text creates independent attempts and attaches each provider id", async () => {
