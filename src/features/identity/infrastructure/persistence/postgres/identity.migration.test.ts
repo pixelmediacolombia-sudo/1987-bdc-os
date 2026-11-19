@@ -12,6 +12,10 @@ test("identity schema separates global accounts from dealer tenants and permits 
   assert.match(CREATE_IDENTITY_TABLES_SQL, /REFERENCES public\.tenants\(dealer_id\)/);
   assert.match(CREATE_IDENTITY_TABLES_SQL, /public\.app_sessions/);
   assert.match(CREATE_IDENTITY_TABLES_SQL, /token_hash TEXT NOT NULL UNIQUE/);
+  assert.match(CREATE_IDENTITY_TABLES_SQL, /ALTER TABLE public\.tenants ALTER COLUMN ghl_location_id DROP NOT NULL/);
+  assert.match(CREATE_IDENTITY_TABLES_SQL, /IF NULLIF\(btrim\(NEW\.ghl_location_id\), ''\) IS NOT NULL/);
+  assert.match(CREATE_IDENTITY_TABLES_SQL, /public\.dealer_invitations/);
+  assert.match(CREATE_IDENTITY_TABLES_SQL, /accepted_at IS NULL AND revoked_at IS NULL/);
   assert.doesNotMatch(CREATE_IDENTITY_TABLES_SQL, /password\s*=\s*['"]/i);
 });
 

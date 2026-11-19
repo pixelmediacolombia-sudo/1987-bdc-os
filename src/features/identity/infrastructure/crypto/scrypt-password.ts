@@ -1,8 +1,19 @@
-import { scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 
 const scrypt = promisify(scryptCallback);
 const PARAMETERS = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+
+export async function hashScryptPassword(password: string): Promise<string> {
+  const salt = randomBytes(16);
+  const derived = await new Promise<Buffer>((resolve, reject) => {
+    scryptCallback(password, salt, 64, PARAMETERS, (error, key) => {
+      if (error) reject(error);
+      else resolve(key as Buffer);
+    });
+  });
+  return `scrypt$32768$8$1$${salt.toString("base64url")}$${derived.toString("base64url")}`;
+}
 
 export async function verifyScryptPassword(password: string, encodedHash: string): Promise<boolean> {
   const parts = encodedHash.split("$");

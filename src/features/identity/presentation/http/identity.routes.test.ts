@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { scryptSync, randomBytes } from "node:crypto";
+import { createHash, scryptSync, randomBytes } from "node:crypto";
 import express from "express";
 import test from "node:test";
 import type { Pool } from "pg";
@@ -92,4 +92,125 @@ test("production identity cookies are Secure", async (context) => {
   const response = await fetch(`http://127.0.0.1:${address.port}/auth/session`);
   assert.equal(response.status, 401);
   assert.match(response.headers.get("set-cookie") ?? "", /; Secure/);
+});
+
+test("admin creates an inert dealer and one-time invitation; invitee chooses a hashed password", async (context) => {
+  const sessionToken = "admin-browser-session";
+  const sessionHash = createHash("sha256").update(sessionToken).digest("hex");
+  const admin = { id: "admin-id", email, display_name: "Local Admin", account_type: "admin" as const };
+  const dealerId = "dealer-123";
+  let invitationDigest = "";
+  let createdPasswordHash = "";
+  let invitationAccepted = false;
+  const client = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [] };
+      if (sql.includes("FROM public.app_users WHERE lower(email) = $1")) return { rows: [] };
+      if (sql.includes("INSERT INTO public.tenants")) {
+        assert.equal(values[0], "Sample Dealer");
+        assert.match(sql, /NULL, \$1/);
+        assert.match(sql, /false, false, false/);
+        return { rows: [{ id: dealerId }] };
+      }
+      if (sql.includes("INSERT INTO public.dealer_invitations")) {
+        invitationDigest = String(values[3]);
+        return { rows: [] };
+      }
+      if (sql.includes("SELECT i.id::text")) {
+        assert.equal(values[0], invitationDigest);
+        return { rows: invitationAccepted ? [] : [{
+          id: "invite-1", tenant_id: dealerId, email: "owner@example.com", display_name: "Dealer Owner", dealer_name: "Sample Dealer",
+        }] };
+      }
+      if (sql.includes("SELECT id::text, account_type, status FROM public.app_users")) return { rows: [] };
+      if (sql.includes("INSERT INTO public.app_users")) {
+        createdPasswordHash = String(values[2]);
+        return { rows: [{ id: "owner-id" }] };
+      }
+      if (sql.includes("INSERT INTO public.user_tenant_memberships")) {
+        assert.deepEqual(values, ["owner-id", dealerId]);
+        return { rows: [] };
+      }
+      if (sql.includes("UPDATE public.dealer_invitations SET accepted_at")) {
+        invitationAccepted = true;
+        return { rows: [] };
+      }
+      throw new Error(`Unexpected identity invitation SQL: ${sql.slice(0, 80)}`);
+    },
+    release: () => undefined,
+  };
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes("FROM public.app_sessions")) return { rows: values[0] === sessionHash ? [admin] : [] };
+      throw new Error(`Unexpected identity pool SQL: ${sql.slice(0, 80)}`);
+    },
+    connect: async () => client,
+  } as unknown as Pool;
+  const app = express();
+  app.use(express.json());
+  app.use("/auth", createIdentityRouter(pool, { production: false }));
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}/auth`;
+  const cookie = `bdc_os_session=${sessionToken}`;
+
+  const created = await fetch(`${baseUrl}/admin/dealers`, {
+    method: "POST", headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ dealerName: "Sample Dealer", ownerName: "Dealer Owner", ownerEmail: "Owner@Example.com" }),
+  });
+  assert.equal(created.status, 201);
+  const createdBody = await created.json() as { dealer: { id: string; status: string }; invitation: { url: string; expiresInHours: number } };
+  assert.equal(createdBody.dealer.id, dealerId);
+  assert.equal(createdBody.dealer.status, "onboarding");
+  assert.equal(createdBody.invitation.expiresInHours, 72);
+  const inviteUrl = new URL(createdBody.invitation.url);
+  assert.equal(inviteUrl.origin, "http://localhost:3000");
+  const rawToken = inviteUrl.searchParams.get("token");
+  assert.ok(rawToken);
+  assert.notEqual(invitationDigest, rawToken);
+  assert.equal(invitationDigest, createHash("sha256").update(rawToken).digest("hex"));
+
+  const page = await fetch(`${baseUrl}/invitations/accept?token=${encodeURIComponent(rawToken)}`);
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
+  assert.match(page.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+  assert.equal(page.headers.get("referrer-policy"), "no-referrer");
+
+  const accepted = await fetch(`${baseUrl}/invitations/accept`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: rawToken, password: "dealer-password-long-enough" }),
+  });
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(await accepted.json(), { activated: true, existingAccount: false, dealerName: "Sample Dealer" });
+  assert.match(createdPasswordHash, /^scrypt\$32768\$8\$1\$/);
+  assert.equal(await verifyScryptPassword("dealer-password-long-enough", createdPasswordHash), true);
+
+  const reused = await fetch(`${baseUrl}/invitations/accept`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: rawToken, password: "dealer-password-long-enough" }),
+  });
+  assert.equal(reused.status, 400);
+});
+
+test("a dealer user cannot create a dealer invitation", async (context) => {
+  const sessionToken = "dealer-browser-session";
+  const sessionHash = createHash("sha256").update(sessionToken).digest("hex");
+  const user = { id: "user-id", email: "dealer@example.com", display_name: "Dealer", account_type: "user" as const };
+  const pool = { query: async (_sql: string, values: unknown[] = []) => ({ rows: values[0] === sessionHash ? [user] : [] }) } as unknown as Pool;
+  const app = express();
+  app.use(express.json());
+  app.use("/auth", createIdentityRouter(pool, { production: false }));
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const response = await fetch(`http://127.0.0.1:${address.port}/auth/admin/dealers`, {
+    method: "POST", headers: { cookie: `bdc_os_session=${sessionToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ dealerName: "Other Dealer", ownerName: "Owner", ownerEmail: "owner@example.com" }),
+  });
+  assert.equal(response.status, 403);
 });

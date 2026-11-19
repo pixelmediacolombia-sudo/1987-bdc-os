@@ -61,16 +61,19 @@ import { PostgresInternalDiagnosticAudit } from "@/presentation/http/postgres-in
 import { ensureIdentityTables } from "@/features/identity/infrastructure/persistence/postgres/identity.migration";
 import { bootstrapLocalAdmin } from "@/features/identity/infrastructure/persistence/postgres/local-admin.bootstrap";
 import { createIdentityRouter } from "@/features/identity/presentation/http/identity.routes";
+import { createSmtpDealerInvitationMailer } from "@/features/identity/infrastructure/email/smtp-dealer-invitation-mailer";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
   const pool = createPostgresPool(config.databaseUrl, config.pgSsl);
   const redis = new IoredisClient(config.redisUrl);
+  // Webhook bootstrap creates tenant_location_routes before identity updates the GHL route trigger
+  // to support new BDC OS dealers that have not connected GHL yet.
+  await ensureWebhookTables(pool);
   await ensureIdentityTables(pool);
   const localAdminCreated = await bootstrapLocalAdmin(pool);
   if (localAdminCreated) console.info("[Identity] local platform admin bootstrapped");
   await ensureIntegrationsTable(pool);
-  await ensureWebhookTables(pool);
   await ensureTenantFeatureFlags(pool);
   await ensureMemoryTables(pool);
   const countryClubActivated = await ensureCountryClubPolicy(pool);
@@ -244,7 +247,11 @@ async function start(): Promise<void> {
       production: config.nodeEnv === "production",
       allowedRemoteIps: config.internalDiagnosticAllowedRemoteIps,
     } : undefined,
-    createIdentityRouter(pool, { production: config.nodeEnv === "production" }),
+    createIdentityRouter(pool, {
+      production: config.nodeEnv === "production",
+      publicAppUrl: process.env.BDC_APP_URL,
+      invitationMailer: createSmtpDealerInvitationMailer(),
+    }),
   );
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
