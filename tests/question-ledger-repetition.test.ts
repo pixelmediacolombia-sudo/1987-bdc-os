@@ -204,6 +204,9 @@ test("Ticket 8 / rejected candidates do not reach the outbound provider", async 
   const qualificationFlow = new QualificationFlowService({
     evaluateForContact: async (input) => {
       assert.equal(input.source, "qualification-flow");
+      if (input.requestedAction === "REPLY") {
+        return { selectedAction: "REPLY", allowedActions: ["REPLY"], replyBlocked: false } as never;
+      }
       return { selectedAction: "ASK_OBJECTIVE" } as never;
     },
   }, sender);
