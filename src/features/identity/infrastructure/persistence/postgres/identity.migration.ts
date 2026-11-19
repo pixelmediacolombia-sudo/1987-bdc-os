@@ -29,10 +29,25 @@ CREATE TABLE IF NOT EXISTS public.user_tenant_memberships (
 CREATE INDEX IF NOT EXISTS user_tenant_memberships_tenant_idx
   ON public.user_tenant_memberships (tenant_id, user_id);
 
+CREATE TABLE IF NOT EXISTS public.app_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS app_sessions_user_expiry_idx
+  ON public.app_sessions (user_id, expires_at DESC)
+  WHERE revoked_at IS NULL;
+
 COMMENT ON TABLE public.app_users IS
   'Human login accounts for BDC OS. Dealers/companies remain tenants.';
 COMMENT ON TABLE public.user_tenant_memberships IS
   'Associates regular BDC OS users with one or more dealer tenants.';
+COMMENT ON TABLE public.app_sessions IS
+  'Opaque, revocable web sessions. Only a SHA-256 digest of the browser token is stored.';
 `;
 
 export async function ensureIdentityTables(pool: Pool): Promise<void> {

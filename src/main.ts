@@ -60,6 +60,7 @@ import { ensureInternalDiagnosticAuditTable } from "@/presentation/http/internal
 import { PostgresInternalDiagnosticAudit } from "@/presentation/http/postgres-internal-diagnostic-audit";
 import { ensureIdentityTables } from "@/features/identity/infrastructure/persistence/postgres/identity.migration";
 import { bootstrapLocalAdmin } from "@/features/identity/infrastructure/persistence/postgres/local-admin.bootstrap";
+import { createIdentityRouter } from "@/features/identity/presentation/http/identity.routes";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -243,6 +244,7 @@ async function start(): Promise<void> {
       production: config.nodeEnv === "production",
       allowedRemoteIps: config.internalDiagnosticAllowedRemoteIps,
     } : undefined,
+    createIdentityRouter(pool, { production: config.nodeEnv === "production" }),
   );
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 

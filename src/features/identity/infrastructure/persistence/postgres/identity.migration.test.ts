@@ -10,6 +10,8 @@ test("identity schema separates global accounts from dealer tenants and permits 
   assert.match(CREATE_IDENTITY_TABLES_SQL, /app_users_single_platform_admin_uq[\s\S]*WHERE account_type = 'admin'/);
   assert.match(CREATE_IDENTITY_TABLES_SQL, /public\.user_tenant_memberships/);
   assert.match(CREATE_IDENTITY_TABLES_SQL, /REFERENCES public\.tenants\(dealer_id\)/);
+  assert.match(CREATE_IDENTITY_TABLES_SQL, /public\.app_sessions/);
+  assert.match(CREATE_IDENTITY_TABLES_SQL, /token_hash TEXT NOT NULL UNIQUE/);
   assert.doesNotMatch(CREATE_IDENTITY_TABLES_SQL, /password\s*=\s*['"]/i);
 });
 
