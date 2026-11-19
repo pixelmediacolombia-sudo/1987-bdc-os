@@ -58,11 +58,16 @@ import { OutboundDeliveryReconciliationService } from "@/modules/control/applica
 import { OutboundDeliveryReconciliationController } from "@/presentation/http/outbound-delivery-reconciliation.controller";
 import { ensureInternalDiagnosticAuditTable } from "@/presentation/http/internal-diagnostic-audit.migration";
 import { PostgresInternalDiagnosticAudit } from "@/presentation/http/postgres-internal-diagnostic-audit";
+import { ensureIdentityTables } from "@/features/identity/infrastructure/persistence/postgres/identity.migration";
+import { bootstrapLocalAdmin } from "@/features/identity/infrastructure/persistence/postgres/local-admin.bootstrap";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
   const pool = createPostgresPool(config.databaseUrl, config.pgSsl);
   const redis = new IoredisClient(config.redisUrl);
+  await ensureIdentityTables(pool);
+  const localAdminCreated = await bootstrapLocalAdmin(pool);
+  if (localAdminCreated) console.info("[Identity] local platform admin bootstrapped");
   await ensureIntegrationsTable(pool);
   await ensureWebhookTables(pool);
   await ensureTenantFeatureFlags(pool);

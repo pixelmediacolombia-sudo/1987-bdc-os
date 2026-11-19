@@ -1,0 +1,47 @@
+import type { Pool } from "pg";
+
+export const CREATE_IDENTITY_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS public.app_users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  password_hash TEXT,
+  account_type TEXT NOT NULL CHECK (account_type IN ('admin', 'user')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('invited', 'active', 'disabled')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS app_users_email_lower_uq
+  ON public.app_users (lower(email));
+
+CREATE UNIQUE INDEX IF NOT EXISTS app_users_single_platform_admin_uq
+  ON public.app_users (account_type)
+  WHERE account_type = 'admin';
+
+CREATE TABLE IF NOT EXISTS public.user_tenant_memberships (
+  user_id UUID NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+  tenant_id UUID NOT NULL REFERENCES public.tenants(dealer_id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, tenant_id)
+);
+
+CREATE INDEX IF NOT EXISTS user_tenant_memberships_tenant_idx
+  ON public.user_tenant_memberships (tenant_id, user_id);
+
+COMMENT ON TABLE public.app_users IS
+  'Human login accounts for BDC OS. Dealers/companies remain tenants.';
+COMMENT ON TABLE public.user_tenant_memberships IS
+  'Associates regular BDC OS users with one or more dealer tenants.';
+`;
+
+export async function ensureIdentityTables(pool: Pool): Promise<void> {
+  await pool.query("BEGIN");
+  try {
+    await pool.query(CREATE_IDENTITY_TABLES_SQL);
+    await pool.query("COMMIT");
+  } catch (error) {
+    await pool.query("ROLLBACK");
+    throw error;
+  }
+}
