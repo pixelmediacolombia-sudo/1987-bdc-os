@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ConversationHydrator } from "@/modules/memory/application/conversation-hydrator";
 import type { ConsolidatedInboundConversation, InboundConversationOrchestratorPort } from "@/modules/control/application/ports/inbound-conversation-orchestrator.port";
 import { QualificationFlowService } from "@/modules/control/application/qualification-flow.service";
@@ -189,6 +189,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
       }
       if (handoffFailed) return;
       const outboundChannel = toOutboundChannel(input.messages.at(-1)?.channel);
+      const correlationId = input.messages.at(-1)?.externalId || randomUUID();
       if (response && outboundChannel && qualificationFlowEnabledForTenant && this.qualificationFlow) {
         try {
           await this.qualificationFlow.sendSofiaResponse({
@@ -196,14 +197,15 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
             contactId: input.contactId,
             content: response,
             semanticHash: createHash("sha256").update(response, "utf8").digest("hex"),
+            correlationId,
             externalId: input.messages.at(-1)?.externalId,
             channel: outboundChannel,
           });
-          this.logger.info(`Sofia outbound sent tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel}`);
+          this.logger.info(`Sofia outbound sent tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel} correlationId=${correlationId}`);
         } catch (error) {
           if (error instanceof OutboundMessageDeliveryUncertainError) {
             this.logger.error(
-              `Sofia outbound delivery uncertain tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel} attemptId=${error.attemptId} providerMessageId=${error.providerMessageId} persisted=${error.persisted}`,
+              `Sofia outbound delivery uncertain tenant=${input.tenantId} contact=${input.contactId} channel=${outboundChannel} correlationId=${correlationId} attemptId=${error.attemptId} providerMessageId=${error.providerMessageId} persisted=${error.persisted}`,
             );
             return;
           }

@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { internalDiagnosticIdentity } from "@/presentation/http/internal-diagnostic-guard";
 
 export type RedisDiagnosticPort = {
   ping(): Promise<string>;
@@ -8,11 +9,11 @@ export type RedisDiagnosticPort = {
 export class RedisDiagnosticController {
   constructor(
     private readonly redis: RedisDiagnosticPort,
-    private readonly diagnosticToken?: string,
   ) {}
 
-  health = async (req: Request, res: Response): Promise<void> => {
-    if (!this.diagnosticToken || req.get("x-policy-diagnostic-token") !== this.diagnosticToken) {
+  health = async (_req: Request, res: Response): Promise<void> => {
+    const identity = internalDiagnosticIdentity(res);
+    if (!identity) {
       res.status(404).json({ error: "Not found" });
       return;
     }
@@ -25,7 +26,8 @@ export class RedisDiagnosticController {
       ]);
 
       res.status(200).json({
-        test: "Redis Connectivity in Render Production",
+        test: "Redis Connectivity",
+        tenant_id: identity.tenantId,
         redis_reachable: ping === "PONG",
         ping,
         queues: {
@@ -36,7 +38,7 @@ export class RedisDiagnosticController {
       });
     } catch {
       res.status(503).json({
-        test: "Redis Connectivity in Render Production",
+        test: "Redis Connectivity",
         redis_reachable: false,
         error: "Redis health check failed",
       });

@@ -11,6 +11,7 @@ test("reconciliation confirms provider acceptance after restart without sending 
       attemptId: "attempt-a",
       contactId: "contact-a",
       providerMessageId: "ghl-message-a",
+      correlationId: "inbound-correlation-a",
       content: "Hola",
       uncertaintyReason: "local association failed",
       detectedAt: new Date(),
@@ -19,14 +20,16 @@ test("reconciliation confirms provider acceptance after restart without sending 
     recordDeliveryReconciliationAttempt: async (input: { result: string }) => { calls.push(input.result); },
     resolveDeliveryUncertainty: async (input: { resolution: string }) => { resolved.push(input.resolution); },
   };
+  let lookupCorrelationId: string | undefined;
   const service = new OutboundDeliveryReconciliationService(registry as never, {
-    lookup: async () => ({ result: "found", providerStatus: "delivered" }),
+    lookup: async (input) => { lookupCorrelationId = input.correlationId; return { result: "found", providerStatus: "delivered" }; },
   });
 
   const summary = await service.runOnce("tenant-a", "ops@example.com");
   assert.deepEqual(summary, { inspected: 1, confirmed: 1, notFound: 0, stillUnknown: 0 });
   assert.deepEqual(calls, ["found"]);
   assert.deepEqual(resolved, ["confirmed"]);
+  assert.equal(lookupCorrelationId, "inbound-correlation-a");
 });
 
 test("provider timeout keeps uncertainty open and records the reason", async () => {

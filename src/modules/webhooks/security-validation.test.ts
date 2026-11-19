@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { test } from "node:test";
 import { Pool } from "pg";
 import type { Request, Response } from "express";
@@ -130,6 +130,22 @@ test("collapses five identical concurrent deliveries to one background task", as
   }
 });
 
+test("legacy /tests diagnostics and disabled internal diagnostics are not public routes", async () => {
+  const app = createTestServer({ execute: async () => undefined } as unknown as ProcessGHLWebhookUseCase);
+  const server = app.listen(0);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Test server did not bind a port");
+  try {
+    const legacy = await fetch(`http://127.0.0.1:${address.port}/tests/policy-evaluation?contact_id=fixture`);
+    const internal = await fetch(`http://127.0.0.1:${address.port}/internal/admin/diagnostics/policy-evaluation?tenant_id=00000000-0000-0000-0000-000000000901`);
+    assert.equal(legacy.status, 404);
+    assert.equal(internal.status, 404);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and outbound registry", {
   skip: !process.env.SECURITY_TEST_DATABASE_URL,
 }, async () => {
@@ -149,6 +165,10 @@ test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and o
     await client.query("BEGIN");
     await client.query("SET LOCAL lock_timeout = '2s'");
     await client.query("SET LOCAL statement_timeout = '10s'");
+    if (process.env.SECURITY_TEST_ROLE) {
+      assert.match(process.env.SECURITY_TEST_ROLE, /^[a-z_][a-z0-9_]{0,62}$/i, "SECURITY_TEST_ROLE must be a simple PostgreSQL role name");
+      await client.query(`SET LOCAL ROLE "${process.env.SECURITY_TEST_ROLE}"`);
+    }
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantA]);
 
     const integration = await client.query<{ id: string }>(
@@ -175,9 +195,15 @@ test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and o
        VALUES ($1, 'rls-contact-a', 'rls-hash-a', 'rls-provider-a', 'tenant A')`,
       [tenantA],
     );
+    await client.query(
+      `INSERT INTO public.internal_diagnostic_access_audit
+         (tenant_id, actor, request_id, method, route, remote_address)
+       VALUES ($1, 'rls-evidence', $2, 'GET', '/internal/admin/diagnostics/redis-health', '127.0.0.1')`,
+      [tenantA, randomUUID()],
+    );
 
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantB]);
-    for (const table of ["integrations", "integration_token_audits", "raw_webhooks", "outbound_message_registry"]) {
+    for (const table of ["integrations", "integration_token_audits", "raw_webhooks", "outbound_message_registry", "internal_diagnostic_access_audit"]) {
       const visible = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM public.${table}`);
       assert.equal(visible.rows[0]?.count, "0", `${table} leaked tenant A rows`);
     }
@@ -210,6 +236,14 @@ test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and o
     );
     assert.equal(
       (await client.query("DELETE FROM public.outbound_message_registry WHERE tenant_id = $1", [tenantA])).rowCount,
+      0,
+    );
+    assert.equal(
+      (await client.query("UPDATE public.internal_diagnostic_access_audit SET actor = 'cross-tenant' WHERE tenant_id = $1", [tenantA])).rowCount,
+      0,
+    );
+    assert.equal(
+      (await client.query("DELETE FROM public.internal_diagnostic_access_audit WHERE tenant_id = $1", [tenantA])).rowCount,
       0,
     );
   } finally {

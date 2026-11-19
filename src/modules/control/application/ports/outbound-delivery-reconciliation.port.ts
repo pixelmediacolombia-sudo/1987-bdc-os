@@ -9,5 +9,6 @@ export interface OutboundDeliveryReconciliationProviderPort {
     tenantId: string;
     contactId: string;
     providerMessageId: string;
+    correlationId?: string;
   }): Promise<ProviderDeliveryLookup>;
 }

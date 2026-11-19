@@ -44,7 +44,7 @@ La capa híbrida usa `CONVERSATIONAL_AI_ENABLED=false` por defecto. Cuando se au
 
 La policy `country_club_cars_v8` se activa por tenant mediante la migración idempotente `ensureCountryClubPolicy`; solo actualiza el `ghl_location_id` explícitamente identificado. El motor de Sofía es de código: extrae hechos, valida rangos/coherencia y redacta respuestas con reglas deterministas. La matriz visible del PDF está cubierta por 60 pruebas en `test:country-club:matrix`; la prueba `test:country-club:db10` ejecuta 10 conversaciones contra PostgreSQL local y comprueba respuestas y estado persistido.
 
-El Ticket 7 añade el motor determinista de siguiente acción en `src/modules/decisions`. `REPLY` y cualquier otra acción deben quedar dentro de `allowed_actions` antes de invocar un LLM. Las políticas locales incluyen compatibilidad con el `policy_version` histórico `v0.1` usado por el sandbox, además de `koons_policy_v1`, que usa quiet hours de 21:00 a 08:00 y deja `downPayment.min` sin definir hasta que gerencia configure la banda aprobada; un down payment explícitamente igual a cero sigue requiriendo el disclaimer estructurado. El endpoint `GET /tests/policy-evaluation` requiere `X-Policy-Diagnostic-Token` y `POLICY_DIAGNOSTIC_TOKEN`; recibe `tenant_id`, `contact_id` y `payload` JSON URL-encoded, registra la decisión bajo RLS y no envía mensajes.
+El Ticket 7 añade el motor determinista de siguiente acción en `src/modules/decisions`. `REPLY` y cualquier otra acción deben quedar dentro de `allowed_actions` antes de invocar un LLM. Las políticas locales incluyen compatibilidad con el `policy_version` histórico `v0.1` usado por el sandbox, además de `koons_policy_v1`, que usa quiet hours de 21:00 a 08:00 y deja `downPayment.min` sin definir hasta que gerencia configure la banda aprobada; un down payment explícitamente igual a cero sigue requiriendo el disclaimer estructurado.
 
 Para los eventos inbound no duplicados, el Ticket 4 añade un búfer Redis por contacto de `BURST_BUFFER_SECONDS` (15 por defecto) y un mutex Redis con TTL de `CONTACT_MUTEX_TTL_SECONDS` (30 por defecto). Los fragmentos se consolidan en orden antes de entregarse al puerto de orquestación. El adaptador de orquestación permanece deshabilitado hasta el piloto controlado. La cola de trabajo HTTP continúa siendo en memoria y debe sustituirse por una cola durable en la siguiente fase.
 
@@ -60,10 +60,12 @@ Para los eventos inbound no duplicados, el Ticket 4 añade un búfer Redis por c
 - `raw_webhooks`, `integrations` y `integration_token_audits` usan RLS forzado; antes de acceder a ellas, el repositorio fija `app.tenant_id` dentro de la transacción.
 - Redis se configura únicamente mediante `REDIS_URL`; el repositorio no contiene ni registra credenciales, URL o puertos reales.
 - El código no registra tokens, contraseñas ni URLs de conexión.
+- Los diagnósticos administrativos están desactivados por defecto y no se montan bajo `/tests`. Para habilitarlos se requiere `INTERNAL_DIAGNOSTICS_ENABLED=true` y credenciales únicas por tenant en `INTERNAL_DIAGNOSTIC_CREDENTIALS_JSON`; cada credencial enlaza un token de al menos 32 bytes con la identidad auditada del operador. En producción también se requiere `INTERNAL_DIAGNOSTIC_ALLOWED_REMOTE_IPS` con las IP remotas exactas permitidas.
+- Las rutas protegidas viven bajo `/internal/admin/diagnostics`, aceptan `Authorization: Bearer <token>` y `tenant_id`, limitan cada tenant/operador a 30 solicitudes por minuto y escriben el acceso en `internal_diagnostic_access_audit` bajo RLS. La reconciliación toma el operador de la credencial, no de un parámetro manipulable. Rotar o revocar el token requiere actualizar el mapa de credenciales y reiniciar el servicio; la credencial anterior deja de autorizar después del reinicio.
 
 ## Regresión de seguridad
 
-`npm run test:security` compila y ejecuta pruebas de firma sin cabecera, firma Ed25519 inválida, cuerpo alterado, ACK asíncrono y cinco entregas idénticas concurrentes. La matriz RLS requiere una base de pruebas desechable configurada explícitamente mediante variables de entorno y no usa el `.env` local ni producción.
+`npm run test:security` compila y ejecuta pruebas de firma sin cabecera, firma Ed25519 inválida, cuerpo alterado, ACK asíncrono, cinco entregas idénticas concurrentes y protección de diagnósticos. La matriz RLS requiere una base de pruebas configurada explícitamente mediante variables de entorno y no usa producción.
 
 ## Render
 

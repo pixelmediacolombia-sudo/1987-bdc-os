@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import type { PolicyEvaluatorPort } from "@/modules/decisions/application/policy-evaluation.service";
+import { internalDiagnosticIdentity } from "@/presentation/http/internal-diagnostic-guard";
 
 type DiagnosticPayload = {
   at?: string;
@@ -11,19 +12,18 @@ type DiagnosticPayload = {
 export class PolicyDiagnosticController {
   constructor(
     private readonly evaluator: PolicyEvaluatorPort,
-    private readonly diagnosticToken?: string,
   ) {}
 
   evaluate = async (req: Request, res: Response): Promise<void> => {
-    if (!this.diagnosticToken || req.get("x-policy-diagnostic-token") !== this.diagnosticToken) {
+    const identity = internalDiagnosticIdentity(res);
+    if (!identity) {
       res.status(404).json({ error: "Not found" });
       return;
     }
 
-    const tenantId = queryString(req, "tenant_id");
     const ghlContactId = queryString(req, "contact_id");
-    if (!tenantId || !ghlContactId) {
-      res.status(400).json({ error: "tenant_id and contact_id are required" });
+    if (!ghlContactId) {
+      res.status(400).json({ error: "contact_id is required" });
       return;
     }
 
@@ -45,7 +45,7 @@ export class PolicyDiagnosticController {
       }
 
       const decision = await this.evaluator.evaluateForContact({
-        tenantId,
+        tenantId: identity.tenantId,
         ghlContactId,
         source: "diagnostic",
         ...(at ? { now: at } : {}),
@@ -56,8 +56,8 @@ export class PolicyDiagnosticController {
 
       res.status(200).json({
         test: decision.gate === "QUIET_HOURS"
-          ? "Quiet Hours Enforcement in Render Production"
-          : "Policy Gate Evaluation in Render Production",
+          ? "Quiet Hours Enforcement"
+          : "Policy Gate Evaluation",
         timestamp_concesionario: decision.localTimestamp,
         allowed_actions_returned: decision.allowedActions,
         reply_blocked: decision.replyBlocked,

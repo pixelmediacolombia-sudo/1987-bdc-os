@@ -15,6 +15,14 @@ import type { RedisDiagnosticController } from "@/presentation/http/redis-diagno
 import { createRedisDiagnosticRouter } from "@/presentation/http/redis-diagnostic.routes";
 import type { OutboundDeliveryReconciliationController } from "@/presentation/http/outbound-delivery-reconciliation.controller";
 import { createOutboundDeliveryReconciliationRouter } from "@/presentation/http/outbound-delivery-reconciliation.routes";
+import { createInternalDiagnosticGuard, type InternalDiagnosticAuditPort, type InternalDiagnosticCredential } from "@/presentation/http/internal-diagnostic-guard";
+
+export type InternalDiagnosticsOptions = {
+  credentials: Record<string, InternalDiagnosticCredential>;
+  audit: InternalDiagnosticAuditPort;
+  production: boolean;
+  allowedRemoteIps: string[];
+};
 
 export function createHttpApp(
   controller: GhlOAuthController,
@@ -24,6 +32,7 @@ export function createHttpApp(
   redisDiagnosticController?: RedisDiagnosticController,
   outboundDeliveryReconciliationController?: OutboundDeliveryReconciliationController,
   dashboardRouter?: express.Router,
+  internalDiagnostics?: InternalDiagnosticsOptions,
 ): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -37,14 +46,15 @@ export function createHttpApp(
     parseCapturedJsonBody,
   );
   app.use("/webhooks", createWebhookRouter(webhookController));
-  if (policyDiagnosticController) {
-    app.use("/tests", createPolicyDiagnosticRouter(policyDiagnosticController));
-  }
-  if (redisDiagnosticController) {
-    app.use("/tests", createRedisDiagnosticRouter(redisDiagnosticController));
-  }
-  if (outboundDeliveryReconciliationController) {
-    app.use("/tests", createOutboundDeliveryReconciliationRouter(outboundDeliveryReconciliationController));
+  if (internalDiagnostics) {
+    const diagnosticsRouter = express.Router();
+    diagnosticsRouter.use(createInternalDiagnosticGuard(internalDiagnostics));
+    if (policyDiagnosticController) diagnosticsRouter.use(createPolicyDiagnosticRouter(policyDiagnosticController));
+    if (redisDiagnosticController) diagnosticsRouter.use(createRedisDiagnosticRouter(redisDiagnosticController));
+    if (outboundDeliveryReconciliationController) {
+      diagnosticsRouter.use(createOutboundDeliveryReconciliationRouter(outboundDeliveryReconciliationController));
+    }
+    app.use("/internal/admin/diagnostics", diagnosticsRouter);
   }
   app.use((_req, res) => res.status(404).json({ error: "Not found" }));
   return app;

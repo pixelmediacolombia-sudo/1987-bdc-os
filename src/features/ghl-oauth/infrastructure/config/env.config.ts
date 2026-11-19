@@ -38,7 +38,9 @@ export type AppConfig = {
   ghlScopes: string[];
   encryptionSecret: string;
   oauthStateSecret: string;
-  policyDiagnosticToken?: string;
+  internalDiagnosticsEnabled: boolean;
+  internalDiagnosticCredentials: Record<string, { token: string; actor: string }>;
+  internalDiagnosticAllowedRemoteIps: string[];
 };
 
 function required(name: string): string {
@@ -54,6 +56,7 @@ function booleanEnv(name: string, fallback: boolean): boolean {
 }
 
 export function loadAppConfig(): AppConfig {
+  const nodeEnv = process.env.NODE_ENV ?? "development";
   const scopes = required("GHL_SCOPES").split(/[\s,]+/).filter(Boolean);
   const encryptionSecret = required("ENCRYPTION_SECRET");
   const oauthStateSecret = required("OAUTH_STATE_SECRET");
@@ -69,8 +72,23 @@ export function loadAppConfig(): AppConfig {
     throw new Error("OAUTH_STATE_SECRET must contain at least 32 UTF-8 bytes");
   }
 
+  const internalDiagnosticsEnabled = booleanEnv("INTERNAL_DIAGNOSTICS_ENABLED", false);
+  const internalDiagnosticCredentials = parseInternalDiagnosticCredentials(
+    process.env.INTERNAL_DIAGNOSTIC_CREDENTIALS_JSON,
+  );
+  const internalDiagnosticAllowedRemoteIps = (process.env.INTERNAL_DIAGNOSTIC_ALLOWED_REMOTE_IPS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (internalDiagnosticsEnabled && Object.keys(internalDiagnosticCredentials).length === 0) {
+    throw new Error("INTERNAL_DIAGNOSTIC_CREDENTIALS_JSON is required when internal diagnostics are enabled");
+  }
+  if (internalDiagnosticsEnabled && nodeEnv === "production" && internalDiagnosticAllowedRemoteIps.length === 0) {
+    throw new Error("INTERNAL_DIAGNOSTIC_ALLOWED_REMOTE_IPS is required for production internal diagnostics");
+  }
+
   return {
-    nodeEnv: process.env.NODE_ENV ?? "development",
+    nodeEnv,
     port: Number.parseInt(process.env.PORT ?? "3000", 10),
     databaseUrl: required("DATABASE_URL"),
     pgSsl: booleanEnv("PGSSL", false),
@@ -110,8 +128,43 @@ export function loadAppConfig(): AppConfig {
     ghlScopes: scopes,
     encryptionSecret,
     oauthStateSecret,
-    policyDiagnosticToken: process.env.POLICY_DIAGNOSTIC_TOKEN?.trim() || undefined,
+    internalDiagnosticsEnabled,
+    internalDiagnosticCredentials,
+    internalDiagnosticAllowedRemoteIps,
   };
+}
+
+function parseInternalDiagnosticCredentials(
+  raw: string | undefined,
+): Record<string, { token: string; actor: string }> {
+  if (!raw?.trim()) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("INTERNAL_DIAGNOSTIC_CREDENTIALS_JSON must be valid JSON");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("INTERNAL_DIAGNOSTIC_CREDENTIALS_JSON must be an object keyed by tenant UUID");
+  }
+  const credentials: Record<string, { token: string; actor: string }> = {};
+  for (const [tenantId, value] of Object.entries(parsed)) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tenantId)) {
+      throw new Error("INTERNAL_DIAGNOSTIC_CREDENTIALS_JSON contains an invalid tenant UUID");
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Each internal diagnostic credential must have token and actor fields");
+    }
+    const credential = value as { token?: unknown; actor?: unknown };
+    if (typeof credential.token !== "string" || Buffer.byteLength(credential.token, "utf8") < 32) {
+      throw new Error("Each internal diagnostic token must contain at least 32 UTF-8 bytes");
+    }
+    if (typeof credential.actor !== "string" || !credential.actor.trim() || credential.actor.length > 160) {
+      throw new Error("Each internal diagnostic credential must include an actor of 1-160 characters");
+    }
+    credentials[tenantId.toLowerCase()] = { token: credential.token, actor: credential.actor.trim() };
+  }
+  return credentials;
 }
 
 function positiveNumberEnv(name: string, fallback: number): number {

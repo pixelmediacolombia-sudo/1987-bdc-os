@@ -10,13 +10,18 @@ type ResponseCapture = {
 
 function requestWithToken(token?: string): Request {
   return {
-    get: (name: string) => name.toLowerCase() === "x-policy-diagnostic-token" ? token : undefined,
-  } as Request;
+    get: () => token,
+  } as unknown as Request;
 }
 
 function responseCapture(): { response: Response; capture: ResponseCapture } {
   const capture: ResponseCapture = { statusCode: 200 };
   const response = {
+    locals: { internalDiagnosticIdentity: {
+      tenantId: "00000000-0000-4000-8000-000000000001",
+      actor: "ops",
+      requestId: "00000000-0000-4000-8000-000000000002",
+    } },
     status(code: number) {
       capture.statusCode = code;
       return response;
@@ -25,18 +30,19 @@ function responseCapture(): { response: Response; capture: ResponseCapture } {
       capture.body = body;
       return response;
     },
-  } as Response;
+  } as unknown as Response;
   return { response, capture };
 }
 
-test("rejects Redis diagnostics without the policy diagnostic token", async () => {
+test("rejects Redis diagnostics when no authenticated admin identity is attached", async () => {
   const controller = new RedisDiagnosticController({
     ping: async () => "PONG",
     zcard: async () => 0,
-  }, "secret");
+  });
   const { response, capture } = responseCapture();
+  response.locals.internalDiagnosticIdentity = undefined;
 
-  await controller.health(requestWithToken("wrong"), response);
+  await controller.health(requestWithToken(), response);
 
   assert.equal(capture.statusCode, 404);
   assert.deepEqual(capture.body, { error: "Not found" });
@@ -46,10 +52,10 @@ test("returns sanitized Redis reachability and queue counts", async () => {
   const controller = new RedisDiagnosticController({
     ping: async () => "PONG",
     zcard: async (key) => key.endsWith("pending") ? 2 : 0,
-  }, "secret");
+  });
   const { response, capture } = responseCapture();
 
-  await controller.health(requestWithToken("secret"), response);
+  await controller.health(requestWithToken(), response);
 
   const body = capture.body as { checked_at: string };
   assert.equal(capture.statusCode, 200);
@@ -66,14 +72,14 @@ test("does not expose Redis connection errors", async () => {
   const controller = new RedisDiagnosticController({
     ping: async () => { throw new Error("redis://user:password@private-host"); },
     zcard: async () => 0,
-  }, "secret");
+  });
   const { response, capture } = responseCapture();
 
-  await controller.health(requestWithToken("secret"), response);
+  await controller.health(requestWithToken(), response);
 
   assert.equal(capture.statusCode, 503);
   assert.deepEqual(capture.body, {
-    test: "Redis Connectivity in Render Production",
+    test: "Redis Connectivity",
     redis_reachable: false,
     error: "Redis health check failed",
   });

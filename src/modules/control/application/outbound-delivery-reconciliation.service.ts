@@ -32,6 +32,7 @@ export class OutboundDeliveryReconciliationService {
           tenantId,
           contactId: delivery.contactId,
           providerMessageId: delivery.providerMessageId,
+          ...(delivery.correlationId ? { correlationId: delivery.correlationId } : {}),
         });
       } catch (error) {
         lookup = {

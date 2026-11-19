@@ -12,10 +12,10 @@ export class PostgresOutboundMessageRegistry implements OutboundMessageRegistryP
     return this.withTenantContext(entry.tenantId, async (client) => {
       const result = await client.query<OutboundMessageReservation>(
         `INSERT INTO public.outbound_message_registry
-           (tenant_id, contact_id, semantic_hash, provider_message_id, content, status)
-         VALUES ($1, $2, $3, $4, $5, 'reserved')
+           (tenant_id, contact_id, semantic_hash, provider_message_id, content, correlation_id, status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'reserved')
          RETURNING attempt_id AS "attemptId", expires_at AS "expiresAt"`,
-        [entry.tenantId, entry.contactId, entry.semanticHash, entry.providerMessageId ?? null, entry.content],
+        [entry.tenantId, entry.contactId, entry.semanticHash, entry.providerMessageId ?? null, entry.content, entry.correlationId ?? null],
       );
       if (result.rowCount !== 1 || !result.rows[0]) throw new Error("Outbound registry reservation was not created");
       return result.rows[0];
@@ -84,12 +84,13 @@ export class PostgresOutboundMessageRegistry implements OutboundMessageRegistryP
         contact_id: string;
         provider_message_id: string;
         content: string;
+        correlation_id: string | null;
         uncertainty_reason: string;
         uncertainty_detected_at: Date;
         reconciliation_attempts: number;
         last_reconciliation_error: string | null;
       }>(
-        `SELECT attempt_id, contact_id, provider_message_id, content,
+        `SELECT attempt_id, contact_id, provider_message_id, content, correlation_id,
                 uncertainty_reason, uncertainty_detected_at,
                 reconciliation_attempts, last_reconciliation_error
            FROM public.outbound_message_registry
@@ -103,6 +104,7 @@ export class PostgresOutboundMessageRegistry implements OutboundMessageRegistryP
         contactId: row.contact_id,
         providerMessageId: row.provider_message_id,
         content: row.content,
+        ...(row.correlation_id ? { correlationId: row.correlation_id } : {}),
         uncertaintyReason: row.uncertainty_reason,
         detectedAt: row.uncertainty_detected_at,
         reconciliationAttempts: row.reconciliation_attempts,

@@ -56,6 +56,8 @@ import { ConversationAiService } from "@/modules/control/application/conversatio
 import { PostgresConversationAiShadowRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-conversation-ai-shadow.repository";
 import { OutboundDeliveryReconciliationService } from "@/modules/control/application/outbound-delivery-reconciliation.service";
 import { OutboundDeliveryReconciliationController } from "@/presentation/http/outbound-delivery-reconciliation.controller";
+import { ensureInternalDiagnosticAuditTable } from "@/presentation/http/internal-diagnostic-audit.migration";
+import { PostgresInternalDiagnosticAudit } from "@/presentation/http/postgres-internal-diagnostic-audit";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
@@ -70,6 +72,7 @@ async function start(): Promise<void> {
   await ensureDecisionLogsTable(pool);
   await ensureQualificationSignalTables(pool);
   await ensureConversationAiShadowTables(pool);
+  await ensureInternalDiagnosticAuditTable(pool);
 
   const oauthClient = new GhlOAuthClientAdapter(config);
   const stateService = new HmacOAuthStateService(config.oauthStateSecret);
@@ -209,12 +212,11 @@ async function start(): Promise<void> {
     processWebhook,
     webhookQueue,
   );
-  const policyDiagnosticController = new PolicyDiagnosticController(policyEvaluator, config.policyDiagnosticToken);
-  const redisDiagnosticController = new RedisDiagnosticController(redis, config.policyDiagnosticToken);
+  const policyDiagnosticController = new PolicyDiagnosticController(policyEvaluator);
+  const redisDiagnosticController = new RedisDiagnosticController(redis);
   const outboundDeliveryReconciliationController = new OutboundDeliveryReconciliationController(
     outboundRegistry,
     outboundDeliveryReconciliation,
-    config.policyDiagnosticToken,
   );
   // The dashboard is read-only, isolated to Lucki, and does not alter conversation automation.
   const { createDashboardRouter } = require("../dashboard/compiled/router.cjs");
@@ -230,6 +232,12 @@ async function start(): Promise<void> {
     redisDiagnosticController,
     outboundDeliveryReconciliationController,
     dashboardRouter,
+    config.internalDiagnosticsEnabled ? {
+      credentials: config.internalDiagnosticCredentials,
+      audit: new PostgresInternalDiagnosticAudit(pool),
+      production: config.nodeEnv === "production",
+      allowedRemoteIps: config.internalDiagnosticAllowedRemoteIps,
+    } : undefined,
   );
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 

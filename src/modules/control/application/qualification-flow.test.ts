@@ -91,3 +91,28 @@ test("internal handoff authorization is independent from customer reply authoriz
   assert.equal(requests[0]?.requestedAction, undefined);
   assert.equal(requests[1]?.requestedAction, "REPLY");
 });
+
+test("human takeover during a slow final reply check blocks send while handoff authorization remains valid", async () => {
+  let releaseReplyCheck!: (value: ReturnType<typeof decision>) => void;
+  let takeover = false;
+  let sends = 0;
+  const replyCheck = new Promise<ReturnType<typeof decision>>((resolve) => { releaseReplyCheck = resolve; });
+  const flow = new QualificationFlowService({
+    evaluateForContact: async (request) => {
+      if (request.requestedAction === "REPLY") return replyCheck;
+      return decision({ allowedActions: ["HANDOFF"], replyBlocked: true, selectedAction: "HANDOFF" });
+    },
+  }, { send: async () => { sends += 1; return { providerMessageId: "must-not-send" }; } } as never);
+
+  const handoff = await flow.authorizeHandoff({ tenantId: "tenant-a", contactId: "contact-a" });
+  assert.equal(handoff.selectedAction, "HANDOFF");
+  const pendingReply = flow.sendSofiaResponse(input());
+  takeover = true;
+  releaseReplyCheck(decision(takeover
+    ? { allowedActions: ["WAIT", "HANDOFF"], selectedAction: "HANDOFF", replyBlocked: true, reason: "Human takeover" }
+    : {}));
+
+  await assert.rejects(pendingReply, (error: unknown) =>
+    error instanceof OutboundMessageRejectedError && error.action === "HANDOFF" && /Human takeover/.test(error.message));
+  assert.equal(sends, 0);
+});

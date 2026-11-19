@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS public.outbound_message_registry (
   status TEXT NOT NULL DEFAULT 'reserved'
     CHECK (status IN ('reserved', 'sent', 'failed', 'expired', 'uncertain')),
   uncertainty_reason TEXT,
+  correlation_id TEXT,
   uncertainty_detected_at TIMESTAMPTZ,
   reconciliation_attempts INT NOT NULL DEFAULT 0,
   last_reconciliation_result TEXT,
@@ -93,6 +94,7 @@ ALTER TABLE public.outbound_message_registry
   ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 ALTER TABLE public.outbound_message_registry
   ADD COLUMN IF NOT EXISTS uncertainty_reason TEXT,
+  ADD COLUMN IF NOT EXISTS correlation_id TEXT,
   ADD COLUMN IF NOT EXISTS uncertainty_detected_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS reconciliation_attempts INT NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS last_reconciliation_result TEXT,
@@ -130,6 +132,8 @@ BEGIN
   END IF;
 END $$;
 
+ALTER TABLE public.outbound_message_registry
+  DROP CONSTRAINT IF EXISTS outbound_message_registry_status_check;
 ALTER TABLE public.outbound_message_registry
   DROP CONSTRAINT IF EXISTS outbound_registry_status_check;
 ALTER TABLE public.outbound_message_registry

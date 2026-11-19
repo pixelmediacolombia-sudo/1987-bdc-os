@@ -4,6 +4,7 @@ export type OutboundMessageRegistryEntry = {
   semanticHash: string;
   providerMessageId?: string;
   content: string;
+  correlationId?: string;
 };
 
 export type OutboundMessageReservation = {
@@ -17,6 +18,7 @@ export type OutboundDeliveryUncertainty = {
   contactId: string;
   providerMessageId: string;
   content: string;
+  correlationId?: string;
   uncertaintyReason: string;
   detectedAt: Date;
   reconciliationAttempts: number;
