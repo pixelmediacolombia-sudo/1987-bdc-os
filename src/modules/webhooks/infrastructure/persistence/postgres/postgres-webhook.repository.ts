@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type {
-  GhlWebhookEvent,
+  InboundWebhookEvent,
   HumanInterruption,
   InboundMessage,
-} from "@/modules/webhooks/domain/ghl-webhook-event";
-import { GhlTenantNotFoundError } from "@/modules/webhooks/domain/ghl-webhook-event";
+} from "@/modules/webhooks/domain/inbound-webhook-event";
+import { WebhookTenantNotFoundError } from "@/modules/webhooks/domain/inbound-webhook-event";
 import type {
   WebhookProcessResult,
   WebhookStage,
@@ -29,18 +29,18 @@ export class PostgresWebhookRepository implements WebhookRepository {
     private readonly outboundRegistry?: OutboundMessageRegistryPort,
   ) {}
 
-  async process(event: GhlWebhookEvent): Promise<WebhookProcessResult> {
+  async process(event: InboundWebhookEvent): Promise<WebhookProcessResult> {
     const client = await this.pool.connect();
     let tenantId: string | undefined;
 
     try {
       await client.query("BEGIN");
-      tenantId = await this.resolveTenant(client, event.locationId);
+      tenantId = await this.resolveTenant(client, event.accountId);
       await this.setTenantContext(client, tenantId);
 
       const rawEvent = await client.query<RawWebhookRow>(
         `INSERT INTO public.raw_webhooks
-           (tenant_id, external_id, event_type, location_id, signature, payload, status, suppression_required)
+           (tenant_id, external_id, event_type, account_id, signature, payload, status, suppression_required)
          VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'received', false)
          ON CONFLICT (tenant_id, external_id) DO NOTHING
          RETURNING id, status, suppression_required`,
@@ -48,7 +48,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
           tenantId,
           event.externalId,
           event.eventType,
-          event.locationId,
+          event.accountId,
           event.signature,
           JSON.stringify(event.payload),
         ],
@@ -204,13 +204,13 @@ export class PostgresWebhookRepository implements WebhookRepository {
     }
   }
 
-  private async resolveTenant(client: PoolClient, locationId: string): Promise<string> {
+  private async resolveTenant(client: PoolClient, accountId: string): Promise<string> {
     const result = await client.query<TenantRow>(
-      "SELECT public.resolve_ghl_tenant_id($1) AS tenant_id",
-      [locationId],
+      "SELECT public.resolve_meta_tenant_id($1) AS tenant_id",
+      [accountId],
     );
     const tenantId = result.rows[0]?.tenant_id;
-    if (!tenantId) throw new GhlTenantNotFoundError(locationId);
+    if (!tenantId) throw new WebhookTenantNotFoundError(accountId);
     return tenantId;
   }
 
@@ -225,9 +225,9 @@ export class PostgresWebhookRepository implements WebhookRepository {
   ): Promise<void> {
     const contact = await client.query<ContactRow>(
       `INSERT INTO public.contacts AS c
-         (tenant_id, ghl_contact_id, phone, email, ctwa_clid, ctwa_source_id, ctwa_captured_at, preferred_language, consent_state)
+         (tenant_id, provider_contact_id, phone, email, ctwa_clid, ctwa_source_id, ctwa_captured_at, preferred_language, consent_state)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'unknown', 'unknown')
-       ON CONFLICT (tenant_id, ghl_contact_id) DO UPDATE SET
+       ON CONFLICT (tenant_id, provider_contact_id) DO UPDATE SET
          phone = COALESCE(EXCLUDED.phone, c.phone),
          email = COALESCE(EXCLUDED.email, c.email),
          ctwa_clid = COALESCE(c.ctwa_clid, EXCLUDED.ctwa_clid),
@@ -247,7 +247,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
     );
 
     if (contact.rowCount !== 1 || !contact.rows[0]) {
-      throw new Error("GHL contact was not persisted");
+      throw new Error("Meta contact was not persisted");
     }
 
     const conversation = await this.findOrCreateConversation(
@@ -279,22 +279,22 @@ export class PostgresWebhookRepository implements WebhookRepository {
     client: PoolClient,
     tenantId: string,
     contactId: string,
-    ghlConversationId: string,
+    providerConversationId: string,
     channel: string,
   ): Promise<ConversationRow> {
     const normalizedChannel = normalizeConversationChannel(channel);
-    // GHL retries can arrive with the same conversation id after a restart or
+    // Meta retries can arrive with the same conversation id after a restart or
     // a transient failure. Resolve the provider identity first so a changed
     // contact/channel projection cannot create a second local conversation.
-    const byGhlId = await client.query<ConversationRow>(
+    const byProviderId = await client.query<ConversationRow>(
       `SELECT id
          FROM public.conversations
-        WHERE tenant_id = $1 AND ghl_conversation_id = $2
+        WHERE tenant_id = $1 AND provider_conversation_id = $2
         LIMIT 1
         FOR UPDATE`,
-      [tenantId, ghlConversationId],
+      [tenantId, providerConversationId],
     );
-    if (byGhlId.rowCount === 1 && byGhlId.rows[0]) return byGhlId.rows[0];
+    if (byProviderId.rowCount === 1 && byProviderId.rows[0]) return byProviderId.rows[0];
 
     const existing = await client.query<ConversationRow>(
       `SELECT id
@@ -309,24 +309,24 @@ export class PostgresWebhookRepository implements WebhookRepository {
 
     const created = await client.query<ConversationRow>(
       `INSERT INTO public.conversations
-         (tenant_id, contact_id, ghl_conversation_id, channel, owner, state, last_activity)
-       VALUES ($1, $2, $3, $4, 'ghl', 'open', now())
-       ON CONFLICT (tenant_id, ghl_conversation_id) DO NOTHING
+         (tenant_id, contact_id, provider_conversation_id, channel, owner, state, last_activity)
+       VALUES ($1, $2, $3, $4, 'meta', 'open', now())
+       ON CONFLICT (tenant_id, provider_conversation_id) WHERE provider_conversation_id IS NOT NULL DO NOTHING
        RETURNING id`,
-      [tenantId, contactId, ghlConversationId, normalizedChannel],
+      [tenantId, contactId, providerConversationId, normalizedChannel],
     );
     if (created.rowCount === 1 && created.rows[0]) return created.rows[0];
 
     const conflicted = await client.query<ConversationRow>(
       `SELECT id
          FROM public.conversations
-        WHERE tenant_id = $1 AND ghl_conversation_id = $2
+        WHERE tenant_id = $1 AND provider_conversation_id = $2
         LIMIT 1
         FOR UPDATE`,
-      [tenantId, ghlConversationId],
+      [tenantId, providerConversationId],
     );
     if (conflicted.rowCount === 1 && conflicted.rows[0]) return conflicted.rows[0];
-    throw new Error("GHL conversation was not persisted");
+    throw new Error("Meta conversation was not persisted");
   }
 
   private async persistHumanInterruption(
@@ -348,9 +348,9 @@ export class PostgresWebhookRepository implements WebhookRepository {
     );
     const contact = await client.query<ContactRow>(
       `INSERT INTO public.contacts AS c
-         (tenant_id, ghl_contact_id, phone, email, preferred_language, consent_state)
+         (tenant_id, provider_contact_id, phone, email, preferred_language, consent_state)
        VALUES ($1, $2, $3, $4, 'unknown', 'unknown')
-       ON CONFLICT (tenant_id, ghl_contact_id) DO UPDATE SET
+       ON CONFLICT (tenant_id, provider_contact_id) DO UPDATE SET
          phone = COALESCE(EXCLUDED.phone, c.phone),
          email = COALESCE(EXCLUDED.email, c.email),
          updated_at = now()
@@ -413,30 +413,30 @@ export class PostgresWebhookRepository implements WebhookRepository {
     client: PoolClient,
     tenantId: string,
     contactId: string,
-    ghlConversationId?: string,
+    providerConversationId?: string,
   ): Promise<ConversationRow | undefined> {
     const result = await client.query<ConversationRow>(
       `SELECT id
          FROM public.conversations
         WHERE tenant_id = $1
           AND contact_id = $2
-          AND ($3::text IS NULL OR ghl_conversation_id = $3)
+          AND ($3::text IS NULL OR provider_conversation_id = $3)
         ORDER BY last_activity DESC NULLS LAST
         LIMIT 1
         FOR UPDATE`,
-      [tenantId, contactId, ghlConversationId ?? null],
+      [tenantId, contactId, providerConversationId ?? null],
     );
     return result.rows[0];
   }
 
-  private async recordFailedEvent(event: GhlWebhookEvent, tenantId: string, error: unknown): Promise<void> {
+  private async recordFailedEvent(event: InboundWebhookEvent, tenantId: string, error: unknown): Promise<void> {
     const failureClient = await this.pool.connect();
     try {
       await failureClient.query("BEGIN");
       await this.setTenantContext(failureClient, tenantId);
       await failureClient.query(
         `INSERT INTO public.raw_webhooks
-           (tenant_id, external_id, event_type, location_id, signature, payload, status, error_message)
+           (tenant_id, external_id, event_type, account_id, signature, payload, status, error_message)
          VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'failed', $7)
          ON CONFLICT (tenant_id, external_id) DO UPDATE SET
            status = 'failed',
@@ -445,7 +445,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
           tenantId,
           event.externalId,
           event.eventType,
-          event.locationId,
+          event.accountId,
           event.signature,
           JSON.stringify(event.payload),
           error instanceof Error ? error.message.slice(0, 1000) : "unknown error",

@@ -1,9 +1,8 @@
-import type { SecretCryptor } from "@/features/ghl-oauth/application/ports/secret-cryptor.port";
+import type { SecretCryptor } from "@/modules/security/application/secret-cryptor.port";
 import type {
   CapiDeliveryEvent,
   QualificationSignalRepository,
 } from "@/modules/control/application/ports/qualification-signal.port";
-import { GhlQualificationTagProvider } from "@/features/ghl-oauth/infrastructure/ghl/ghl-qualification-tag.provider";
 import { MetaCapiProvider, QualificationDeliveryError } from "@/modules/control/infrastructure/meta-capi.provider";
 import type { MetaCapiPayload } from "@/modules/decisions/domain/meta-capi";
 
@@ -17,7 +16,6 @@ export class QualificationSignalWorker {
   constructor(
     private readonly repository: QualificationSignalRepository,
     private readonly metaProvider: MetaCapiProvider,
-    private readonly tagProvider: GhlQualificationTagProvider,
     private readonly cryptor: SecretCryptor,
     private readonly nodeEnv: string,
     private readonly pollMs = 5_000,
@@ -41,19 +39,16 @@ export class QualificationSignalWorker {
     try {
       const dealerIds = await this.repository.listDealerIds();
       let capiClaims = 0;
-      let ghlTagClaims = 0;
       for (const dealerId of dealerIds) {
         if (await this.processCapi(dealerId)) capiClaims += 1;
-        if (await this.processGhlTag(dealerId)) ghlTagClaims += 1;
       }
       const now = Date.now();
       if (
         capiClaims > 0 ||
-        ghlTagClaims > 0 ||
         now - this.lastDiagnosticLogAt >= DIAGNOSTIC_LOG_INTERVAL_MS
       ) {
         console.info(
-          `[Ticket8.5] Qualification signal worker cycle dealers_found=${dealerIds.length} capi_claims=${capiClaims} ghl_tag_claims=${ghlTagClaims}`,
+          `[Ticket8.5] Qualification signal worker cycle dealers_found=${dealerIds.length} capi_claims=${capiClaims}`,
         );
         this.lastDiagnosticLogAt = now;
       }
@@ -100,28 +95,6 @@ export class QualificationSignalWorker {
     return true;
   }
 
-  private async processGhlTag(dealerId: string): Promise<boolean> {
-    const event = await this.repository.claimNextGhlTagEvent(dealerId);
-    if (!event) return false;
-    try {
-      await this.tagProvider.addQualificationCompletedTag({
-        tenantId: dealerId,
-        ghlContactId: event.ghlContactId,
-      });
-      await this.repository.markGhlTagSent(event.id, dealerId);
-      console.info(`[Ticket8.5] GHL qualification tag sent dealer=${dealerId} ledger=${event.ledgerEntryId}`);
-    } catch (error) {
-      await this.repository.markGhlTagFailure({
-        dealerId,
-        eventId: event.id,
-        error: deliveryMessage(error),
-        retryable: isRetryable(error),
-        rateLimited: isRateLimited(error),
-      });
-      console.warn(`[Ticket8.5] GHL qualification tag failed dealer=${dealerId} ledger=${event.ledgerEntryId}`);
-    }
-    return true;
-  }
 }
 
 function isRetryable(error: unknown): boolean {

@@ -44,7 +44,7 @@ test("Sofia response rechecks current policy immediately before provider send", 
   assert.equal(sends, 1);
   assert.deepEqual(evaluations, [{
     tenantId: "tenant-a",
-    ghlContactId: "contact-a",
+    providerContactId: "contact-a",
     requestedAction: "REPLY",
     externalId: "inbound-a",
     source: "qualification-flow",

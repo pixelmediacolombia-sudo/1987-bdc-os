@@ -11,7 +11,6 @@ import type {
 
 type TenantRow = {
   id: string;
-  ghl_location_id: string | null;
   dealer_name: string | null;
   financial_policy: Record<string, unknown>;
   facebook_page_id: string | null;
@@ -26,7 +25,7 @@ type TenantRow = {
 };
 type ContactConversationRow = {
   contact_id: string;
-  ghl_contact_id: string;
+  provider_contact_id: string;
   preferred_language: string;
   consent_state: string;
   conversation_id: string;
@@ -47,7 +46,7 @@ export class PostgresHydrationRepository implements HydrationRepositoryPort {
 
   async loadTenant(tenantId: string): Promise<TenantProfile> {
     const rows = await this.readWithTenant<TenantRow>(tenantId, `
-      SELECT dealer_id::text AS id, ghl_location_id, dealer_name, financial_policy, facebook_page_id,
+      SELECT dealer_id::text AS id, dealer_name, financial_policy, facebook_page_id,
              timezone, policy_version, status, sofia_enabled, qualification_flow_enabled,
              qualification_signal_enabled, conversational_ai_shadow_enabled, conversational_ai_send_enabled
         FROM public.tenants
@@ -57,7 +56,6 @@ export class PostgresHydrationRepository implements HydrationRepositoryPort {
     if (!row) throw new HydrationNotFoundError("tenant", tenantId);
     return {
       id: row.id,
-      ...(row.ghl_location_id ? { ghlLocationId: row.ghl_location_id } : {}),
       ...(row.dealer_name ? { dealerName: row.dealer_name } : {}),
       financialPolicy: row.financial_policy ?? {},
       ...(row.facebook_page_id ? { facebookPageId: row.facebook_page_id } : {}),
@@ -74,9 +72,9 @@ export class PostgresHydrationRepository implements HydrationRepositoryPort {
     };
   }
 
-  async loadContactConversation(tenantId: string, ghlContactId: string): Promise<ContactConversation> {
+  async loadContactConversation(tenantId: string, providerContactId: string): Promise<ContactConversation> {
     const rows = await this.readWithTenant<ContactConversationRow>(tenantId, `
-      SELECT c.id::text AS contact_id, c.ghl_contact_id, c.preferred_language, c.consent_state,
+      SELECT c.id::text AS contact_id, c.provider_contact_id, c.preferred_language, c.consent_state,
              conversation.id::text AS conversation_id, conversation.channel, conversation.state
         FROM public.contacts AS c
         JOIN LATERAL (
@@ -86,12 +84,12 @@ export class PostgresHydrationRepository implements HydrationRepositoryPort {
            ORDER BY cv.last_activity DESC NULLS LAST, cv.id DESC
            LIMIT 1
         ) AS conversation ON true
-       WHERE c.tenant_id = $1 AND c.ghl_contact_id = $2
-       LIMIT 1`, [tenantId, ghlContactId]);
+       WHERE c.tenant_id = $1 AND c.provider_contact_id = $2
+       LIMIT 1`, [tenantId, providerContactId]);
     const row = rows[0];
-    if (!row) throw new HydrationNotFoundError("contact", ghlContactId);
+    if (!row) throw new HydrationNotFoundError("contact", providerContactId);
     return {
-      contact: { id: row.contact_id, ghlContactId: row.ghl_contact_id, preferredLanguage: row.preferred_language, consentState: row.consent_state },
+      contact: { id: row.contact_id, providerContactId: row.provider_contact_id, preferredLanguage: row.preferred_language, consentState: row.consent_state },
       conversation: { id: row.conversation_id, channel: row.channel, state: row.state },
     };
   }

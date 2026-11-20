@@ -5,9 +5,9 @@ import { QuestionLedgerService } from "@/modules/decisions/application/QuestionL
 
 export type PolicyEvaluationRequest = PolicyEvaluationOverrides & {
   tenantId: string;
-  ghlContactId: string;
+  providerContactId: string;
   externalId?: string;
-  source: "ghl-stop-ai" | "diagnostic" | "qualification-flow";
+  source: "meta-stop-ai" | "diagnostic" | "qualification-flow";
 };
 
 export type LoggedPolicyDecision = PolicyDecision & {
@@ -28,7 +28,7 @@ export class PolicyEvaluationService implements PolicyEvaluatorPort {
   ) {}
 
   async evaluateForContact(input: PolicyEvaluationRequest): Promise<LoggedPolicyDecision> {
-    const context = await this.contextRepository.load(input.tenantId, input.ghlContactId);
+    const context = await this.contextRepository.load(input.tenantId, input.providerContactId);
     const baseDecision = this.engine.evaluate(context, input);
     const decision = await this.applyObjectiveGuard(baseDecision, input);
     await this.decisionLogRepository.append({
@@ -57,7 +57,7 @@ export class PolicyEvaluationService implements PolicyEvaluatorPort {
 
     const state = await this.questionLedger.checkObjectiveState(
       input.tenantId,
-      input.ghlContactId,
+      input.providerContactId,
       input.objectiveType,
     );
     const fallbackAction = decision.gate === "FINANCIAL" ? "HANDOFF" : "WAIT";

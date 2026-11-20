@@ -1,4 +1,4 @@
-import type { HumanInterruptionTrigger } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { HumanInterruptionTrigger } from "@/modules/webhooks/domain/inbound-webhook-event";
 
 export type HumanSuppressionInput = {
   tenantId: string;

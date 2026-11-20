@@ -1,0 +1,74 @@
+import type { MediaClassification } from "@/modules/media/media";
+
+export type JsonObject = Record<string, unknown>;
+
+export type MediaAttachmentKind = "audio" | "image";
+
+export type MediaAttachment = {
+  kind: MediaAttachmentKind;
+  mimeType?: string;
+  filename?: string;
+  url?: string;
+  localPath?: string;
+  caption?: string;
+};
+
+export type InboundMessage = {
+  externalId: string;
+  providerMessageId?: string;
+  contactId: string;
+  conversationId?: string;
+  phone?: string;
+  email?: string;
+  ctwaClid?: string;
+  ctwaSourceId?: string;
+  ctwaCapturedAt?: string;
+  channel: string;
+  content: string;
+  semanticHash: string;
+  attachments?: MediaAttachment[];
+  mediaSignals?: {
+    audioTranscriptionFailed?: boolean;
+    imageClassifications?: MediaClassification[];
+    imageVehicleCategories?: string[];
+  };
+};
+
+export type HumanInterruptionTrigger = "staff_message" | "control_tag";
+
+export type HumanInterruption = {
+  trigger: HumanInterruptionTrigger;
+  contactId: string;
+  conversationId?: string;
+  ownerId?: string;
+  controlTag?: string;
+  staffMessage?: InboundMessage;
+};
+
+export type InboundWebhookEvent = {
+  provider: "meta";
+  externalId: string;
+  eventType: string;
+  accountId: string;
+  signature: string;
+  rawBody: Buffer;
+  payload: JsonObject;
+  contactId?: string;
+  conversationId?: string;
+  humanInterruption?: HumanInterruption;
+  inboundMessage?: InboundMessage;
+};
+
+export class InvalidWebhookEventError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidWebhookEventError";
+  }
+}
+
+export class WebhookTenantNotFoundError extends Error {
+  constructor(accountId: string) {
+    super(`No tenant configured for Meta account ${accountId}`);
+    this.name = "WebhookTenantNotFoundError";
+  }
+}

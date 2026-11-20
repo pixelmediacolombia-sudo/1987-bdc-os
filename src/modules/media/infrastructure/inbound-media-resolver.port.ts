@@ -1,5 +1,5 @@
-import type { GhlWebhookEvent } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { InboundWebhookEvent } from "@/modules/webhooks/domain/inbound-webhook-event";
 
 export interface InboundMediaResolverPort {
-  resolve(event: GhlWebhookEvent): Promise<GhlWebhookEvent>;
+  resolve(event: InboundWebhookEvent): Promise<InboundWebhookEvent>;
 }

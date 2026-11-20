@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type {
   CapiDeliveryEvent,
-  GhlTagDeliveryEvent,
   QualificationCompletion,
   QualificationCompletionPort,
   QualificationSignalRepository,
@@ -43,9 +42,9 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
     const contact = await client.query<ContactSignalRow>(
       `SELECT id::text AS id, phone, email, ctwa_clid
          FROM public.contacts
-        WHERE tenant_id = $1 AND ghl_contact_id = $2
+        WHERE tenant_id = $1 AND provider_contact_id = $2
         LIMIT 1`,
-      [input.tenantId, input.ghlContactId],
+      [input.tenantId, input.providerContactId],
     );
     const contactRow = contact.rows[0];
     if (!contactRow) throw new Error("Qualification completion contact was not found");
@@ -122,13 +121,6 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
          updated_at = now()`,
       [input.tenantId, contactRow.id, input.ledgerEntryId, eventName, input.ledgerEntryId, eventTime, JSON.stringify(payload), eventStatus],
     );
-    await client.query(
-      `INSERT INTO public.ghl_qualification_tag_events
-         (dealer_id, contact_id, ghl_contact_id, ledger_entry_id)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (dealer_id, ledger_entry_id) DO NOTHING`,
-      [input.tenantId, contactRow.id, input.ghlContactId, input.ledgerEntryId],
-    );
   }
 
   async listDealerIds(): Promise<string[]> {
@@ -143,6 +135,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
     try {
       await client.query("BEGIN");
       await this.setTenantContext(client, dealerId);
+      const envConfig = findMetaCapiEnvConfig(dealerId, this.metaCapiDealers);
       const claimToken = randomUUID();
       const candidates = await client.query<{
         id: string;
@@ -153,12 +146,10 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
         encrypted_meta_access_token: string | null;
         meta_test_event_code: string | null;
         meta_capi_enabled: boolean;
-        ghl_location_id: string;
-        dealer_document: string;
       }>(
         `SELECT e.id, e.event_id, e.event_name, e.payload_sent,
                 t.meta_dataset_id, t.encrypted_meta_access_token, t.meta_test_event_code,
-                t.meta_capi_enabled, t.ghl_location_id, to_jsonb(t)::text AS dealer_document
+                t.meta_capi_enabled
              FROM public.capi_events AS e
              JOIN public.tenants AS t ON t.dealer_id = e.dealer_id
             WHERE e.dealer_id = $1
@@ -171,9 +162,9 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
             FOR UPDATE OF e SKIP LOCKED`,
         [dealerId],
       );
-      const selected = candidates.rows
-        .map((candidate) => ({ candidate, env: findMetaCapiEnvConfig(candidate.dealer_document, this.metaCapiDealers, candidate.ghl_location_id) }))
-        .find(({ candidate, env }) => Boolean(env || (candidate.meta_capi_enabled && candidate.meta_dataset_id && candidate.encrypted_meta_access_token)))?.candidate;
+      const selected = candidates.rows.find((candidate) => Boolean(
+        envConfig || (candidate.meta_capi_enabled && candidate.meta_dataset_id && candidate.encrypted_meta_access_token),
+      ));
       if (!selected) {
         await client.query("COMMIT");
         return undefined;
@@ -188,8 +179,6 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
         encrypted_meta_access_token: string | null;
         meta_test_event_code: string | null;
         meta_capi_enabled: boolean;
-        ghl_location_id: string;
-        dealer_document: string;
       }>(
         `UPDATE public.capi_events AS e
             SET claim_token = $2, claimed_at = now(), updated_at = now()
@@ -198,13 +187,12 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
            AND t.qualification_signal_enabled = true
         RETURNING e.id, e.event_id, e.event_name, e.payload_sent,
                   t.meta_dataset_id, t.encrypted_meta_access_token, t.meta_test_event_code,
-                  t.meta_capi_enabled, t.ghl_location_id, to_jsonb(t)::text AS dealer_document`,
+                  t.meta_capi_enabled`,
         [selected.id, claimToken],
       );
       await client.query("COMMIT");
       const row = result.rows[0];
       if (!row) return undefined;
-      const envConfig = findMetaCapiEnvConfig(row.dealer_document, this.metaCapiDealers, row.ghl_location_id);
       return {
         id: row.id,
         dealerId,
@@ -238,71 +226,8 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
     await this.updateDelivery("capi_events", input.dealerId, input.eventId, undefined, input);
   }
 
-  async claimNextGhlTagEvent(dealerId: string): Promise<GhlTagDeliveryEvent | undefined> {
-    return this.claimTagEvent(dealerId);
-  }
-
-  async markGhlTagSent(eventId: string, dealerId: string): Promise<void> {
-    await this.updateDelivery("ghl_qualification_tag_events", dealerId, eventId, "sent");
-  }
-
-  async markGhlTagFailure(input: {
-    dealerId: string;
-    eventId: string;
-    error: string;
-    retryable: boolean;
-    rateLimited?: boolean;
-  }): Promise<void> {
-    await this.updateDelivery("ghl_qualification_tag_events", input.dealerId, input.eventId, undefined, input);
-  }
-
-  private async claimTagEvent(dealerId: string): Promise<GhlTagDeliveryEvent | undefined> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      await this.setTenantContext(client, dealerId);
-      const result = await client.query<{
-        id: string;
-        ghl_contact_id: string;
-        ledger_entry_id: string;
-      }>(
-        `WITH candidate AS (
-           SELECT event.id
-             FROM public.ghl_qualification_tag_events AS event
-             JOIN public.tenants AS tenant ON tenant.dealer_id = event.dealer_id
-            WHERE event.dealer_id = $1
-              AND tenant.qualification_signal_enabled = true
-              AND event.status = 'pending' AND event.next_attempt_at <= now()
-              AND (event.claimed_at IS NULL OR event.claimed_at < now() - interval '60 seconds')
-            ORDER BY event.created_at LIMIT 1 FOR UPDATE OF event SKIP LOCKED
-         )
-         UPDATE public.ghl_qualification_tag_events AS e
-            SET claim_token = $2, claimed_at = now(), updated_at = now()
-           FROM candidate
-          WHERE e.id = candidate.id
-            AND EXISTS (
-              SELECT 1 FROM public.tenants AS tenant
-               WHERE tenant.dealer_id = e.dealer_id
-                 AND tenant.qualification_signal_enabled = true
-            )
-        RETURNING e.id, e.ghl_contact_id, e.ledger_entry_id`,
-        [dealerId, randomUUID()],
-      );
-      await client.query("COMMIT");
-      const row = result.rows[0];
-      return row
-        ? { id: row.id, dealerId, ghlContactId: row.ghl_contact_id, ledgerEntryId: row.ledger_entry_id }
-        : undefined;
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-
   private async updateDelivery(
-    table: "capi_events" | "ghl_qualification_tag_events",
+    table: "capi_events",
     dealerId: string,
     eventId: string,
     success?: "sent",
@@ -314,13 +239,12 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
       await client.query("BEGIN");
       await this.setTenantContext(client, dealerId);
       if (success === "sent") {
-        const traceSet = table === "capi_events" ? ", fbtrace_id = COALESCE($4, fbtrace_id)" : "";
         await client.query(
           `UPDATE public.${table}
-              SET status = 'sent'${traceSet},
+              SET status = 'sent', fbtrace_id = COALESCE($4, fbtrace_id),
                   claim_token = NULL, claimed_at = NULL, updated_at = now()
-            WHERE dealer_id = $1 AND ${table === "capi_events" ? "event_id" : "id"} = $2`,
-          table === "capi_events" ? [dealerId, eventId, null, fbtraceId ?? null] : [dealerId, eventId],
+            WHERE dealer_id = $1 AND event_id = $2`,
+          [dealerId, eventId, null, fbtraceId ?? null],
         );
       } else if (failure) {
         const increment = failure.rateLimited ? 0 : 1;
@@ -340,7 +264,7 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
                     ELSE now() + interval '6 hours'
                   END,
                   claim_token = NULL, claimed_at = NULL, updated_at = now()
-            WHERE dealer_id = $1 AND ${table === "capi_events" ? "event_id" : "id"} = $2`,
+            WHERE dealer_id = $1 AND event_id = $2`,
           [dealerId, eventId, increment, failure.retryable, failure.error.slice(0, 1000), failure.rateLimited ?? false],
         );
       }

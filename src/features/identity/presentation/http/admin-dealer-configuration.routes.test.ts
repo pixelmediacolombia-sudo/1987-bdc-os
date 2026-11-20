@@ -15,7 +15,6 @@ test("admin dealer configuration exposes safe state and never returns stored cre
     query: async (sql: string, values: unknown[] = []) => {
       calls.push(sql);
       if (sql.includes("set_config")) { assert.deepEqual(values, [dealerId]); return { rows: [] }; }
-      if (sql.includes("FROM public.integrations")) return { rows: [{ ghl_location_id: "location-1", scopes: ["contacts.read"], health_state: "healthy", access_token_expires_at: null, has_stored_access_token: true, has_stored_refresh_token: true, created_at: "2026-11-20T12:00:00.000Z", updated_at: "2026-11-20T12:00:00.000Z", last_verified_at: "2026-11-20T12:00:00.000Z" }] };
       if (sql.includes("FROM public.capi_events")) return { rows: [{ status: "sent", created_at: "2026-11-20T12:30:00.000Z" }] };
       return { rows: [] };
     }, release: () => undefined,
@@ -23,7 +22,7 @@ test("admin dealer configuration exposes safe state and never returns stored cre
   const pool = {
     query: async (sql: string, values: unknown[] = []) => {
       if (sql.includes("FROM public.app_sessions")) return { rows: values[0] === tokenHash ? [{ id: "admin-id", email: "admin@example.com", display_name: "Admin", account_type: "admin" }] : [] };
-      if (sql.includes("FROM public.tenants")) return { rows: [{ id: dealerId, name: "Demo Dealer", status: "active", timezone: "America/Bogota", policy_version: "policy-v1", financial_policy: { downPaymentMinimum: 1000 }, ghl_location_id: "location-1", sofia_enabled: true, qualification_flow_enabled: true, qualification_signal_enabled: false, meta_dataset_id: "dataset-1", has_meta_access_token: true, meta_event_name: "LeadSubmitted", meta_capi_enabled: true, has_meta_test_event_code: true, facebook_page_id: "page-1", conversational_ai_shadow_enabled: true, conversational_ai_send_enabled: false }] };
+      if (sql.includes("FROM public.tenants")) return { rows: [{ id: dealerId, name: "Demo Dealer", status: "active", timezone: "America/Bogota", policy_version: "policy-v1", financial_policy: { downPaymentMinimum: 1000 }, sofia_enabled: true, qualification_flow_enabled: true, qualification_signal_enabled: false, meta_dataset_id: "dataset-1", has_meta_access_token: true, meta_event_name: "LeadSubmitted", meta_capi_enabled: true, has_meta_test_event_code: true, facebook_page_id: "page-1", conversational_ai_shadow_enabled: true, conversational_ai_send_enabled: false }] };
       throw new Error(`Unexpected configuration SQL: ${sql.slice(0, 100)}`);
     }, connect: async () => client,
   } as unknown as Pool;
@@ -40,12 +39,9 @@ test("admin dealer configuration exposes safe state and never returns stored cre
   const body = await response.text();
   assert.doesNotMatch(body, /ENCRYPTED_META_SECRET|TEST_SECRET/);
   assert.match(body, /"hasCredential":true/);
-  assert.match(body, /"hasStoredAccessToken":true/);
-  assert.match(body, /"lastVerifiedAt":"2026-11-20T12:00:00.000Z"/);
   assert.match(body, /"lastEventStatus":"sent"/);
   assert.ok(calls.some((sql) => sql.includes("set_config('app.tenant_id'")));
-  const integrationSql = calls.find((sql) => sql.includes("FROM public.integrations")) ?? "";
-  assert.doesNotMatch(integrationSql, /SELECT\s+encrypted_access_token\s*[,\n]/i);
+  assert.equal(calls.some((sql) => sql.includes("FROM public.integrations")), false);
 });
 
 test("dealer configuration rejects invalid and unauthenticated requests", async (context) => {

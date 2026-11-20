@@ -1,4 +1,4 @@
-import type { InboundMessage } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { InboundMessage } from "@/modules/webhooks/domain/inbound-webhook-event";
 
 export interface BurstBufferPort {
   add(message: InboundMessage, tenantId: string): Promise<void>;

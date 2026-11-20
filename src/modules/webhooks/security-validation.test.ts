@@ -1,45 +1,35 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { Pool } from "pg";
-import type { Request, Response } from "express";
-import type { GhlOAuthController } from "@/features/ghl-oauth/presentation/http/ghl-oauth.controller";
-import type { ProcessGHLWebhookUseCase } from "@/modules/webhooks/application/process-ghl-webhook.use-case";
-import { WebhookController } from "@/modules/webhooks/presentation/http/webhook.controller";
+import { MetaWebhookController } from "@/features/meta/presentation/http/meta-webhook.controller";
+import { InMemoryWebhookQueue } from "@/modules/webhooks/application/in-memory-webhook.queue";
 import { createHttpApp } from "@/presentation/http/create-http-app";
 
-const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-const signatureKeys = {
-  ed25519PublicKey: publicKey.export({ type: "spki", format: "pem" }).toString(),
-  // The test uses the current header. The production route carries GHL's RSA
-  // compatibility key by default for X-WH-Signature.
-  legacyRsaPublicKey: "invalid-test-key",
-};
+const APP_SECRET = "local-meta-app-secret";
 
 function signBody(body: string): string {
-  return sign(null, Buffer.from(body, "utf8"), privateKey).toString("base64");
+  return `sha256=${createHmac("sha256", APP_SECRET).update(body).digest("hex")}`;
 }
 
-function createTestServer(processUseCase: ProcessGHLWebhookUseCase): ReturnType<typeof createHttpApp> {
-  const oauthController = {
-    initiateHandler: (_req: Request, res: Response) => res.status(404).end(),
-    completeHandler: (_req: Request, res: Response) => res.status(404).end(),
-  } as unknown as GhlOAuthController;
-  return createHttpApp(oauthController, new WebhookController(processUseCase), signatureKeys);
+function payload(id = "message-1") {
+  return { object: "page", entry: [{ id: "page-1", messaging: [{ sender: { id: "person-1" }, recipient: { id: "page-1" }, message: { mid: id, text: "Hola" } }] }] };
+}
+
+function createTestServer(process: (event: unknown) => Promise<void> = async () => undefined): ReturnType<typeof createHttpApp> {
+  const controller = new MetaWebhookController({ execute: process } as never, new InMemoryWebhookQueue(), "verify-token");
+  return createHttpApp({ metaWebhook: { controller, appSecret: APP_SECRET } });
 }
 
 async function postWebhook(body: string, headers: Record<string, string> = {}) {
-  const processUseCase = {
-    execute: async () => undefined,
-  } as unknown as ProcessGHLWebhookUseCase;
-  const app = createTestServer(processUseCase);
+  const app = createTestServer();
   const server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Test server did not bind a port");
 
   try {
-    return await fetch(`http://127.0.0.1:${address.port}/webhooks/ghl`, {
+    return await fetch(`http://127.0.0.1:${address.port}/webhooks/meta`, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
       body,
@@ -54,40 +44,37 @@ test("rejects an unsigned webhook before JSON parsing", async () => {
   assert.equal(response.status, 401);
 });
 
-test("rejects invalid Ed25519 signatures", async () => {
-  const body = JSON.stringify({ locationId: "location-1", eventId: "event-1" });
-  const response = await postWebhook(body, { "x-ghl-signature": signBody(`${body}-wrong`) });
+test("rejects invalid Meta signatures", async () => {
+  const body = JSON.stringify(payload());
+  const response = await postWebhook(body, { "x-hub-signature-256": signBody(`${body}-wrong`) });
   assert.equal(response.status, 401);
 });
 
 test("rejects a valid signature when the raw body is altered", async () => {
-  const original = JSON.stringify({ locationId: "location-1", eventId: "event-2" });
+  const original = JSON.stringify(payload("event-2"));
   const response = await postWebhook(
-    JSON.stringify({ locationId: "location-1", eventId: "event-3" }),
-    { "x-ghl-signature": signBody(original) },
+    JSON.stringify(payload("event-3")),
+    { "x-hub-signature-256": signBody(original) },
   );
   assert.equal(response.status, 401);
 });
 
 test("ACKs a valid webhook and schedules processing outside the request", async () => {
-  const body = JSON.stringify({ locationId: "location-1", eventId: "event-4" });
+  const body = JSON.stringify(payload("event-4"));
   let calls = 0;
-  const processUseCase = {
-    execute: async () => {
+  const app = createTestServer(async () => {
       calls += 1;
       await new Promise((resolve) => setTimeout(resolve, 25));
-    },
-  } as unknown as ProcessGHLWebhookUseCase;
-  const app = createTestServer(processUseCase);
+    });
   const server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Test server did not bind a port");
 
   try {
-    const response = await fetch(`http://127.0.0.1:${address.port}/webhooks/ghl`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/webhooks/meta`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-ghl-signature": signBody(body) },
+      headers: { "content-type": "application/json", "x-hub-signature-256": signBody(body) },
       body,
     });
     assert.equal(response.status, 200);
@@ -102,24 +89,21 @@ test("ACKs a valid webhook and schedules processing outside the request", async 
 });
 
 test("collapses five identical concurrent deliveries to one background task", async () => {
-  const body = JSON.stringify({ locationId: "location-1", eventId: "event-5" });
+  const body = JSON.stringify(payload("event-5"));
   let calls = 0;
-  const processUseCase = {
-    execute: async () => {
+  const app = createTestServer(async () => {
       calls += 1;
       await new Promise((resolve) => setTimeout(resolve, 25));
-    },
-  } as unknown as ProcessGHLWebhookUseCase;
-  const app = createTestServer(processUseCase);
+    });
   const server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Test server did not bind a port");
 
   try {
-    const responses = await Promise.all(Array.from({ length: 5 }, () => fetch(`http://127.0.0.1:${address.port}/webhooks/ghl`, {
+    const responses = await Promise.all(Array.from({ length: 5 }, () => fetch(`http://127.0.0.1:${address.port}/webhooks/meta`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-ghl-signature": signBody(body) },
+      headers: { "content-type": "application/json", "x-hub-signature-256": signBody(body) },
       body,
     })));
     assert.deepEqual(responses.map((response) => response.status), [200, 200, 200, 200, 200]);
@@ -131,7 +115,7 @@ test("collapses five identical concurrent deliveries to one background task", as
 });
 
 test("legacy /tests diagnostics and disabled internal diagnostics are not public routes", async () => {
-  const app = createTestServer({ execute: async () => undefined } as unknown as ProcessGHLWebhookUseCase);
+  const app = createTestServer();
   const server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();
@@ -146,7 +130,7 @@ test("legacy /tests diagnostics and disabled internal diagnostics are not public
   }
 });
 
-test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and outbound registry", {
+test("RLS cross-tenant matrix isolates Meta credentials, webhooks, and outbound registry", {
   skip: !process.env.SECURITY_TEST_DATABASE_URL,
 }, async () => {
   const tenantA = process.env.SECURITY_TEST_TENANT_A;
@@ -171,23 +155,17 @@ test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and o
     }
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantA]);
 
-    const integration = await client.query<{ id: string }>(
-      "SELECT id FROM public.integrations WHERE tenant_id = $1 AND provider = 'ghl' LIMIT 1",
-      [tenantA],
-    );
-    const integrationId = integration.rows[0]?.id;
-    assert.ok(integrationId);
-
     await client.query(
-      `INSERT INTO public.integration_token_audits (tenant_id, integration_id, action, metadata)
-       VALUES ($1, $2, 'token_refreshed', '{}'::jsonb)`,
-      [tenantA, integrationId],
+      `INSERT INTO public.meta_messaging_connections
+         (tenant_id, facebook_page_id, encrypted_page_access_token, granted_scopes)
+       VALUES ($1, $2, 'encrypted-test-token', ARRAY['pages_messaging']::text[])`,
+      [tenantA, `security-page-${tenantA}`],
     );
     await client.query(
       `INSERT INTO public.raw_webhooks
-         (tenant_id, external_id, event_type, location_id, signature, payload)
-       VALUES ($1, 'rls-test-a', 'ContactCreate', 'rls-location-a', 'test-signature', '{}'::jsonb)`,
-      [tenantA],
+         (tenant_id, external_id, event_type, account_id, signature, payload)
+       VALUES ($1, 'rls-test-a', 'MetaMessage', $2, 'test-signature', '{}'::jsonb)`,
+      [tenantA, `security-page-${tenantA}`],
     );
     await client.query(
       `INSERT INTO public.outbound_message_registry
@@ -203,7 +181,7 @@ test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and o
     );
 
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantB]);
-    for (const table of ["integrations", "integration_token_audits", "raw_webhooks", "outbound_message_registry", "internal_diagnostic_access_audit"]) {
+    for (const table of ["meta_messaging_connections", "raw_webhooks", "outbound_message_registry", "internal_diagnostic_access_audit"]) {
       const visible = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM public.${table}`);
       assert.equal(visible.rows[0]?.count, "0", `${table} leaked tenant A rows`);
     }
@@ -212,10 +190,10 @@ test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and o
     try {
       await assert.rejects(
         client.query(
-          `INSERT INTO public.integrations
-             (tenant_id, provider, encrypted_access_token, scopes)
-           VALUES ($1, 'ghl', 'cross-tenant', ARRAY[]::text[])`,
-          [tenantA],
+          `INSERT INTO public.meta_messaging_connections
+             (tenant_id, facebook_page_id, encrypted_page_access_token, granted_scopes)
+           VALUES ($1, $2, 'cross-tenant', ARRAY[]::text[])`,
+          [tenantA, `cross-tenant-page-${tenantB}`],
         ),
       );
     } finally {
@@ -223,7 +201,7 @@ test("RLS cross-tenant matrix isolates integrations, audits, raw webhooks, and o
       await client.query("RELEASE SAVEPOINT cross_tenant_insert");
     }
     assert.equal(
-      (await client.query("UPDATE public.integrations SET health_state = 'degraded' WHERE id = $1", [integrationId])).rowCount,
+      (await client.query("UPDATE public.meta_messaging_connections SET health_state = 'degraded' WHERE tenant_id = $1", [tenantA])).rowCount,
       0,
     );
     assert.equal(

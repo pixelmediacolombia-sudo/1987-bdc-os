@@ -4,7 +4,7 @@ import type { PolicyContextRepositoryPort } from "@/modules/decisions/applicatio
 import type { PolicyContext } from "@/modules/decisions/domain/policy-context";
 
 type TenantRow = { id: string; timezone: string; policy_version: string; status: string };
-type ContactRow = { id: string; ghl_contact_id: string; consent_state: string };
+type ContactRow = { id: string; provider_contact_id: string; consent_state: string };
 type MessageRow = { content: string };
 type FactRow = { fact_key: string; fact_value: string | null };
 
@@ -14,13 +14,13 @@ export class PostgresPolicyContextRepository implements PolicyContextRepositoryP
     private readonly policyProvider: PolicyPackProviderPort,
   ) {}
 
-  async load(tenantId: string, ghlContactId: string): Promise<PolicyContext> {
+  async load(tenantId: string, providerContactId: string): Promise<PolicyContext> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
       const tenant = await this.loadTenant(client, tenantId);
-      const contact = await this.loadContact(client, tenantId, ghlContactId);
+      const contact = await this.loadContact(client, tenantId, providerContactId);
       const latestInbound = await client.query<MessageRow>(
         `SELECT m.content
            FROM public.messages AS m
@@ -52,7 +52,7 @@ export class PostgresPolicyContextRepository implements PolicyContextRepositoryP
         },
         contact: {
           id: contact.id,
-          ghlContactId: contact.ghl_contact_id,
+          providerContactId: contact.provider_contact_id,
           consentState: contact.consent_state,
         },
         ...(latestInbound.rows[0]?.content ? { lastInboundMessage: latestInbound.rows[0].content } : {}),
@@ -79,16 +79,16 @@ export class PostgresPolicyContextRepository implements PolicyContextRepositoryP
     return row;
   }
 
-  private async loadContact(client: PoolClient, tenantId: string, ghlContactId: string): Promise<ContactRow> {
+  private async loadContact(client: PoolClient, tenantId: string, providerContactId: string): Promise<ContactRow> {
     const result = await client.query<ContactRow>(
-      `SELECT id::text AS id, ghl_contact_id, consent_state
+      `SELECT id::text AS id, provider_contact_id, consent_state
          FROM public.contacts
-        WHERE tenant_id = $1 AND ghl_contact_id = $2
+        WHERE tenant_id = $1 AND provider_contact_id = $2
         LIMIT 1`,
-      [tenantId, ghlContactId],
+      [tenantId, providerContactId],
     );
     const row = result.rows[0];
-    if (!row) throw new Error(`Policy contact ${ghlContactId} was not found`);
+    if (!row) throw new Error(`Policy contact ${providerContactId} was not found`);
     return row;
   }
 }

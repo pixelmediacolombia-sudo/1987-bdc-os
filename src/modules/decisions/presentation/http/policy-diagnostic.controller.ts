@@ -21,8 +21,8 @@ export class PolicyDiagnosticController {
       return;
     }
 
-    const ghlContactId = queryString(req, "contact_id");
-    if (!ghlContactId) {
+    const providerContactId = queryString(req, "contact_id");
+    if (!providerContactId) {
       res.status(400).json({ error: "contact_id is required" });
       return;
     }
@@ -46,7 +46,7 @@ export class PolicyDiagnosticController {
 
       const decision = await this.evaluator.evaluateForContact({
         tenantId: identity.tenantId,
-        ghlContactId,
+        providerContactId,
         source: "diagnostic",
         ...(at ? { now: at } : {}),
         ...(payload.message ? { inboundMessage: payload.message } : {}),

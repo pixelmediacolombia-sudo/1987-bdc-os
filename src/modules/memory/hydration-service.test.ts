@@ -7,7 +7,7 @@ import { LocalPolicyPackProvider } from "@/modules/memory/infrastructure/policie
 import { PostgresHydrationRepository } from "@/modules/memory/infrastructure/persistence/postgres/postgres-hydration.repository";
 
 const TENANT_ID = "00000000-0000-0000-0000-000000000001";
-const GHL_CONTACT_ID = "ghl-contact-42";
+const PROVIDER_CONTACT_ID = "meta-test-contact-42";
 const CONTACT_ID = "00000000-0000-0000-0000-000000000042";
 const CONVERSATION_ID = "00000000-0000-0000-0000-000000000043";
 
@@ -36,7 +36,7 @@ class FakeClient {
       return { rows: [{
         id: TENANT_ID,
         timezone: "America/Bogota",
-        policy_version: "default_v1",
+        policy_version: "shared_dealer_v1",
         status: "active",
         sofia_enabled: true,
         qualification_flow_enabled: true,
@@ -46,7 +46,7 @@ class FakeClient {
     if (normalized.includes("FROM public.contacts")) {
       return { rows: [{
         contact_id: CONTACT_ID,
-        ghl_contact_id: GHL_CONTACT_ID,
+        provider_contact_id: PROVIDER_CONTACT_ID,
         preferred_language: "es",
         consent_state: "unknown",
         conversation_id: CONVERSATION_ID,
@@ -89,14 +89,14 @@ test("hidrata 12 mensajes cronológicos, hechos activos, ledger y política con 
   const fakePool = new FakePool();
   const repository = new PostgresHydrationRepository(fakePool as never);
   const hydrator = new ConversationHydrator(repository, new LocalPolicyPackProvider(), 12);
-  const context = await hydrator.hydrate(TENANT_ID, GHL_CONTACT_ID);
+  const context = await hydrator.hydrate(TENANT_ID, PROVIDER_CONTACT_ID);
 
   assert.equal(context.transcript.length, 12);
   assert.equal(context.transcript[0]?.content, "message-1");
   assert.equal(context.transcript[11]?.content, "message-12");
   assert.deepEqual(context.activeFacts, { budget: "25000", language: "es" });
   assert.deepEqual(context.objectivesLedger, [{ objectiveType: "down_payment", asked: true, answered: false, skipped: false }]);
-  assert.equal(context.tenant.policies.version, "default_v1");
+  assert.equal(context.tenant.policies.version, "shared_dealer_v1");
 
   const clientIds = [...new Set(fakePool.trace.map((entry) => entry.clientId))];
   for (const clientId of clientIds) {
@@ -118,7 +118,7 @@ test("rechaza límites de transcripción fuera del contrato 8..12", () => {
       flags: { sofiaEnabled: false, qualificationFlowEnabled: false, qualificationSignalEnabled: false },
     }),
     loadContactConversation: async () => ({
-      contact: { id: CONTACT_ID, ghlContactId: GHL_CONTACT_ID, preferredLanguage: "es", consentState: "unknown" },
+      contact: { id: CONTACT_ID, providerContactId: PROVIDER_CONTACT_ID, preferredLanguage: "es", consentState: "unknown" },
       conversation: { id: CONVERSATION_ID, channel: "sms", state: "open" },
     }),
     loadRecentTranscript: async () => [],
@@ -136,8 +136,8 @@ test("rechaza límites de transcripción fuera del contrato 8..12", () => {
   assert.throws(() => new ConversationHydrator(repository, provider, 13), /between 8 and 12/);
 });
 
-test("carga la política v1 existente en producción", async () => {
+test("las etiquetas de política heredadas cargan el baseline compartido", async () => {
   const policy = await new LocalPolicyPackProvider().load("v1");
-  assert.equal(policy.version, "v1");
+  assert.equal(policy.version, "shared_dealer_v1");
   assert.equal(policy.humanHandoff.enabled, true);
 });

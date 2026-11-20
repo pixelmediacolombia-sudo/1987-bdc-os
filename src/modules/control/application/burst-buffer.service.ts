@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { InboundMessage } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { InboundMessage } from "@/modules/webhooks/domain/inbound-webhook-event";
 import { ContactMutex } from "@/modules/control/application/contact-mutex";
 import type {
   BurstBufferCancellationPort,

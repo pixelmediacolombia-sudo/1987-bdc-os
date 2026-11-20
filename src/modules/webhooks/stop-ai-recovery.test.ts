@@ -6,8 +6,9 @@ import type {
   WebhookStage,
   WebhookStageClaim,
 } from "@/modules/webhooks/application/ports/webhook-repository.port";
-import { ProcessGHLWebhookUseCase } from "@/modules/webhooks/application/process-ghl-webhook.use-case";
+import { ProcessInboundWebhookUseCase } from "@/modules/webhooks/application/process-inbound-webhook.use-case";
 import type { PolicyEvaluatorPort } from "@/modules/decisions/application/policy-evaluation.service";
+import { testMetaEvent } from "@/modules/webhooks/test-meta-event";
 
 const TENANT_ID = "tenant-stop-ai";
 const EXTERNAL_ID = "stop-recovery-1";
@@ -49,14 +50,13 @@ class RecoverableWebhookRepository implements WebhookRepository {
   }
 }
 
-function stopAiPayload() {
-  return {
-    eventId: EXTERNAL_ID,
-    eventType: "ContactTagUpdate",
-    locationId: "location-stop-ai",
+function stopAiEvent() {
+  return testMetaEvent({
+    externalId: EXTERNAL_ID,
     contactId: CONTACT_ID,
-    tags: ["stop_ai"],
-  };
+    eventType: "meta.control.stop_ai",
+    humanInterruption: { trigger: "control_tag", contactId: CONTACT_ID, controlTag: "stop_ai" },
+  });
 }
 
 function createEvaluator(options: { failFirst?: boolean; delayMs?: number } = {}) {
@@ -81,19 +81,15 @@ function createUseCase(
   evaluator: PolicyEvaluatorPort,
   suppressionCalls: { count: number },
 ) {
-  return new ProcessGHLWebhookUseCase(repository, undefined, {
+  return new ProcessInboundWebhookUseCase(repository, undefined, {
     suppress: async () => {
       suppressionCalls.count += 1;
     },
   }, evaluator);
 }
 
-async function execute(useCase: ProcessGHLWebhookUseCase): Promise<void> {
-  await useCase.execute({
-    payload: stopAiPayload(),
-    rawBody: Buffer.from(EXTERNAL_ID),
-    signature: "test-signature",
-  });
+async function execute(useCase: ProcessInboundWebhookUseCase): Promise<void> {
+  await useCase.execute(stopAiEvent());
 }
 
 test("A1/A2: retry recovers policy_pending after a decision-log failure without duplicating STOP", async () => {

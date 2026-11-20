@@ -1,21 +1,11 @@
 import { createHttpApp } from "@/presentation/http/create-http-app";
-import path from "node:path";
-import { loadAppConfig } from "@/features/ghl-oauth/infrastructure/config/env.config";
-import { Aes256GcmTokenCryptor } from "@/features/ghl-oauth/infrastructure/crypto/aes256-gcm-token.cryptor";
-import { GhlOAuthClientAdapter } from "@/features/ghl-oauth/infrastructure/ghl/ghl-oauth.client";
-import { HmacOAuthStateService } from "@/features/ghl-oauth/infrastructure/oauth/hmac-oauth-state.service";
-import { createPostgresPool } from "@/features/ghl-oauth/infrastructure/persistence/postgres/pool";
-import { ensureIntegrationsTable } from "@/features/ghl-oauth/infrastructure/persistence/postgres/integrations.migration";
-import { PostgresTenantIntegrationRepository } from "@/features/ghl-oauth/infrastructure/persistence/postgres/tenant-integration.repository";
-import { PostgresTenantLocationRouteRepository } from "@/features/ghl-oauth/infrastructure/persistence/postgres/tenant-location-route.repository";
-import { CompleteGhlOAuthUseCase } from "@/features/ghl-oauth/application/use-cases/complete-ghl-oauth.use-case";
-import { InitiateGhlOAuthUseCase } from "@/features/ghl-oauth/application/use-cases/initiate-ghl-oauth.use-case";
-import { GhlOAuthController } from "@/features/ghl-oauth/presentation/http/ghl-oauth.controller";
-import { GhlOAuthPresentationService } from "@/features/ghl-oauth/presentation/services/ghl-oauth.presentation.service";
+import { loadAppConfig } from "@/infrastructure/config/env.config";
+import { Aes256GcmTokenCryptor } from "@/modules/security/infrastructure/aes256-gcm-token.cryptor";
+import { HmacOAuthStateService } from "@/features/meta/infrastructure/hmac-oauth-state.service";
+import { createPostgresPool } from "@/infrastructure/database/postgres-pool";
 import { ensureWebhookTables } from "@/modules/webhooks/infrastructure/persistence/postgres/webhooks.migration";
 import { PostgresWebhookRepository } from "@/modules/webhooks/infrastructure/persistence/postgres/postgres-webhook.repository";
-import { ProcessGHLWebhookUseCase } from "@/modules/webhooks/application/process-ghl-webhook.use-case";
-import { WebhookController } from "@/modules/webhooks/presentation/http/webhook.controller";
+import { ProcessInboundWebhookUseCase } from "@/modules/webhooks/application/process-inbound-webhook.use-case";
 import { RedisWebhookQueue } from "@/modules/webhooks/infrastructure/redis/redis-webhook-queue";
 import { ContactMutex } from "@/modules/control/application/contact-mutex";
 import { BurstBufferService } from "@/modules/control/application/burst-buffer.service";
@@ -41,20 +31,16 @@ import { ensureQualificationSignalTables } from "@/modules/webhooks/infrastructu
 import { PostgresQualificationSignalRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-qualification-signal.repository";
 import { QualificationSignalWorker } from "@/modules/control/infrastructure/qualification-signal.worker";
 import { MetaCapiProvider } from "@/modules/control/infrastructure/meta-capi.provider";
-import { GhlTokenRefreshUseCase } from "@/features/ghl-oauth/application/use-cases/ghl-token-refresh.use-case";
-import { GhlApiClient } from "@/features/ghl-oauth/infrastructure/ghl/ghl-api.client";
-import { GhlQualificationTagProvider } from "@/features/ghl-oauth/infrastructure/ghl/ghl-qualification-tag.provider";
-import { GhlOutboundMessageProvider } from "@/features/ghl-oauth/infrastructure/ghl/ghl-outbound-message.provider";
 import { PostgresSofiaStateRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-sofia-state.repository";
 import { ensureTenantFeatureFlags } from "@/modules/control/infrastructure/persistence/postgres/tenant-flags.migration";
-import { ensureCountryClubPolicy } from "@/modules/control/infrastructure/persistence/postgres/country-club-policy.migration";
+import { ensureSharedDealerPolicy } from "@/modules/control/infrastructure/persistence/postgres/shared-dealer-policy.migration";
 import { ensureConversationAiShadowTables } from "@/modules/control/infrastructure/persistence/postgres/conversation-ai-shadow.migration";
 import { LocalMediaUnderstandingAdapter } from "@/modules/media/infrastructure/local-media-understanding.adapter";
-import { GhlInboundMediaResolver } from "@/modules/media/infrastructure/ghl-inbound-media-resolver";
-import { OpenAICompatibleConversationalModel } from "@/features/ghl-oauth/infrastructure/ghl/conversational-model.adapter";
+import { OpenAICompatibleConversationalModel } from "@/modules/ai/infrastructure/openai-compatible-conversational-model.adapter";
 import { ConversationAiService } from "@/modules/control/application/conversation-ai.service";
 import { PostgresConversationAiShadowRepository } from "@/modules/control/infrastructure/persistence/postgres/postgres-conversation-ai-shadow.repository";
 import { OutboundDeliveryReconciliationService } from "@/modules/control/application/outbound-delivery-reconciliation.service";
+import { RegisteredOutboundMessageSender } from "@/modules/control/application/registered-outbound-message-sender";
 import { OutboundDeliveryReconciliationController } from "@/presentation/http/outbound-delivery-reconciliation.controller";
 import { ensureInternalDiagnosticAuditTable } from "@/presentation/http/internal-diagnostic-audit.migration";
 import { PostgresInternalDiagnosticAudit } from "@/presentation/http/postgres-internal-diagnostic-audit";
@@ -63,42 +49,48 @@ import { ensureAdminAuditTable } from "@/features/identity/infrastructure/persis
 import { bootstrapLocalAdmin } from "@/features/identity/infrastructure/persistence/postgres/local-admin.bootstrap";
 import { createIdentityRouter } from "@/features/identity/presentation/http/identity.routes";
 import { createSmtpDealerInvitationMailer } from "@/features/identity/infrastructure/email/smtp-dealer-invitation-mailer";
+import { ensureMetaMessagingTables } from "@/features/meta/infrastructure/persistence/postgres/meta-messaging.migration";
+import { MetaWebhookController } from "@/features/meta/presentation/http/meta-webhook.controller";
+import { MetaGraphApiClient } from "@/features/meta/infrastructure/meta-graph-api.client";
+import { MetaOutboundMessageProvider } from "@/features/meta/infrastructure/meta-outbound-message.provider";
+import { PostgresMetaMessagingConnectionRepository } from "@/features/meta/infrastructure/persistence/postgres/postgres-meta-messaging-connection.repository";
+import { MetaOAuthClient } from "@/features/meta/application/oauth/meta-oauth.client";
+import { MetaOAuthController } from "@/features/meta/presentation/http/meta-oauth.controller";
 
 async function start(): Promise<void> {
   const config = loadAppConfig();
   const pool = createPostgresPool(config.databaseUrl, config.pgSsl);
   const redis = new IoredisClient(config.redisUrl);
-  // Webhook bootstrap creates tenant_location_routes before identity updates the GHL route trigger
-  // to support new BDC OS dealers that have not connected GHL yet.
   await ensureWebhookTables(pool);
   await ensureIdentityTables(pool);
   await ensureAdminAuditTable(pool);
   const localAdminCreated = await bootstrapLocalAdmin(pool);
   if (localAdminCreated) console.info("[Identity] local platform admin bootstrapped");
-  await ensureIntegrationsTable(pool);
   await ensureTenantFeatureFlags(pool);
   await ensureMemoryTables(pool);
-  const countryClubActivated = await ensureCountryClubPolicy(pool);
-  console.info(`[CountryClub] policy_version=country_club_cars_v8 activated=${countryClubActivated}`);
+  const sharedDealerActivated = await ensureSharedDealerPolicy(pool);
+  console.info(`[SharedDealerPolicy] baseline=shared_dealer_v1 dealer_overrides=planned migrated=${sharedDealerActivated}`);
   await ensureDecisionLogsTable(pool);
   await ensureQualificationSignalTables(pool);
+  await ensureMetaMessagingTables(pool);
   await ensureConversationAiShadowTables(pool);
   await ensureInternalDiagnosticAuditTable(pool);
 
-  const oauthClient = new GhlOAuthClientAdapter(config);
   const stateService = new HmacOAuthStateService(config.oauthStateSecret);
   const cryptor = new Aes256GcmTokenCryptor(config.encryptionSecret);
-  const repository = new PostgresTenantIntegrationRepository(pool);
-  const locationRouteRepository = new PostgresTenantLocationRouteRepository(pool);
-  const tokenRefresh = new GhlTokenRefreshUseCase(oauthClient, repository, cryptor);
-  const ghlApiClient = new GhlApiClient(tokenRefresh);
-  const qualificationHandoff = new GhlQualificationTagProvider(ghlApiClient);
-  const presentationService = new GhlOAuthPresentationService(
-    new InitiateGhlOAuthUseCase(oauthClient, stateService, locationRouteRepository),
-    new CompleteGhlOAuthUseCase(oauthClient, stateService, cryptor, repository),
+  const metaMessagingConnections = new PostgresMetaMessagingConnectionRepository(pool, cryptor);
+  const metaOAuthClient = config.metaAppId && config.metaAppSecret && config.metaOAuthRedirectUri
+    ? new MetaOAuthClient(config.metaAppId, config.metaAppSecret, config.metaOAuthRedirectUri,
+        config.metaGraphApiBaseUrl, config.metaGraphApiVersion, config.metaOAuthAuthorizationBaseUrl)
+    : undefined;
+  const metaOAuthController = new MetaOAuthController(
+    pool, stateService, metaOAuthClient, metaMessagingConnections,
+    config.metaOAuthRedirectUri, process.env.BDC_APP_URL, config.metaOAuthScopes,
   );
-  const controller = new GhlOAuthController(presentationService,
-    (code,redirectUri)=>oauthClient.verifyDashboardInstall(code,redirectUri));
+  const metaOutboundProvider = new MetaOutboundMessageProvider(
+    metaMessagingConnections,
+    new MetaGraphApiClient(config.metaGraphApiBaseUrl, config.metaGraphApiVersion),
+  );
   const policyPackProvider = new LocalPolicyPackProvider();
   const hydrator = new ConversationHydrator(
     new PostgresHydrationRepository(pool),
@@ -122,7 +114,7 @@ async function start(): Promise<void> {
   const outboundRegistry = new PostgresOutboundMessageRegistry(pool);
   const outboundDeliveryReconciliation = new OutboundDeliveryReconciliationService(
     outboundRegistry,
-    new GhlOutboundMessageProvider(ghlApiClient),
+    metaOutboundProvider,
   );
   const conversationalAi = config.conversationalAiEnabled
     ? new ConversationAiService(
@@ -140,9 +132,7 @@ async function start(): Promise<void> {
   const qualificationFlow = config.qualificationFlowEnabled
     ? createQualificationFlow({
         pool,
-        oauthClient,
-        integrationRepository: repository,
-        cryptor,
+        outboundProvider: metaOutboundProvider,
         outboundRegistry,
         policyEvaluator,
       })
@@ -155,7 +145,6 @@ async function start(): Promise<void> {
     sofiaRepository,
     qualificationLedger: questionLedger,
     qualificationSignalEnabled: config.qualificationSignalEnabled,
-    qualificationHandoff: config.qualificationFlowEnabled ? qualificationHandoff : undefined,
     conversationalAi,
     conversationalAiSendEnabled: config.conversationalAiSendEnabled,
   });
@@ -181,19 +170,19 @@ async function start(): Promise<void> {
         tesseractExecutable: config.tesseractCliPath,
       })
     : undefined;
-  const processWebhook = new ProcessGHLWebhookUseCase(
+  const processWebhook = new ProcessInboundWebhookUseCase(
     new PostgresWebhookRepository(pool, outboundRegistry),
     burstBuffer,
     humanSuppression,
     policyEvaluator,
     undefined,
     mediaUnderstanding,
-    new GhlInboundMediaResolver(ghlApiClient, locationRouteRepository),
+    undefined,
   );
   const webhookQueue = new RedisWebhookQueue(redis);
+  const metaWebhookController = new MetaWebhookController(processWebhook, webhookQueue, config.metaWebhookVerifyToken);
   await webhookQueue.start(async (job) => {
-    const payload: unknown = JSON.parse(job.rawBody.toString("utf8"));
-    await processWebhook.execute({ payload, rawBody: job.rawBody, signature: job.signature });
+    await metaWebhookController.process(job.rawBody, job.signature);
   });
   let qualificationSignalWorker: QualificationSignalWorker | undefined;
   if (config.qualificationSignalEnabled) {
@@ -210,7 +199,6 @@ async function start(): Promise<void> {
     qualificationSignalWorker = new QualificationSignalWorker(
       qualificationSignalRepository,
       new MetaCapiProvider(),
-      qualificationHandoff,
       cryptor,
       config.nodeEnv,
       config.qualificationSignalPollMs,
@@ -219,44 +207,41 @@ async function start(): Promise<void> {
   } else {
     console.info("[Ticket8.5] Qualification signal worker disabled reason=QUALIFICATION_SIGNAL_ENABLED_false");
   }
-  const webhookController = new WebhookController(
-    processWebhook,
-    webhookQueue,
-  );
   const policyDiagnosticController = new PolicyDiagnosticController(policyEvaluator);
   const redisDiagnosticController = new RedisDiagnosticController(redis);
   const outboundDeliveryReconciliationController = new OutboundDeliveryReconciliationController(
     outboundRegistry,
     outboundDeliveryReconciliation,
   );
-  // The dashboard is read-only, isolated to Lucki, and does not alter conversation automation.
+  // The internal operations dashboard reads BDC OS-owned data.
   const { createDashboardRouter } = require("../dashboard/compiled/router.cjs");
   const dashboardRouter = createDashboardRouter({
     pool,
-    publicDirectory: path.resolve(__dirname, "../dashboard/public"),
+    publicDirectory: `${__dirname}/../dashboard/public`,
+    outboundSender: new RegisteredOutboundMessageSender(outboundRegistry, metaOutboundProvider),
   });
-  const app = createHttpApp(
-    controller,
-    webhookController,
-    undefined,
+  const app = createHttpApp({
     policyDiagnosticController,
     redisDiagnosticController,
     outboundDeliveryReconciliationController,
     dashboardRouter,
-    config.internalDiagnosticsEnabled ? {
+    internalDiagnostics: config.internalDiagnosticsEnabled ? {
       credentials: config.internalDiagnosticCredentials,
       audit: new PostgresInternalDiagnosticAudit(pool),
       production: config.nodeEnv === "production",
       allowedRemoteIps: config.internalDiagnosticAllowedRemoteIps,
     } : undefined,
-    createIdentityRouter(pool, {
+    identityRouter: createIdentityRouter(pool, {
       production: config.nodeEnv === "production",
       publicAppUrl: process.env.BDC_APP_URL,
       invitationMailer: createSmtpDealerInvitationMailer(),
       metaCapiDealers: config.metaCapiDealers,
       metaCapiEventName: config.metaCapiEventName,
+      metaOAuthStart: (tenantId) => metaOAuthController.authorizationUrl(tenantId),
     }),
-  );
+    metaWebhook: { controller: metaWebhookController, appSecret: config.metaAppSecret },
+    metaOAuth: metaOAuthController,
+  });
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 
   const shutdown = (signal: string) => {

@@ -10,7 +10,7 @@ test("reconciliation confirms provider acceptance after restart without sending 
       tenantId: "tenant-a",
       attemptId: "attempt-a",
       contactId: "contact-a",
-      providerMessageId: "ghl-message-a",
+      providerMessageId: "meta-test-message-a",
       correlationId: "inbound-correlation-a",
       content: "Hola",
       uncertaintyReason: "local association failed",
@@ -37,7 +37,7 @@ test("provider timeout keeps uncertainty open and records the reason", async () 
   const registry = {
     listDeliveryUncertainties: async () => [{
       tenantId: "tenant-a", attemptId: "attempt-a", contactId: "contact-a",
-      providerMessageId: "ghl-message-a", content: "Hola", uncertaintyReason: "timeout",
+      providerMessageId: "meta-test-message-a", content: "Hola", uncertaintyReason: "timeout",
       detectedAt: new Date(), reconciliationAttempts: 0,
     }],
     recordDeliveryReconciliationAttempt: async (input: Record<string, unknown>) => { calls.push(input); },

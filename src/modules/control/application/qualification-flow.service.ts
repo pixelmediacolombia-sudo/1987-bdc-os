@@ -30,7 +30,7 @@ export class QualificationFlowService {
   evaluateObjective(input: ObjectiveQualificationInput): Promise<LoggedPolicyDecision> {
     return this.policyEvaluator.evaluateForContact({
       tenantId: input.tenantId,
-      ghlContactId: input.contactId,
+      providerContactId: input.contactId,
       objectiveType: input.objectiveType,
       requestedAction: input.requestedAction,
       ...(input.externalId ? { externalId: input.externalId } : {}),
@@ -46,7 +46,7 @@ export class QualificationFlowService {
   }): Promise<LoggedPolicyDecision> {
     return this.policyEvaluator.evaluateForContact({
       tenantId: input.tenantId,
-      ghlContactId: input.contactId,
+      providerContactId: input.contactId,
       ...(input.externalId ? { externalId: input.externalId } : {}),
       source: "qualification-flow",
     });
@@ -63,7 +63,7 @@ export class QualificationFlowService {
   private async sendAuthorizedReply(input: OutboundMessageRequest): Promise<ProviderOutboundMessage> {
     const decision = await this.policyEvaluator.evaluateForContact({
       tenantId: input.tenantId,
-      ghlContactId: input.contactId,
+      providerContactId: input.contactId,
       requestedAction: "REPLY",
       ...(input.externalId ? { externalId: input.externalId } : {}),
       source: "qualification-flow",

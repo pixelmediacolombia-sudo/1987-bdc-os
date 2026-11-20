@@ -1,4 +1,4 @@
-import type { InboundMessage } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { InboundMessage } from "@/modules/webhooks/domain/inbound-webhook-event";
 import type { NextBestAction } from "@/modules/decisions/domain/next-best-action";
 import type { SofiaMediaContext } from "@/modules/media/media";
 

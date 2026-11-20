@@ -132,7 +132,7 @@ export class QuestionLedgerService {
           if (!this.completionPort) throw new Error("Qualification completion signal is not configured");
           await this.completionPort.enqueueWithinTransaction(client, {
             tenantId: normalizedTenantId,
-            ghlContactId: normalizedContactId,
+            providerContactId: normalizedContactId,
             ledgerEntryId,
           });
         }
@@ -172,17 +172,17 @@ export class QuestionLedgerService {
   private async loadContactId(
     client: { query: <T>(sql: string, values?: unknown[]) => Promise<{ rows: T[] }> },
     tenantId: string,
-    ghlContactId: string,
+    providerContactId: string,
   ): Promise<string> {
     const result = await client.query<{ id: string }>(
       `SELECT id::text AS id
          FROM public.contacts
-        WHERE tenant_id = $1 AND ghl_contact_id = $2
+        WHERE tenant_id = $1 AND provider_contact_id = $2
         LIMIT 1`,
-      [tenantId, ghlContactId],
+      [tenantId, providerContactId],
     );
     const contactId = result.rows[0]?.id;
-    if (!contactId) throw new Error(`Question ledger contact ${ghlContactId} was not found`);
+    if (!contactId) throw new Error(`Question ledger contact ${providerContactId} was not found`);
     return contactId;
   }
 }

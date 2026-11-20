@@ -2,7 +2,7 @@ import type { PoolClient } from "pg";
 
 export type QualificationCompletion = {
   tenantId: string;
-  ghlContactId: string;
+  providerContactId: string;
   ledgerEntryId: string;
 };
 
@@ -22,27 +22,11 @@ export type CapiDeliveryEvent = {
   testEventCode?: string;
 };
 
-export type GhlTagDeliveryEvent = {
-  id: string;
-  dealerId: string;
-  ghlContactId: string;
-  ledgerEntryId: string;
-};
-
 export interface QualificationSignalRepository {
   listDealerIds(): Promise<string[]>;
   claimNextCapiEvent(dealerId: string): Promise<CapiDeliveryEvent | undefined>;
   markCapiSent(eventId: string, dealerId: string, fbtraceId?: string): Promise<void>;
   markCapiFailure(input: {
-    dealerId: string;
-    eventId: string;
-    error: string;
-    retryable: boolean;
-    rateLimited?: boolean;
-  }): Promise<void>;
-  claimNextGhlTagEvent(dealerId: string): Promise<GhlTagDeliveryEvent | undefined>;
-  markGhlTagSent(eventId: string, dealerId: string): Promise<void>;
-  markGhlTagFailure(input: {
     dealerId: string;
     eventId: string;
     error: string;

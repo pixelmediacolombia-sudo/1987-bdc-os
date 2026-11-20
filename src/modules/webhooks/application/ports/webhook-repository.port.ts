@@ -1,4 +1,4 @@
-import type { GhlWebhookEvent } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { InboundWebhookEvent } from "@/modules/webhooks/domain/inbound-webhook-event";
 
 export type WebhookProcessResult = {
   duplicate: boolean;
@@ -23,7 +23,7 @@ export type WebhookStageClaim = {
 };
 
 export interface WebhookRepository {
-  process(event: GhlWebhookEvent): Promise<WebhookProcessResult>;
+  process(event: InboundWebhookEvent): Promise<WebhookProcessResult>;
   claimStage?(input: Omit<WebhookStageClaim, "token">): Promise<WebhookStageClaim | undefined>;
   completeStage?(input: WebhookStageClaim, nextStage: WebhookStage): Promise<void>;
   releaseStage?(input: WebhookStageClaim): Promise<void>;

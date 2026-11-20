@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { SofiaConversationEngine } = require("../dist/modules/decisions/domain/sofia-conversation");
 const { ConversationAiService } = require("../dist/modules/control/application/conversation-ai.service");
-const policy = require("../policies/country_club_cars_v8.json");
+const policy = require("../policies/shared_dealer_v1.json");
 
 class FakeOpenAI {
   extractionModel = "fake-gpt-5.6-luna";
@@ -51,17 +51,17 @@ async function main() {
     const turns = [];
     for (const latestMessage of scenario.turns) {
       const result = await service.process({
-        tenantId: "local-country-club",
+        tenantId: "local-shared-dealer",
         contactId: scenario.id,
         latestMessage,
         transcript,
         channel: scenario.channel,
         language: "en",
-        dealerName: "Country Club Cars Inc.",
+        dealerName: "Dealer Demo Inc.",
         priorFacts: facts,
         missingObjectives: [],
         ruleTurn: (candidateFacts) => engine.processTurn({
-          dealerName: "Country Club Cars Inc.",
+          dealerName: "Dealer Demo Inc.",
           latestMessage,
           priorFacts: candidateFacts,
           contactChannel: scenario.channel,

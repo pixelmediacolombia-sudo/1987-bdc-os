@@ -4,9 +4,9 @@ const path = require("node:path");
 const { enrichInboundMedia } = require("../dist/modules/media/application/enrich-inbound-media");
 const { FixtureMediaUnderstandingAdapter } = require("../dist/modules/media/application/fixture-media-understanding.adapter");
 const { SofiaConversationEngine } = require("../dist/modules/decisions/domain/sofia-conversation");
-const policy = require("../policies/country_club_cars_v8.json");
+const policy = require("../policies/shared_dealer_v1.json");
 
-const AUDIO_DIR = path.join(__dirname, "..", "tmp", "synthetic-country-club-audio");
+const AUDIO_DIR = path.join(__dirname, "..", "tmp", "synthetic-shared-dealer-audio");
 
 const samples = [
   {
@@ -79,7 +79,7 @@ async function main() {
     const enriched = await enrichInboundMedia(event, adapter, { info() {}, error(message) { throw new Error(message); } });
     const transcript = enriched.inboundMessage.content;
     const turn = engine.processTurn({
-      dealerName: "Country Club Cars Inc.",
+      dealerName: "Dealer Demo Inc.",
       latestMessage: transcript,
       priorFacts: {},
       contactChannel: "whatsapp",
@@ -90,7 +90,7 @@ async function main() {
     for (const [key, value] of Object.entries(sample.expected)) assert.deepEqual(turn.facts[key], value, `${sample.id} ${key}`);
     results.push({ id: sample.id, file: sample.filename, bytes: fs.statSync(localPath).size, source: "fixture-synthetic-audio", transcript, facts: turn.facts, response: turn.response });
   }
-  const summary = { syntheticAudioFiles: results.length, mediaPipelinePassed: true, sofiaFactChecksPassed: results.length, realCountryClubAudio: false, results };
+  const summary = { syntheticAudioFiles: results.length, mediaPipelinePassed: true, sofiaFactChecksPassed: results.length, realDealerAudio: false, results };
   console.log(`SYNTHETIC_AUDIO_LOCAL_SUMMARY ${JSON.stringify(summary)}`);
 }
 

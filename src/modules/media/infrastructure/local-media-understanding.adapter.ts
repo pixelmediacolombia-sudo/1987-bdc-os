@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
 import { promisify } from "node:util";
 import type { MediaUnderstandingPort, MediaUnderstandingResult } from "@/modules/media/application/media-understanding.port";
-import type { MediaAttachment } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { MediaAttachment } from "@/modules/webhooks/domain/inbound-webhook-event";
 import type { MediaClassification } from "@/modules/media/media";
 
 const execFileAsync = promisify(execFile);

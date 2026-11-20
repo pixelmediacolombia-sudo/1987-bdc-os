@@ -52,7 +52,7 @@ export class SemanticRepetitionValidator implements SemanticRepetitionGuard {
       const contact = await client.query<ContactRow>(
         `SELECT id::text AS id
            FROM public.contacts
-          WHERE tenant_id = $1 AND ghl_contact_id = $2
+          WHERE tenant_id = $1 AND provider_contact_id = $2
           LIMIT 1`,
         [tenantId, contactId],
       );

@@ -18,4 +18,4 @@ La planificación de producción usa `RedisBurstFlushQueue`, un sorted set durab
 4. Observar duplicados, latencia, jobs vencidos y reintentos antes de habilitar mensajería real.
 5. Para rollback, detener la publicación de jobs nuevos y completar los jobs durables pendientes sin activar el envío outbound.
 
-La cola durable queda implementada para desarrollo y validación operativa. La prueba unitaria local cubre claim, ACK posterior al éxito, reprogramación, backoff y DLQ; las pruebas Redis reales permanecen condicionadas a `RUN_REDIS_INTEGRATION_TESTS=true` y una `REDIS_URL` inyectada por Juan. La activación de mensajería e IA sigue bloqueada hasta completar el Redis de Render y la secuencia real firmada en GHL Sandbox.
+La cola durable queda implementada para desarrollo y validación operativa. La prueba unitaria local cubre claim, ACK posterior al éxito, reprogramación, backoff y DLQ; las pruebas Redis reales permanecen condicionadas a `RUN_REDIS_INTEGRATION_TESTS=true` y una `REDIS_URL` inyectada por Juan. La activación de mensajería e IA sigue bloqueada hasta completar el Redis de Render y la secuencia real firmada en el simulador Meta local.

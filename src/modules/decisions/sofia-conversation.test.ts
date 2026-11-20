@@ -66,7 +66,7 @@ test("Sofia opens with dealer identity and reacts before asking", () => {
 
 test("Sofia ignores Facebook promotional metadata when opening a WhatsApp conversation", () => {
   const result = new SofiaConversationEngine().processTurn({
-    dealerName: "Country Club Cars Inc.",
+    dealerName: "Dealer Demo Inc.",
     latestMessage: "*Headline:* $200 Seguro + $500 de Bono GRATIS\n*Source URL:* https://fb.me/example\n\n¡Hola! Quiero más información",
     priorFacts: {},
     turnCount: 1,
@@ -81,7 +81,7 @@ test("Sofia ignores Facebook promotional metadata when opening a WhatsApp conver
 
 test("Sofia records a specific vehicle model and ignores its model year as a down payment", () => {
   const result = new SofiaConversationEngine().processTurn({
-    dealerName: "Country Club Cars Inc.",
+    dealerName: "Dealer Demo Inc.",
     latestMessage: "Quiero un Toyota Corolla 2015",
     priorFacts: {},
     turnCount: 2,
@@ -95,7 +95,7 @@ test("Sofia records a specific vehicle model and ignores its model year as a dow
 
 test("Sofia selects the explicit down payment instead of a vehicle model year", () => {
   const result = new SofiaConversationEngine().processTurn({
-    dealerName: "Country Club Cars Inc.",
+    dealerName: "Dealer Demo Inc.",
     latestMessage: "Busco un Toyota Corolla 2015 y cuento con $2,000 de enganche",
     priorFacts: {},
     turnCount: 2,
@@ -121,7 +121,7 @@ test("Sofia reacts to each captured answer before asking the next question", () 
 
 test("Sofia extracts all facts from the single-sentence audio transcript", () => {
   const result = new SofiaConversationEngine().processTurn({
-    dealerName: "Country Club Cars Inc.",
+    dealerName: "Dealer Demo Inc.",
     latestMessage: "Hola, busco una SUV para mi familia y tengo como dos mil de enganche.",
     priorFacts: {},
     turnCount: 1,
@@ -160,7 +160,7 @@ test("Sofia acknowledges a vehicle photo, records only the trade-in boolean and 
 
 test("Sofia uses a vehicle category identified by image without asking for the category again", () => {
   const result = new SofiaConversationEngine().processTurn({
-    dealerName: "Country Club Cars Inc.",
+    dealerName: "Dealer Demo Inc.",
     latestMessage: "Adjunto de image",
     priorFacts: {},
     mediaContext: { imageClassifications: ["vehicle_photo"], imageVehicleCategories: ["suv"] },

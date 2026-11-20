@@ -5,13 +5,11 @@ import { QualificationFlowService } from "@/modules/control/application/qualific
 import type { SofiaStateRepositoryPort } from "@/modules/control/application/ports/sofia-state-repository.port";
 import type { OutboundMessageChannel } from "@/modules/control/application/ports/outbound-message-sender.port";
 import { SofiaConversationEngine, sofiaPolicyFromPolicyPack, type SofiaFacts } from "@/modules/decisions/domain/sofia-conversation";
-import { resolveDealerDisplayName } from "@/modules/decisions/domain/dealer-identity";
 import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
 import {
   OutboundMessageDeliveryUncertainError,
   OutboundMessageRejectedError,
 } from "@/modules/control/application/registered-outbound-message-sender";
-import type { QualificationHandoffPort } from "@/modules/control/application/ports/qualification-handoff.port";
 import type { ConversationAiService } from "@/modules/control/application/conversation-ai.service";
 
 export type SofiaConversationLogger = {
@@ -36,7 +34,6 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
     private readonly qualificationLedger?: QuestionLedgerService,
     private readonly qualificationSignalEnabled = false,
     private readonly logger: SofiaConversationLogger = defaultLogger,
-    private readonly qualificationHandoff?: QualificationHandoffPort,
     private readonly conversationalAi?: ConversationAiService,
     private readonly conversationalAiSendEnabled = false,
   ) {}
@@ -63,10 +60,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
       this.qualificationSignalEnabled && tenantFlags.qualificationSignalEnabled;
 
     if (sofiaEnabledForTenant && this.sofia) {
-      const dealerName = context.tenant.dealerName ?? resolveDealerDisplayName({
-        dealerId: context.tenant.id,
-        ghlLocationId: context.tenant.ghlLocationId,
-      }) ?? this.sofia.dealerName;
+      const dealerName = context.tenant.dealerName ?? this.sofia.dealerName;
       if (!dealerName) {
         this.logger.info(`Sofia inbound skipped dealer=${context.tenant.id} contact=${input.contactId} reason=dealer_not_identified`);
         return;
@@ -147,8 +141,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
       if (
         handoffRequested &&
         qualificationFlowEnabledForTenant &&
-        this.qualificationFlow &&
-        this.qualificationHandoff
+        this.qualificationFlow
       ) {
         const handoffDecision = typeof this.qualificationFlow.authorizeHandoff === "function"
           ? await this.qualificationFlow.authorizeHandoff({
@@ -163,13 +156,6 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
           );
         } else {
           try {
-            await this.qualificationHandoff.markQualified({
-              tenantId: input.tenantId,
-              contactId: input.contactId,
-              leadLevel: "A",
-              stage: "Calificado",
-              customerMessage: response ?? "",
-            });
             await this.sofia.repository.save(input.tenantId, input.contactId, {
               turnCount: (previous?.turnCount ?? 0) + 1,
               facts: { ...result.facts, handoff_completed: true },
@@ -179,7 +165,7 @@ export class HydratingInboundConversationOrchestrator implements InboundConversa
               hardRuleFailure: result.hardRuleFailure,
               ...(result.response ? { lastResponse: result.response } : {}),
             });
-            this.logger.info(`Sofia qualification handoff recorded tenant=${input.tenantId} contact=${input.contactId} stage=Calificado`);
+            this.logger.info(`Sofia internal qualification handoff recorded tenant=${input.tenantId} contact=${input.contactId} stage=Calificado`);
           } catch (error) {
             handoffFailed = true;
             const detail = error instanceof Error ? error.message : "unknown error";

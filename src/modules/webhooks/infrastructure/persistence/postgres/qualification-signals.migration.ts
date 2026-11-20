@@ -58,28 +58,6 @@ ALTER TABLE public.capi_events
 CREATE INDEX IF NOT EXISTS capi_events_pending_idx
   ON public.capi_events (dealer_id, status, next_attempt_at, created_at);
 
-CREATE TABLE IF NOT EXISTS public.ghl_qualification_tag_events (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  dealer_id UUID NOT NULL REFERENCES public.tenants(dealer_id) ON DELETE CASCADE,
-  contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
-  ghl_contact_id TEXT NOT NULL,
-  ledger_entry_id UUID NOT NULL REFERENCES public.objectives(id) ON DELETE CASCADE,
-  tag TEXT NOT NULL DEFAULT 'qualification_completed',
-  status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'sent', 'failed', 'abandoned')),
-  attempts INT NOT NULL DEFAULT 0,
-  last_error TEXT,
-  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  claim_token TEXT,
-  claimed_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT ghl_qualification_tag_event_uq UNIQUE (dealer_id, ledger_entry_id)
-);
-
-CREATE INDEX IF NOT EXISTS ghl_qualification_tag_pending_idx
-  ON public.ghl_qualification_tag_events (dealer_id, status, next_attempt_at, created_at);
-
 ALTER TABLE public.capi_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.capi_events FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS capi_events_dealer_isolation ON public.capi_events;
@@ -88,13 +66,24 @@ CREATE POLICY capi_events_dealer_isolation ON public.capi_events
   USING (dealer_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
   WITH CHECK (dealer_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
 
-ALTER TABLE public.ghl_qualification_tag_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ghl_qualification_tag_events FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS ghl_qualification_tag_events_dealer_isolation ON public.ghl_qualification_tag_events;
-CREATE POLICY ghl_qualification_tag_events_dealer_isolation ON public.ghl_qualification_tag_events
-  FOR ALL TO PUBLIC
-  USING (dealer_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
-  WITH CHECK (dealer_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
+CREATE TABLE IF NOT EXISTS public.tenant_processing_routes (
+  dealer_id UUID PRIMARY KEY REFERENCES public.tenants(dealer_id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO public.tenant_processing_routes (dealer_id)
+SELECT dealer_id FROM public.tenants ON CONFLICT (dealer_id) DO NOTHING;
+CREATE OR REPLACE FUNCTION public.sync_tenant_processing_route()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+BEGIN
+  INSERT INTO public.tenant_processing_routes (dealer_id) VALUES (NEW.dealer_id)
+  ON CONFLICT (dealer_id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS tenants_sync_processing_route ON public.tenants;
+CREATE TRIGGER tenants_sync_processing_route AFTER INSERT ON public.tenants
+FOR EACH ROW EXECUTE FUNCTION public.sync_tenant_processing_route();
+REVOKE ALL ON TABLE public.tenant_processing_routes FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION public.list_qualification_signal_dealers()
 RETURNS TABLE(dealer_id UUID)
@@ -103,11 +92,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
-  -- Enumerate only bootstrap routing metadata here. The worker applies the
-  -- tenant-scoped qualification_signal_enabled check when claiming events;
-  -- joining FORCE RLS tenants without app.tenant_id would hide every route.
-  SELECT route.dealer_id
-    FROM public.tenant_location_routes AS route;
+  SELECT route.dealer_id FROM public.tenant_processing_routes AS route;
 $$;
 
 REVOKE ALL ON FUNCTION public.list_qualification_signal_dealers() FROM PUBLIC;

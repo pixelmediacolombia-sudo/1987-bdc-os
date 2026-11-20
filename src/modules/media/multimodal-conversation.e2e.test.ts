@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
-import type { Request, Response as ExpressResponse } from "express";
-import type { GhlOAuthController } from "@/features/ghl-oauth/presentation/http/ghl-oauth.controller";
 import { HydratingInboundConversationOrchestrator } from "@/modules/control/application/hydrating-inbound-conversation-orchestrator";
 import type { QualificationFlowService } from "@/modules/control/application/qualification-flow.service";
 import type { SofiaStateRepositoryPort } from "@/modules/control/application/ports/sofia-state-repository.port";
@@ -11,20 +8,13 @@ import type { HydratedContext } from "@/modules/memory/domain/hydrated-context";
 import { SofiaConversationEngine } from "@/modules/decisions/domain/sofia-conversation";
 import { FixtureMediaUnderstandingAdapter } from "@/modules/media/application/fixture-media-understanding.adapter";
 import { AUDIO_TEXT, IMAGE_TEXT, fixtureAdapter } from "@/modules/media/media-test-fixtures";
-import { ProcessGHLWebhookUseCase } from "@/modules/webhooks/application/process-ghl-webhook.use-case";
+import { ProcessInboundWebhookUseCase } from "@/modules/webhooks/application/process-inbound-webhook.use-case";
 import type { WebhookRepository } from "@/modules/webhooks/application/ports/webhook-repository.port";
 import type { WebhookProcessResult } from "@/modules/webhooks/application/ports/webhook-repository.port";
 import type { BurstBufferPort } from "@/modules/control/application/ports/burst-buffer.port";
-import { WebhookController } from "@/modules/webhooks/presentation/http/webhook.controller";
-import { createHttpApp } from "@/presentation/http/create-http-app";
 
 const TENANT_ID = "dealer-media-e2e";
 const CONTACT_ID = "contact-media-e2e";
-const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-const signatureKeys = {
-  ed25519PublicKey: publicKey.export({ type: "spki", format: "pem" }).toString(),
-  legacyRsaPublicKey: "invalid-test-key",
-};
 
 const hydrated: HydratedContext = {
   tenant: {
@@ -40,7 +30,7 @@ const hydrated: HydratedContext = {
       humanHandoff: { enabled: true, triggers: [] },
     },
   },
-  contact: { id: CONTACT_ID, ghlContactId: CONTACT_ID, preferredLanguage: "es", consentState: "granted" },
+  contact: { id: CONTACT_ID, providerContactId: CONTACT_ID, preferredLanguage: "es", consentState: "granted" },
   conversation: { id: "conversation-media-e2e", channel: "whatsapp", state: "open" },
   transcript: [],
   activeFacts: {},
@@ -53,31 +43,6 @@ class InMemoryWebhookRepository implements WebhookRepository {
   async process(event: Parameters<WebhookRepository["process"]>[0]): Promise<WebhookProcessResult> {
     this.persisted.push(event.inboundMessage?.content ?? "");
     return { duplicate: false, tenantId: TENANT_ID };
-  }
-}
-
-async function postSignedWebhook(useCase: ProcessGHLWebhookUseCase, payload: object): Promise<globalThis.Response> {
-  const body = JSON.stringify(payload);
-  const oauthController = {
-    initiateHandler: (_req: Request, res: ExpressResponse) => res.status(404).end(),
-    completeHandler: (_req: Request, res: ExpressResponse) => res.status(404).end(),
-  } as unknown as GhlOAuthController;
-  const app = createHttpApp(oauthController, new WebhookController(useCase), signatureKeys);
-  const server = app.listen(0);
-  await new Promise<void>((resolve) => server.once("listening", resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("Media E2E server did not bind a port");
-  try {
-    return await fetch(`http://127.0.0.1:${address.port}/webhooks/ghl`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-ghl-signature": sign(null, Buffer.from(body, "utf8"), privateKey).toString("base64"),
-      },
-      body,
-    });
-  } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 }
 
@@ -97,7 +62,7 @@ test("E2E multimodal: audio entra al flujo y la imagen no expone OCR", async () 
   const orchestrator = new HydratingInboundConversationOrchestrator(
     { hydrate: async () => hydrated } as unknown as ConversationHydrator,
     flow,
-    { engine: new SofiaConversationEngine(), repository: stateRepository, dealerName: "Country Club Cars Inc." },
+    { engine: new SofiaConversationEngine(), repository: stateRepository, dealerName: "Dealer Demo Inc." },
   );
   const repository = new InMemoryWebhookRepository();
   const burstBuffer: BurstBufferPort = {
@@ -111,30 +76,12 @@ test("E2E multimodal: audio entra al flujo y la imagen no expone OCR", async () 
       });
     },
   };
-  const useCase = new ProcessGHLWebhookUseCase(repository, burstBuffer, undefined, undefined, undefined, fixtureAdapter());
+  const useCase = new ProcessInboundWebhookUseCase(repository, burstBuffer, undefined, undefined, undefined, fixtureAdapter());
 
-  const audioResponse = await postSignedWebhook(useCase, {
-      eventId: "media-e2e-audio",
-      eventType: "InboundMessage",
-      locationId: "location-media-e2e",
-      direction: "inbound",
-      contactId: CONTACT_ID,
-      messageType: "WhatsApp",
-      message: { attachments: [{ type: "audio/wav", filename: "family-suv.wav", localPath: "fixtures/media/family-suv.wav" }] },
-  });
-  assert.equal(audioResponse.status, 200);
+  await useCase.execute(mediaEvent("media-e2e-audio", "audio", "family-suv.wav"));
   for (let attempt = 0; attempt < 20 && responses.length < 1; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
 
-  const imageResponse = await postSignedWebhook(useCase, {
-      eventId: "media-e2e-image",
-      eventType: "InboundMessage",
-      locationId: "location-media-e2e",
-      direction: "inbound",
-      contactId: CONTACT_ID,
-      messageType: "WhatsApp",
-      message: { attachments: [{ type: "image/svg+xml", filename: "qualification-signals.svg", localPath: "fixtures/media/qualification-signals.svg" }] },
-  });
-  assert.equal(imageResponse.status, 200);
+  await useCase.execute(mediaEvent("media-e2e-image", "image", "qualification-signals.svg"));
   for (let attempt = 0; attempt < 20 && responses.length < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
 
   assert.equal(repository.persisted.length, 2);
@@ -147,11 +94,33 @@ test("E2E multimodal: audio entra al flujo y la imagen no expone OCR", async () 
   assert.equal(savedState?.facts.vehicle_category, "suv");
   assert.equal(savedState?.facts.vehicle_use, "familia");
   assert.equal(savedState?.facts.down_payment_declared, 2500);
-  assert.equal(responses[0], "Hola! Te saludamos desde Country Club Cars Inc.. Soy Sofía.\nPerfecto, para familia la SUV es buena opción. ¿Tienes algún carro que puedas dar de parte de pago? Eso te ayudaría bastante con el enganche.");
+  assert.equal(responses[0], "Hola! Te saludamos desde Dealer Demo Inc.. Soy Sofía.\nPerfecto, para familia la SUV es buena opción. ¿Tienes algún carro que puedas dar de parte de pago? Eso te ayudaría bastante con el enganche.");
   assert.equal(responses[1], "Gracias por compartirla. Seguimos con la información de tu compra.\n¿Tienes algún carro que puedas dar de parte de pago? Eso te ayudaría bastante con el enganche.");
   console.log(`MEDIA_E2E_RESPONSES audio=${JSON.stringify(responses[0])} image=${JSON.stringify(responses[1])}`);
   assert.equal(typeof IMAGE_TEXT, "string");
 });
+
+function mediaEvent(externalId: string, kind: "audio" | "image", filename: string) {
+  return {
+    provider: "meta" as const,
+    externalId,
+    eventType: "meta.message.received",
+    accountId: "meta-account-media-e2e",
+    signature: "local-test",
+    rawBody: Buffer.from("{}"),
+    payload: {},
+    contactId: CONTACT_ID,
+    inboundMessage: {
+      externalId,
+      contactId: CONTACT_ID,
+      conversationId: "whatsapp:meta-account-media-e2e:contact-media-e2e",
+      channel: "whatsapp",
+      content: kind === "audio" ? "Adjunto de audio" : "Adjunto de image",
+      semanticHash: `hash-${externalId}`,
+      attachments: [{ kind, filename, localPath: `fixtures/media/${filename}` }],
+    },
+  };
+}
 
 test("el adaptador de fixtures no se confunde con el proveedor local", async () => {
   const adapter = new FixtureMediaUnderstandingAdapter({

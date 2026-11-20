@@ -1,4 +1,4 @@
-import type { MediaAttachment } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { MediaAttachment } from "@/modules/webhooks/domain/inbound-webhook-event";
 import type { MediaUnderstandingPort, MediaUnderstandingResult } from "@/modules/media/application/media-understanding.port";
 
 export class FixtureMediaUnderstandingAdapter implements MediaUnderstandingPort {

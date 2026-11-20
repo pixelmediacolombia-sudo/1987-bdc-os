@@ -1,5 +1,5 @@
 import type { MediaUnderstandingPort } from "@/modules/media/application/media-understanding.port";
-import type { GhlWebhookEvent, InboundMessage } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { InboundWebhookEvent, InboundMessage } from "@/modules/webhooks/domain/inbound-webhook-event";
 import type { MediaClassification } from "@/modules/media/media";
 import type { InboundMediaResolverPort } from "@/modules/media/infrastructure/inbound-media-resolver.port";
 
@@ -14,14 +14,25 @@ const defaultLogger: MediaEnrichmentLogger = {
 };
 
 export async function enrichInboundMedia(
-  event: GhlWebhookEvent,
+  event: InboundWebhookEvent,
   understanding: MediaUnderstandingPort | undefined,
   logger: MediaEnrichmentLogger = defaultLogger,
   resolver?: InboundMediaResolverPort,
-): Promise<GhlWebhookEvent> {
+): Promise<InboundWebhookEvent> {
   const resolvedEvent = resolver ? await resolver.resolve(event) : event;
   const inbound = resolvedEvent.inboundMessage;
-  if (!inbound?.attachments?.length || !understanding) return resolvedEvent;
+  if (!inbound?.attachments?.length) return resolvedEvent;
+  if (!understanding) {
+    if (!inbound.attachments.some((attachment) => attachment.kind === "audio")) return resolvedEvent;
+    return {
+      ...resolvedEvent,
+      inboundMessage: {
+        ...inbound,
+        content: inbound.content.trim() || "Adjunto de audio",
+        mediaSignals: { ...inbound.mediaSignals, audioTranscriptionFailed: true },
+      },
+    };
+  }
 
   const understood: string[] = [];
   let audioTranscriptionFailed = false;
@@ -37,15 +48,15 @@ export async function enrichInboundMedia(
           continue;
         }
         understood.push(text);
-        logger.info(`GHL media understood external=${event.externalId} contact=${inbound.contactId} kind=audio source=${result.source}`);
+        logger.info(`Meta media understood external=${event.externalId} contact=${inbound.contactId} kind=audio source=${result.source}`);
       } else {
         imageClassifications.push(result.classification ?? "unknown");
         if (result.vehicleCategory?.trim()) imageVehicleCategories.push(result.vehicleCategory.trim().toLowerCase());
-        logger.info(`GHL media classified external=${event.externalId} contact=${inbound.contactId} kind=image classification=${result.classification ?? "unknown"} source=${result.source}`);
+        logger.info(`Meta media classified external=${event.externalId} contact=${inbound.contactId} kind=image classification=${result.classification ?? "unknown"} source=${result.source}`);
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : "unknown error";
-      logger.error(`GHL media understanding failed external=${event.externalId} contact=${inbound.contactId} kind=${attachment.kind}: ${detail}`);
+      logger.error(`Meta media understanding failed external=${event.externalId} contact=${inbound.contactId} kind=${attachment.kind}: ${detail}`);
       if (attachment.kind === "audio") audioTranscriptionFailed = true;
       else imageClassifications.push("unknown");
     }
@@ -55,7 +66,7 @@ export async function enrichInboundMedia(
   const content = [
     originalContent && !(understood.length > 0 && /^adjunto de audio$/i.test(originalContent)) ? originalContent : "",
     ...understood,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n") || (audioTranscriptionFailed ? "Adjunto de audio" : "");
   const enrichedMessage: InboundMessage = {
     ...inbound,
     content,

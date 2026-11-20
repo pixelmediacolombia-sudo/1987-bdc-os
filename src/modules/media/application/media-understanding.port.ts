@@ -1,4 +1,4 @@
-import type { MediaAttachment, MediaAttachmentKind } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { MediaAttachment, MediaAttachmentKind } from "@/modules/webhooks/domain/inbound-webhook-event";
 import type { MediaClassification } from "@/modules/media/media";
 
 export type MediaUnderstandingResult = {

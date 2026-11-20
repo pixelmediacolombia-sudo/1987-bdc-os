@@ -120,7 +120,7 @@ test("Ticket 8 / integrated decision flow logs WAIT when ASK_OBJECTIVE is termin
             humanHandoff: { enabled: true, triggers: [] },
           },
         },
-        contact: { id: CONTACT_ID, ghlContactId: "ghl-contact-2", consentState: "unknown" },
+        contact: { id: CONTACT_ID, providerContactId: "provider-contact-2", consentState: "unknown" },
         activeFacts: {},
       }),
     },
@@ -136,7 +136,7 @@ test("Ticket 8 / integrated decision flow logs WAIT when ASK_OBJECTIVE is termin
 
   const decision = await service.evaluateForContact({
     tenantId: TENANT_ID,
-    ghlContactId: CONTACT_ID,
+    providerContactId: CONTACT_ID,
     objectiveType: "down_payment",
     requestedAction: "ASK_OBJECTIVE",
     source: "qualification-flow",

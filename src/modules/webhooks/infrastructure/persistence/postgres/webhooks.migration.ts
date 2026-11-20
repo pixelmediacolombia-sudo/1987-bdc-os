@@ -1,12 +1,29 @@
 import type { Pool } from "pg";
 
 export const CREATE_WEBHOOKS_TABLE_SQL = `
+-- Rename existing provider IDs in place so contact/conversation history survives.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='contacts' AND column_name='ghl_contact_id')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='contacts' AND column_name='provider_contact_id') THEN
+    ALTER TABLE public.contacts RENAME COLUMN ghl_contact_id TO provider_contact_id;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='conversations' AND column_name='ghl_conversation_id')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='conversations' AND column_name='provider_conversation_id') THEN
+    ALTER TABLE public.conversations RENAME COLUMN ghl_conversation_id TO provider_conversation_id;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='raw_webhooks' AND column_name='location_id')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='raw_webhooks' AND column_name='account_id') THEN
+    ALTER TABLE public.raw_webhooks RENAME COLUMN location_id TO account_id;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS public.raw_webhooks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES public.tenants(dealer_id) ON DELETE CASCADE,
   external_id TEXT NOT NULL,
   event_type TEXT NOT NULL,
-  location_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
   signature TEXT NOT NULL,
   payload JSONB NOT NULL,
   status TEXT NOT NULL DEFAULT 'received'
@@ -39,8 +56,8 @@ ALTER TABLE public.raw_webhooks
 CREATE INDEX IF NOT EXISTS raw_webhooks_tenant_received_idx
   ON public.raw_webhooks (tenant_id, received_at DESC);
 
-CREATE INDEX IF NOT EXISTS raw_webhooks_location_idx
-  ON public.raw_webhooks (location_id, received_at DESC);
+CREATE INDEX IF NOT EXISTS raw_webhooks_account_idx
+  ON public.raw_webhooks (account_id, received_at DESC);
 
 CREATE TABLE IF NOT EXISTS public.outbound_message_registry (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -174,55 +191,10 @@ CREATE POLICY raw_webhooks_isolation ON public.raw_webhooks
   USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
   WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
 
--- Bootstrap-only routing metadata. This table contains identifiers only and is
--- intentionally separate from tenant-scoped business data because tenants is
--- FORCE ROW LEVEL SECURITY and cannot be queried before app.tenant_id exists.
-CREATE TABLE IF NOT EXISTS public.tenant_location_routes (
-  ghl_location_id TEXT PRIMARY KEY,
-  dealer_id UUID NOT NULL UNIQUE REFERENCES public.tenants(dealer_id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE OR REPLACE FUNCTION public.sync_tenant_location_route()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = pg_catalog, public
-AS $$
-BEGIN
-  INSERT INTO public.tenant_location_routes (ghl_location_id, dealer_id)
-  VALUES (NEW.ghl_location_id, NEW.dealer_id)
-  ON CONFLICT (ghl_location_id) DO UPDATE
-    SET dealer_id = EXCLUDED.dealer_id,
-        updated_at = now();
-  RETURN NEW;
-END;
-$$;
-
+-- Disable obsolete external-CRM tenant routing while preserving its historical table.
 DROP TRIGGER IF EXISTS tenants_sync_location_route ON public.tenants;
-CREATE TRIGGER tenants_sync_location_route
-AFTER INSERT OR UPDATE OF ghl_location_id ON public.tenants
-FOR EACH ROW EXECUTE FUNCTION public.sync_tenant_location_route();
-
-REVOKE ALL ON TABLE public.tenant_location_routes FROM PUBLIC;
-GRANT SELECT ON TABLE public.tenant_location_routes TO bdc;
-
-CREATE OR REPLACE FUNCTION public.resolve_ghl_tenant_id(p_location_id TEXT)
-RETURNS UUID
-LANGUAGE SQL
-STABLE
-SECURITY DEFINER
-SET search_path = pg_catalog, public
-AS $$
-  SELECT dealer_id
-    FROM public.tenant_location_routes
-   WHERE ghl_location_id = p_location_id
-   LIMIT 1;
-$$;
-
-REVOKE ALL ON FUNCTION public.resolve_ghl_tenant_id(TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.resolve_ghl_tenant_id(TEXT) TO bdc;
+DROP FUNCTION IF EXISTS public.sync_tenant_location_route();
+DROP FUNCTION IF EXISTS public.resolve_ghl_tenant_id(TEXT);
 `;
 
 export async function ensureWebhookTables(pool: Pool): Promise<void> {

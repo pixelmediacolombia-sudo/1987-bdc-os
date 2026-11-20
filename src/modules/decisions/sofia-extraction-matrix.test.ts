@@ -3,13 +3,13 @@ import { test } from "node:test";
 import { SofiaConversationEngine, type SofiaFacts } from "@/modules/decisions/domain/sofia-conversation";
 import { LocalPolicyPackProvider } from "@/modules/memory/infrastructure/policies/local-policy-pack.provider";
 
-const policyPromise = new LocalPolicyPackProvider().load("country_club_cars_v8");
+const policyPromise = new LocalPolicyPackProvider().load("shared_dealer_v1");
 
 async function run(message: string, priorFacts: SofiaFacts = {}, options: { turnCount?: number; language?: string; pendingQuestion?: "has_trade_in" | "trade_in_financed" | "has_income_proof" | "first_time_buyer" | "purchase_timeline"; lastResponse?: string; isFirstTurn?: boolean; isAdvertisementMetadata?: boolean; mediaContext?: SofiaFacts extends never ? never : Parameters<SofiaConversationEngine["processTurn"]>[0]["mediaContext"] } = {}) {
   const policy = await policyPromise;
   assert.ok(policy.sofia);
   return new SofiaConversationEngine(policy.sofia).processTurn({
-    dealerName: "Country Club Cars Inc.",
+    dealerName: "Dealer Demo Inc.",
     latestMessage: message,
     priorFacts,
     turnCount: options.turnCount ?? 2,
@@ -66,8 +66,8 @@ caseTest("D-06", async () => assert.equal((await run("todavía lo debo", { ...wi
 
 caseTest("E-01", async () => { const result = await run("¿Qué requisitos piden?", withVehicle); assert.match(result.response ?? "", /identificación|comprobante/i); });
 caseTest("E-02", async () => { const result = await run("¿Cuánto sería la mensualidad?", withVehicle); assert.match(result.response ?? "", /mensualidad|números exactos/i); assert.doesNotMatch(result.response ?? "", /\$\d/); });
-caseTest("E-03", async () => assert.match((await run("¿Dónde están?", withVehicle)).response ?? "", /8606 Wise Ave/i));
-caseTest("E-04", async () => assert.match((await run("¿Abren domingo?", withVehicle)).response ?? "", /domingo cerrado/i));
+caseTest("E-03", async () => assert.match((await run("¿Dónde están?", withVehicle)).response ?? "", /confirmo con el asesor/i));
+caseTest("E-04", async () => { const result = await run("¿Abren domingo?", withVehicle); assert.match(result.response ?? "", /confirmo con el asesor/i); assert.doesNotMatch(result.response ?? "", /domingo cerrado|horario/i); });
 caseTest("E-05", async () => { const result = await run("Tengo 1k, ¿qué documentos necesito?", withVehicle); assert.equal(result.facts.down_payment_declared, 1000); assert.match(result.response ?? "", /identificación|comprobante/i); });
 caseTest("E-06", async () => assert.match((await run("¿Y si no tengo licencia?", withVehicle)).response ?? "", /ITIN/i));
 caseTest("E-07", async () => { const result = await run("hace mucho calor hoy", withVehicle); assert.equal(result.facts.down_payment_declared, undefined); assert.match(result.response ?? "", /enganche|parte de pago/i); });

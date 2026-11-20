@@ -57,7 +57,7 @@ export class RedisWebhookQueue implements WebhookQueuePort {
     if (this.poller) return;
     this.poller = setInterval(() => {
       void this.poll().catch((error: unknown) => {
-        console.error(`GHL webhook queue poll failed: ${error instanceof Error ? error.message : "unknown error"}`);
+        console.error(`Meta webhook queue poll failed: ${error instanceof Error ? error.message : "unknown error"}`);
       });
     }, POLL_MS);
     this.poller.unref?.();
@@ -94,7 +94,7 @@ export class RedisWebhookQueue implements WebhookQueuePort {
         } catch (error) {
           const attempts = stored.attempts + 1;
           const failure = error instanceof Error ? error.message.slice(0, 500) : "unknown error";
-          console.error(`GHL webhook processing failed id=${stored.id} attempt=${attempts}/${this.maxAttempts}: ${failure}`);
+          console.error(`Meta webhook processing failed id=${stored.id} attempt=${attempts}/${this.maxAttempts}: ${failure}`);
           const replacement = JSON.stringify({ ...stored, attempts });
           if (attempts >= this.maxAttempts) {
             const deadLetter = JSON.stringify({
@@ -104,7 +104,7 @@ export class RedisWebhookQueue implements WebhookQueuePort {
               lastError: failure,
             });
             await this.redis.moveSortedSetMember(PENDING_KEY, DEAD_LETTER_KEY, member, this.clock(), deadLetter);
-            console.error(`GHL webhook moved to dead letter id=${stored.id} attempts=${attempts}`);
+            console.error(`Meta webhook moved to dead letter id=${stored.id} attempts=${attempts}`);
           } else {
             const delay = Math.min(this.maxBackoffMs, this.backoffMs * (2 ** (attempts - 1)));
             await this.redis.replaceSortedSetMember(PENDING_KEY, member, this.clock() + delay, replacement);

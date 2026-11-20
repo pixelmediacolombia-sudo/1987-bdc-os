@@ -10,7 +10,7 @@ import type {
   RedisClientPort,
   RedisSetResult,
 } from "@/modules/control/application/ports/redis-client.port";
-import type { InboundMessage } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { InboundMessage } from "@/modules/webhooks/domain/inbound-webhook-event";
 
 class FakeRedis implements RedisClientPort {
   readonly lists = new Map<string, string[]>();

@@ -4,7 +4,6 @@ import type { QualificationFlowService } from "@/modules/control/application/qua
 import type { SofiaStateRepositoryPort } from "@/modules/control/application/ports/sofia-state-repository.port";
 import { SofiaConversationEngine } from "@/modules/decisions/domain/sofia-conversation";
 import type { QuestionLedgerService } from "@/modules/decisions/application/QuestionLedgerService";
-import type { QualificationHandoffPort } from "@/modules/control/application/ports/qualification-handoff.port";
 import type { ConversationAiService } from "@/modules/control/application/conversation-ai.service";
 
 export type InboundConversationOrchestratorComposition = {
@@ -16,7 +15,6 @@ export type InboundConversationOrchestratorComposition = {
   sofiaDealerName?: string;
   qualificationLedger?: QuestionLedgerService;
   qualificationSignalEnabled?: boolean;
-  qualificationHandoff?: QualificationHandoffPort;
   conversationalAi?: ConversationAiService;
   conversationalAiSendEnabled?: boolean;
 };
@@ -39,7 +37,6 @@ export function createInboundConversationOrchestrator(
     input.qualificationLedger,
     input.qualificationSignalEnabled ?? false,
     undefined,
-    input.qualificationHandoff,
     input.conversationalAi,
     input.conversationalAiSendEnabled ?? false,
   );

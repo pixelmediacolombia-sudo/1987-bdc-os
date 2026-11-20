@@ -10,7 +10,7 @@ export type PolicyContext = {
   };
   contact: {
     id: string;
-    ghlContactId: string;
+    providerContactId: string;
     consentState: string;
   };
   lastInboundMessage?: string;

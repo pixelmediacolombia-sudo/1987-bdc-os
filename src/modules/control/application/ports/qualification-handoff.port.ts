@@ -10,7 +10,7 @@ export type QualificationHandoffInput = {
 
 /**
  * Boundary for the CRM handoff. Local tests record this boundary; a provider
- * must be composed explicitly before any real GHL stage mutation is allowed.
+ * must be composed explicitly before any external CRM stage mutation is allowed.
  */
 export interface QualificationHandoffPort {
   markQualified(input: QualificationHandoffInput): Promise<void>;

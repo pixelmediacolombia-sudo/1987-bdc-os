@@ -17,7 +17,7 @@ function context(state: string = "open"): HydratedContext {
       version: "v1", downPayment: { min: null, max: null, currency: "USD" },
       quietHours: { enabled: false, start: null, end: null }, humanHandoff: { enabled: true, triggers: [] },
     } },
-    contact: { id: "contact-1", ghlContactId: "contact-1", preferredLanguage: "es", consentState: "granted" },
+    contact: { id: "contact-1", providerContactId: "contact-1", preferredLanguage: "es", consentState: "granted" },
     conversation: { id: "conversation-1", channel: "WhatsApp", state },
     transcript: [],
     activeFacts: {},
@@ -44,7 +44,7 @@ function inbound(): ConsolidatedInboundConversation {
 test("Sofia response is sent to the connected dealer using the inbound channel", async () => {
   const sent: Array<Record<string, unknown>> = [];
   const flow = {
-    sendSofiaResponse: async (input: Record<string, unknown>) => { sent.push(input); return { providerMessageId: "ghl-message-1" }; },
+    sendSofiaResponse: async (input: Record<string, unknown>) => { sent.push(input); return { providerMessageId: "meta-message-1" }; },
   } as unknown as QualificationFlowService;
   const repository: SofiaStateRepositoryPort = {
     load: async () => undefined,
@@ -88,10 +88,10 @@ test("semantic repetition veto is terminal and does not requeue the inbound batc
   assert.equal(logs.some((message) => message.startsWith("error:")), false);
 });
 
-test("Sofia routes Messenger and Instagram to the supported GHL channel types", async () => {
+test("Sofia routes Messenger and Instagram to the supported Meta channel types", async () => {
   const sent: Array<Record<string, unknown>> = [];
   const flow = {
-    sendSofiaResponse: async (input: Record<string, unknown>) => { sent.push(input); return { providerMessageId: "ghl-message-1" }; },
+    sendSofiaResponse: async (input: Record<string, unknown>) => { sent.push(input); return { providerMessageId: "meta-message-1" }; },
   } as unknown as QualificationFlowService;
   const repository: SofiaStateRepositoryPort = { load: async () => undefined, save: async () => undefined };
   const hydrator = { hydrate: async () => context() } as unknown as ConversationHydrator;
@@ -170,7 +170,7 @@ test("unknown dealer identity stays silent instead of using a global dealer name
     save: async () => { saveCount += 1; },
   };
   const hydrator = {
-    hydrate: async () => ({ ...context(), tenant: { ...context().tenant, ghlLocationId: "unknown-location" } }),
+    hydrate: async () => ({ ...context(), tenant: { ...context().tenant, accountId: "unknown-account" } }),
   } as unknown as ConversationHydrator;
   const orchestrator = new HydratingInboundConversationOrchestrator(hydrator, flow, { engine: new SofiaConversationEngine(), repository });
 

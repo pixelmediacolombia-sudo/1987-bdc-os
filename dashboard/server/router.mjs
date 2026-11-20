@@ -1,60 +1,122 @@
 import express from 'express';
 import path from 'node:path';
-import {decryptContext,createSessions,ORIGIN,LOCATION,AGENT} from './access.mjs';
-import {loadDashboard} from './ghl-live.mjs';
-import {updateContexts} from './conversation-context.mjs';
-import {generateFocus} from './bdc-ai.mjs';
+import { randomUUID } from 'node:crypto';
+import { activeBdcUser, accessibleDealers, loadBdcConversationMessages, loadBdcDashboard } from './bdc-live.mjs';
 
-function contextStorage(pool){
- let ready;
- return {prepare(sql){let values=[];
-  return {bind(...args){values=args;return this;},async all(){const r=await run();return {results:r.rows};},async run(){const r=await run();return {meta:{changes:r.rowCount}};}};
-  async function run(){
-   ready??=pool.query('CREATE TABLE IF NOT EXISTS public.lucki_bdc_dashboard_briefs (id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,payload TEXT NOT NULL,generated_at BIGINT NOT NULL,expires_at BIGINT NOT NULL)').catch(e=>{ready=undefined;throw e;});await ready;
-   let index=0;const text=sql.replaceAll('conversation_briefs','public.lucki_bdc_dashboard_briefs').replace(/\?/g,()=>'$'+(++index));
-   return pool.query(text,values);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function createDashboardRouter({ pool, publicDirectory, outboundSender }) {
+  const router = express.Router();
+  router.use((_request, response, next) => {
+    response.set({
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+    });
+    next();
+  });
+  router.use(express.json({ limit: '16kb' }));
+
+  async function authorize(request, response) {
+    const user = await activeBdcUser(pool, request);
+    if (!user) {
+      response.status(401).json({ error: 'authentication_required' });
+      return null;
+    }
+    const requestedDealerId = request.query.dealerId || request.body?.dealerId;
+    if (requestedDealerId && !UUID.test(String(requestedDealerId))) {
+      response.status(400).json({ error: 'invalid_dealer' });
+      return null;
+    }
+    const dealers = await accessibleDealers(pool, user, requestedDealerId ? String(requestedDealerId) : undefined);
+    if (!dealers.length) {
+      response.status(403).json({ error: 'dealer_access_denied' });
+      return null;
+    }
+    return { user, dealers, dealer: dealers[0] };
   }
- }};
-}
 
-export function createDashboardRouter({pool,publicDirectory,config=process.env}){
- const router=express.Router(),sessions=createSessions(),attempts=new Map(),db=contextStorage(pool);
- router.use((_req,res,next)=>{res.set({'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors ${ORIGIN}; object-src 'none'; base-uri 'self'; form-action 'none'`});next();});
- router.use(express.json({limit:'24kb'}));
- // Login landing is scoped to Johanna; it never changes the subaccount-wide default.
- router.options('/entry',(req,res)=>{if(req.get('origin')!==ORIGIN)return res.sendStatus(403);res.set({'Access-Control-Allow-Origin':ORIGIN,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Content-Type','Vary':'Origin'});res.sendStatus(204);});
- router.post('/entry',(req,res)=>{
-  if(req.get('origin')!==ORIGIN)return res.status(403).json({error:'origin'});
-  res.set({'Access-Control-Allow-Origin':ORIGIN,'Vary':'Origin'});
-  try{const user=decryptContext(req.body?.encryptedData,config.GHL_APP_SHARED_SECRET);res.json({entry:user.userId===AGENT?'/v2/location/'+LOCATION+'/dashboard/6add8337dc4b01c8b1e5bd51':null});}catch{return res.status(403).json({error:'access_denied'});}
- });
- router.post('/session',(req,res)=>{
-  if(req.get('origin')!=='https://bdc.1987marketing.com')return res.status(403).json({error:'origin'});
-  const now=Date.now(),ip=req.ip||'unknown';for(const[k,v]of attempts)if(v.until<now)attempts.delete(k);
-  const budget=attempts.get(ip)||{count:0,until:now+60000};budget.count++;attempts.set(ip,budget);
-  if(budget.count>30||attempts.size>500)return res.status(429).json({error:'retry_later'});
-  if(!config.GHL_APP_SHARED_SECRET)return res.status(503).json({error:'access_not_configured'});
-  try{const user=decryptContext(req.body?.encryptedData,config.GHL_APP_SHARED_SECRET);return res.json({token:sessions.issue(user),expiresIn:1800});}catch{return res.status(403).json({error:'access_denied'});}
- });
- router.use('/api',(req,res,next)=>{
-  const token=req.get('authorization')?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
-  if(!token||!sessions.verify(token))return res.status(401).json({error:'authentication_required'});
-  if(req.method!=='GET'&&req.get('origin')!=='https://bdc.1987marketing.com')return res.status(403).json({error:'origin'});
-  if(!config.BDC_GHL_READ_TOKEN)return res.status(503).json({error:'read_connection_not_configured'});
-  next();
- });
- const dashboard=()=>loadDashboard(config.BDC_GHL_READ_TOKEN,LOCATION);
- router.get('/api/dashboard',async(_req,res)=>{try{res.json(await dashboard());}catch{res.status(502).json({error:'source_unavailable'});}});
- const context=readOnly=>async(_req,res)=>{try{
-  const key=config.BDC_OPENAI_API_KEY||config.CONVERSATIONAL_MODEL_API_KEY;
-  if(!key)return res.status(503).json({error:'needs_configuration'});
-  const d=await dashboard();if(!d.conversations)return res.status(502).json({error:'source_unavailable'});
-  res.json(await updateContexts({db,token:config.BDC_GHL_READ_TOKEN,key,d,readOnly}));
- }catch{res.status(502).json({error:'source_unavailable'});}};
- router.get('/api/context',context(true));router.post('/api/context',context(false));
- router.post('/api/focus',async(_req,res)=>{try{const key=config.BDC_OPENAI_API_KEY||config.CONVERSATIONAL_MODEL_API_KEY;if(!key)return res.status(503).json({error:'needs_configuration'});res.json(await generateFocus(key,await dashboard()));}catch{res.status(503).json({error:'unavailable'});}});
- router.use('/api',(_req,res)=>res.status(404).json({error:'not_found'}));
- router.use(express.static(publicDirectory,{index:'index.html',setHeaders:res=>res.set('Cache-Control','private, no-store')}));
- router.get('/',(_req,res)=>res.sendFile(path.join(publicDirectory,'index.html')));
- return router;
+  router.get('/api/dashboard', async (request, response) => {
+    try {
+      const access = await authorize(request, response);
+      if (!access) return;
+      const dashboard = await loadBdcDashboard(pool, access.dealer.id);
+      response.json({
+        status: 'connected',
+        updatedAt: dashboard.updatedAt,
+        user: { id: access.user.id, name: access.user.name, role: access.user.role },
+        dealers: access.dealers,
+        selectedDealerId: access.dealer.id,
+        dealer: dashboard.dealer,
+        conversations: dashboard.conversations,
+      });
+    } catch {
+      response.status(503).json({ error: 'dashboard_unavailable' });
+    }
+  });
+
+  router.get('/api/conversations/:conversationId/messages', async (request, response) => {
+    try {
+      const access = await authorize(request, response);
+      if (!access) return;
+      if (!UUID.test(request.params.conversationId)) return response.status(400).json({ error: 'invalid_conversation' });
+      const messages = await loadBdcConversationMessages(pool, access.dealer.id, request.params.conversationId);
+      response.json({ messages });
+    } catch {
+      response.status(503).json({ error: 'conversation_unavailable' });
+    }
+  });
+
+  router.post('/api/conversations/:conversationId/messages', async (request, response) => {
+    try {
+      const origin = request.get('origin');
+      if (origin && new URL(origin).host !== request.get('host')) return response.status(403).json({ error: 'origin' });
+      const access = await authorize(request, response);
+      if (!access) return;
+      if (!outboundSender) return response.status(503).json({ error: 'messaging_not_configured' });
+      if (!UUID.test(request.params.conversationId)) return response.status(400).json({ error: 'invalid_conversation' });
+      const content = typeof request.body?.content === 'string' ? request.body.content.trim() : '';
+      if (!content || content.length > 4000) return response.status(400).json({ error: 'invalid_message' });
+      const client = await pool.connect();
+      let message;
+      try {
+        await client.query('BEGIN');
+        await client.query("SELECT set_config('app.tenant_id', $1, true)", [access.dealer.id]);
+        const result = await client.query(
+          `SELECT contact.provider_contact_id AS contact_id, conversation.channel
+             FROM public.conversations conversation
+             JOIN public.contacts contact ON contact.id = conversation.contact_id
+            WHERE conversation.tenant_id = $1 AND conversation.id = $2
+            LIMIT 1`,
+          [access.dealer.id, request.params.conversationId],
+        );
+        message = result.rows[0];
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+      if (!message) return response.status(404).json({ error: 'conversation_not_found' });
+      const channels = { messenger: 'FB', facebook: 'FB', fb: 'FB', instagram: 'IG', ig: 'IG', whatsapp: 'WhatsApp' };
+      const channel = channels[String(message.channel).toLowerCase()];
+      if (!channel) return response.status(422).json({ error: 'unsupported_channel' });
+      const delivered = await outboundSender.send({
+        tenantId: access.dealer.id,
+        contactId: message.contact_id,
+        channel,
+        content,
+        externalId: randomUUID(),
+      });
+      response.status(202).json({ queued: true, providerMessageId: delivered.providerMessageId });
+    } catch {
+      response.status(502).json({ error: 'message_delivery_failed' });
+    }
+  });
+
+  router.use(express.static(publicDirectory, { index: 'index.html', setHeaders: response => response.set('Cache-Control', 'private, no-store') }));
+  router.get('/', (_request, response) => response.sendFile(path.join(publicDirectory, 'index.html')));
+  return router;
 }

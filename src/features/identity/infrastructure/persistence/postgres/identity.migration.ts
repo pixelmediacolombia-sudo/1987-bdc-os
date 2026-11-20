@@ -43,31 +43,8 @@ CREATE INDEX IF NOT EXISTS app_sessions_user_expiry_idx
   WHERE revoked_at IS NULL;
 
 ALTER TABLE public.tenants ALTER COLUMN ghl_location_id DROP NOT NULL;
-
-CREATE OR REPLACE FUNCTION public.sync_tenant_location_route()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = pg_catalog, public
-AS $function$
-BEGIN
-  IF TG_OP = 'UPDATE'
-     AND OLD.ghl_location_id IS NOT NULL
-     AND OLD.ghl_location_id IS DISTINCT FROM NEW.ghl_location_id THEN
-    DELETE FROM public.tenant_location_routes
-     WHERE dealer_id = NEW.dealer_id AND ghl_location_id = OLD.ghl_location_id;
-  END IF;
-
-  IF NULLIF(btrim(NEW.ghl_location_id), '') IS NOT NULL THEN
-    INSERT INTO public.tenant_location_routes (ghl_location_id, dealer_id)
-    VALUES (btrim(NEW.ghl_location_id), NEW.dealer_id)
-    ON CONFLICT (ghl_location_id) DO UPDATE
-      SET dealer_id = EXCLUDED.dealer_id,
-          updated_at = now();
-  END IF;
-  RETURN NEW;
-END;
-$function$;
+DROP TRIGGER IF EXISTS tenants_sync_location_route ON public.tenants;
+DROP FUNCTION IF EXISTS public.sync_tenant_location_route();
 
 CREATE TABLE IF NOT EXISTS public.dealer_invitations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

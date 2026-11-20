@@ -39,7 +39,6 @@ export type PolicyPack = {
 export interface HydratedContext {
   tenant: {
     id: string;
-    ghlLocationId?: string;
     dealerName?: string;
     financialPolicy?: Record<string, unknown>;
     facebookPageId?: string;
@@ -51,7 +50,7 @@ export interface HydratedContext {
   };
   contact: {
     id: string;
-    ghlContactId: string;
+    providerContactId: string;
     preferredLanguage: string;
     consentState: string;
   };

@@ -4,8 +4,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { SofiaConversationEngine } = require("../dist/modules/decisions/domain/sofia-conversation");
 const { ConversationAiService } = require("../dist/modules/control/application/conversation-ai.service");
-const { OpenAICompatibleConversationalModel } = require("../dist/features/ghl-oauth/infrastructure/ghl/conversational-model.adapter");
-const policy = require("../policies/country_club_cars_v8.json");
+const { OpenAICompatibleConversationalModel } = require("../dist/modules/ai/infrastructure/openai-compatible-conversational-model.adapter");
+const policy = require("../policies/shared_dealer_v1.json");
 
 const apiKey = String(process.env.CONVERSATIONAL_MODEL_API_KEY || "").trim();
 const aiEnabled = /^(1|true|yes)$/i.test(String(process.env.CONVERSATIONAL_AI_ENABLED || ""));
@@ -91,17 +91,17 @@ async function runScenario(scenario, records) {
   for (let index = 0; index < scenario.turns.length; index += 1) {
     const latestMessage = scenario.turns[index];
     const result = await service.process({
-      tenantId: "local-country-club-extraction-v3",
+      tenantId: "local-shared-dealer-extraction-v3",
       contactId: scenario.id,
       latestMessage,
       transcript,
       channel: scenario.channel,
       language: "es",
-      dealerName: "Country Club Cars Inc.",
+      dealerName: "Dealer Demo Inc.",
       priorFacts: facts,
       missingObjectives: pendingObjectives(facts, scenario.channel),
       ruleTurn: (candidateFacts) => engine.processTurn({
-        dealerName: "Country Club Cars Inc.", latestMessage, priorFacts: candidateFacts,
+        dealerName: "Dealer Demo Inc.", latestMessage, priorFacts: candidateFacts,
         contactChannel: scenario.channel, language: "es", turnCount: index + 1,
         isFirstTurn: index === 0, lastResponse: previous,
       }),

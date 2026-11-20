@@ -39,12 +39,11 @@ export type SofiaPolicy = {
 };
 
 export type SofiaKnowledge = {
-  id: "country_club_cars";
+  id: "shared_dealer";
   formalAddress: true;
-  dealer: {
-    name: string;
-    address: string;
-    hours: { es: string; en: string };
+  dealer?: {
+    address?: string;
+    hours?: { es: string; en: string };
   };
   modelCategories: Record<string, string>;
   requirements: { es: string; en: string };
@@ -105,7 +104,7 @@ export class SofiaConversationEngine {
   }
 
   processTurn(input: SofiaTurnInput): SofiaTurnResult {
-    if (this.policy.knowledge?.id === "country_club_cars") {
+    if (this.policy.knowledge) {
       return processDealerTurn(input, this.policy, this.policy.knowledge);
     }
     const extractedFacts = extractFacts(input.latestMessage, input.priorFacts);
@@ -228,13 +227,13 @@ function processDealerTurn(input: SofiaTurnInput, policy: SofiaPolicy, knowledge
 
   const mediaResponse = dealerMediaResponse(input, facts, language);
   if (mediaResponse) {
-    const opening = firstTurn ? dealerOpening(facts, knowledge, language, directAnswer) : [];
+    const opening = firstTurn ? dealerOpening(facts, input.dealerName, language, directAnswer) : [];
     const question = dealerNextQuestion(facts, input.contactChannel, policy, language, input.lastResponse);
     return makeResult(facts, leadLevel, [...opening, mediaResponse, question].filter(Boolean) as string[], "ask", contactCaptured, hardRuleFailure);
   }
 
   if (firstTurn) {
-    const opening = dealerOpening(facts, knowledge, language, directAnswer);
+    const opening = dealerOpening(facts, input.dealerName, language, directAnswer);
     const staircase = dealerNegotiationStaircase(facts, input.priorFacts, policy, knowledge, language, extractedFacts);
     if (staircase) {
       return makeResult(facts, staircase.leadLevel ?? leadLevel, [...opening, ...staircase.messages], staircase.nextStep, contactCaptured, false);
@@ -290,13 +289,14 @@ function processDealerTurn(input: SofiaTurnInput, policy: SofiaPolicy, knowledge
 
 function dealerOpening(
   facts: SofiaFacts,
-  knowledge: SofiaKnowledge,
+  dealerName: string,
   language: "es" | "en",
   directAnswer?: string,
 ): string[] {
+  const name = dealerName.trim() || (language === "en" ? "the dealership" : "el dealer");
   const greeting = language === "en"
-    ? `Hi, this is Sofía with ${knowledge.dealer.name.replace(/[.!?]+$/, "")}.`
-    : `Hola, soy Sofía de ${knowledge.dealer.name.replace(/[.!?]+$/, "")}.`;
+    ? `Hi, this is Sofía with ${name.replace(/[.!?]+$/, "")}.`
+    : `Hola, soy Sofía de ${name.replace(/[.!?]+$/, "")}.`;
   const vehicle = facts.vehicle_model_interest ?? (facts.vehicle_category ? displayDealerCategory(facts.vehicle_category, language) : undefined);
   const vehicleLine = vehicle
     ? language === "en"
@@ -552,6 +552,7 @@ function dealerAnswer(message: string, facts: SofiaFacts, policy: SofiaPolicy, k
     return `${knowledge.requirements[language]}${downPaymentLine}`;
   }
   if (/dónde|donde|ubicación|ubicacion|horario|domingo|abierto|where are you|hours|open/.test(normalized)) {
+    if (!knowledge.dealer?.address || !knowledge.dealer.hours) return dealerSafeExit(knowledge, language);
     return language === "en"
       ? `${knowledge.dealer.address}. Our hours are ${knowledge.dealer.hours.en}.`
       : `Estamos en ${knowledge.dealer.address}. Nuestro horario es ${knowledge.dealer.hours.es}.`;
@@ -726,7 +727,7 @@ function hasVerifiedHardRules(facts: SofiaFacts): boolean {
 }
 
 export function classifyLead(facts: SofiaFacts, policy: SofiaPolicy = DEFAULT_SOFIA_POLICY): SofiaLeadLevel {
-  if (policy.knowledge?.id === "country_club_cars") return classifyDealerLead(facts, policy);
+  if (policy.knowledge) return classifyDealerLead(facts, policy);
   if (!hasContactPath(facts)) return "C";
   if (hasHardRuleFailure(facts)) return "C";
   const range = rangeFor(facts.vehicle_category, policy);

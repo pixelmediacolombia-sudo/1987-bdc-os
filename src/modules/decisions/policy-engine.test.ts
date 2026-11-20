@@ -24,7 +24,7 @@ const QUIET_POLICY_CONTEXT: PolicyContext = {
   },
   contact: {
     id: "00000000-0000-0000-0000-000000000002",
-    ghlContactId: "ghl-contact-2",
+    providerContactId: "meta-test-contact-2",
     consentState: "unknown",
   },
   activeFacts: {},

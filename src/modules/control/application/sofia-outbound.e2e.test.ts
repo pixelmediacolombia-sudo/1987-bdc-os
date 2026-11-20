@@ -13,7 +13,7 @@ test("application E2E: inbound dealer turn is persisted and delivered through th
   const flow = {
     sendSofiaResponse: async (input: { tenantId: string; contactId: string; channel?: string; content: string }) => {
       deliveries.push(input);
-      return { providerMessageId: "controlled-ghl-provider-message" };
+      return { providerMessageId: "controlled-meta-test-provider-message" };
     },
   } as unknown as QualificationFlowService;
   const repository: SofiaStateRepositoryPort = {
@@ -27,7 +27,7 @@ test("application E2E: inbound dealer turn is persisted and delivered through th
       version: "v1", downPayment: { min: null, max: null, currency: "USD" },
       quietHours: { enabled: false, start: null, end: null }, humanHandoff: { enabled: true, triggers: [] },
     } },
-    contact: { id: "ghl-contact-1", ghlContactId: "ghl-contact-1", preferredLanguage: "es", consentState: "granted" },
+    contact: { id: "meta-test-contact-1", providerContactId: "meta-test-contact-1", preferredLanguage: "es", consentState: "granted" },
     conversation: { id: "conversation-1", channel: "WhatsApp", state: "open" },
     transcript: [], activeFacts: {}, objectivesLedger: [],
   };
@@ -40,11 +40,11 @@ test("application E2E: inbound dealer turn is persisted and delivered through th
 
   await orchestrator.process({
     tenantId: "dealer-tenant-1",
-    contactId: "ghl-contact-1",
+    contactId: "meta-test-contact-1",
     consolidatedText: "Hola, busco una SUV.",
     messages: [{
       externalId: "real-flow-boundary-1",
-      contactId: "ghl-contact-1",
+      contactId: "meta-test-contact-1",
       channel: "WhatsApp",
       content: "Hola, busco una SUV.",
       semanticHash: "inbound-hash",
@@ -55,7 +55,7 @@ test("application E2E: inbound dealer turn is persisted and delivered through th
   assert.equal(saved.length, 1);
   assert.equal(deliveries.length, 1);
   assert.equal(deliveries[0]?.tenantId, "dealer-tenant-1");
-  assert.equal(deliveries[0]?.contactId, "ghl-contact-1");
+  assert.equal(deliveries[0]?.contactId, "meta-test-contact-1");
   assert.equal(deliveries[0]?.channel, "WhatsApp");
   assert.equal(deliveries[0]?.content, saved[0]);
 });

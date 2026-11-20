@@ -25,7 +25,7 @@ export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
                 state.has_trade_in, state.hard_rule_failure, state.last_response
            FROM public.sofia_conversation_state AS state
            JOIN public.contacts AS contact ON contact.id = state.contact_id
-          WHERE state.tenant_id = $1 AND contact.ghl_contact_id = $2
+          WHERE state.tenant_id = $1 AND contact.provider_contact_id = $2
           LIMIT 1`,
         [tenantId, contactId],
       );
@@ -60,7 +60,7 @@ export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
            (tenant_id, contact_id, turn_count, fields, lead_level, push_accepted, has_trade_in, hard_rule_failure, last_response, last_inbound_at)
          SELECT $1, contact.id, $3, $4::jsonb, $5, $6, $7, $8, $9, now()
            FROM public.contacts AS contact
-          WHERE contact.tenant_id = $1 AND contact.ghl_contact_id = $2
+          WHERE contact.tenant_id = $1 AND contact.provider_contact_id = $2
          ON CONFLICT (tenant_id, contact_id) DO UPDATE SET
            turn_count = EXCLUDED.turn_count,
            fields = EXCLUDED.fields,
@@ -80,7 +80,7 @@ export class PostgresSofiaStateRepository implements SofiaStateRepositoryPort {
              (tenant_id, contact_id, key, value, active, observed_at)
            SELECT $1, contact.id, $3, $4, true, now()
              FROM public.contacts AS contact
-            WHERE contact.tenant_id = $1 AND contact.ghl_contact_id = $2
+            WHERE contact.tenant_id = $1 AND contact.provider_contact_id = $2
            ON CONFLICT (tenant_id, contact_id, key) WHERE active = true DO UPDATE SET
              value = EXCLUDED.value,
              active = true,

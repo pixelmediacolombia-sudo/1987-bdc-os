@@ -17,7 +17,7 @@ export class InMemoryWebhookQueue implements WebhookQueuePort {
     setImmediate(() => {
       void task()
         .catch((error: unknown) => {
-          console.error("GHL webhook background processing failed", error instanceof Error ? error.message : "unknown error");
+          console.error("Meta webhook background processing failed", error instanceof Error ? error.message : "unknown error");
         })
         .finally(() => this.inFlight.delete(key));
     });

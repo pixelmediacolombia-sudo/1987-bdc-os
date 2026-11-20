@@ -43,7 +43,7 @@ export class PolicyEngine {
     const lastInboundMessage = overrides.inboundMessage ?? context.lastInboundMessage;
 
     if (controlTag === "stop_ai") {
-      return this.stopDecision(localTimestamp, "AI stopped: Compliance Tag 'stop_ai' detected in GHL");
+      return this.stopDecision(localTimestamp, "AI stopped: compliance signal 'stop_ai' detected");
     }
     if (["denied", "revoked"].includes(context.contact.consentState.trim().toLowerCase())) {
       return this.stopDecision(localTimestamp, `AI stopped: consent_state=${context.contact.consentState}`);

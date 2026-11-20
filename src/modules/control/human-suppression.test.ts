@@ -3,12 +3,13 @@ import { test } from "node:test";
 import { BurstBufferService, type BurstBufferLogger } from "@/modules/control/application/burst-buffer.service";
 import { ContactMutex } from "@/modules/control/application/contact-mutex";
 import { HumanSuppressionService } from "@/modules/control/application/human-suppression.service";
+import { testMetaEvent } from "@/modules/webhooks/test-meta-event";
 import { HydratingInboundConversationOrchestrator } from "@/modules/control/application/hydrating-inbound-conversation-orchestrator";
 import type { InboundConversationOrchestratorPort } from "@/modules/control/application/ports/inbound-conversation-orchestrator.port";
 import type { RedisClientPort, RedisSetResult } from "@/modules/control/application/ports/redis-client.port";
 import type { WebhookRepository } from "@/modules/webhooks/application/ports/webhook-repository.port";
-import { ProcessGHLWebhookUseCase } from "@/modules/webhooks/application/process-ghl-webhook.use-case";
-import type { GhlWebhookEvent } from "@/modules/webhooks/domain/ghl-webhook-event";
+import { ProcessInboundWebhookUseCase } from "@/modules/webhooks/application/process-inbound-webhook.use-case";
+import type { InboundWebhookEvent } from "@/modules/webhooks/domain/inbound-webhook-event";
 
 const CONTACT_ID = "contact-human-42";
 const TENANT_ID = "tenant-42";
@@ -89,9 +90,9 @@ class CapturingOrchestrator implements InboundConversationOrchestratorPort {
 class RlsAwareWebhookRepository implements WebhookRepository {
   readonly trace: string[] = [];
   state = "open";
-  interruption?: GhlWebhookEvent["humanInterruption"];
+  interruption?: InboundWebhookEvent["humanInterruption"];
 
-  async process(event: GhlWebhookEvent): Promise<{ duplicate: boolean; tenantId: string }> {
+  async process(event: InboundWebhookEvent): Promise<{ duplicate: boolean; tenantId: string }> {
     this.trace.push("BEGIN", "set_config", "SELECT/UPDATE under tenant context");
     this.interruption = event.humanInterruption;
     if (event.humanInterruption) this.state = "paused";
@@ -134,17 +135,12 @@ test("cancela el búfer, temporizador y flujo IA cuando aparece human_takeover",
 
   const repository = new RlsAwareWebhookRepository();
   const suppression = new HumanSuppressionService(burstBuffer, mutex, { info: (message) => logs.push(message) });
-  await new ProcessGHLWebhookUseCase(repository, burstBuffer, suppression).execute({
-    payload: {
-      eventId: "contact-update-1",
-      eventType: "ContactUpdate",
-      locationId: "location-42",
-      contactId: CONTACT_ID,
-      tags: ["human_takeover"],
-    },
-    rawBody: Buffer.from("{}"),
-    signature: "test-signature",
-  });
+  await new ProcessInboundWebhookUseCase(repository, burstBuffer, suppression).execute(testMetaEvent({
+    externalId: "contact-update-1",
+    contactId: CONTACT_ID,
+    eventType: "meta.control.human_takeover",
+    humanInterruption: { trigger: "control_tag", contactId: CONTACT_ID, controlTag: "human_takeover" },
+  }));
 
   assert.equal(redis.lists.has(`buffer:messages:${CONTACT_ID}`), false);
   assert.equal(redis.values.has(`buffer:timer:${CONTACT_ID}`), false);
@@ -165,22 +161,17 @@ test("cancela el búfer, temporizador y flujo IA cuando aparece human_takeover",
 
 test("detecta un mensaje outbound enviado por staff como takeover humano", async () => {
   const repository = new RlsAwareWebhookRepository();
-  const useCase = new ProcessGHLWebhookUseCase(repository);
+  const useCase = new ProcessInboundWebhookUseCase(repository);
 
-  await useCase.execute({
-    payload: {
-      eventId: "staff-message-1",
-      eventType: "OutboundMessage",
-      locationId: "location-42",
-      contactId: CONTACT_ID,
-      conversationId: "conversation-42",
-      direction: "outbound",
-      sender_type: "staff",
-      content: "Te atiendo personalmente.",
-    },
-    rawBody: Buffer.from("{}"),
-    signature: "test-signature",
-  });
+  await useCase.execute(testMetaEvent({
+    externalId: "staff-message-1",
+    contactId: CONTACT_ID,
+    conversationId: "conversation-42",
+    eventType: "meta.message.echo",
+    humanInterruption: { trigger: "staff_message", contactId: CONTACT_ID, conversationId: "conversation-42", staffMessage: {
+      externalId: "staff-message-1", contactId: CONTACT_ID, conversationId: "conversation-42", channel: "whatsapp", content: "Te atiendo personalmente.", semanticHash: "staff-message-1",
+    } },
+  }));
 
   assert.equal(repository.interruption?.trigger, "staff_message");
   assert.equal(repository.interruption?.staffMessage?.content, "Te atiendo personalmente.");
@@ -191,18 +182,15 @@ test("outbound oficial sin sender_type pausa por defecto si no existe registro d
   const repository = new RlsAwareWebhookRepository();
   let suppressions = 0;
   const suppression = { suppress: async () => { suppressions += 1; } };
-  await new ProcessGHLWebhookUseCase(repository, undefined, suppression).execute({
-    payload: {
-      type: "OutboundMessage",
-      locationId: "location-42",
-      id: "provider-message-unknown",
-      contactId: CONTACT_ID,
-      conversationId: "conversation-42",
-      message: { body: "Mensaje outbound sin registro" },
-    },
-    rawBody: Buffer.from("{}"),
-    signature: "test-signature",
-  });
+  await new ProcessInboundWebhookUseCase(repository, undefined, suppression).execute(testMetaEvent({
+    externalId: "provider-message-unknown",
+    contactId: CONTACT_ID,
+    conversationId: "conversation-42",
+    eventType: "meta.message.echo",
+    humanInterruption: { trigger: "staff_message", contactId: CONTACT_ID, conversationId: "conversation-42", staffMessage: {
+      externalId: "provider-message-unknown", contactId: CONTACT_ID, conversationId: "conversation-42", channel: "whatsapp", content: "Mensaje outbound sin registro", semanticHash: "unknown-outbound",
+    } },
+  }));
   assert.equal(repository.interruption?.trigger, "staff_message");
   assert.equal(suppressions, 1);
 });
@@ -212,17 +200,14 @@ test("un outbound registrado por 1987 no dispara supresión", async () => {
     process: async () => ({ duplicate: false, tenantId: TENANT_ID, suppressAi: false }),
   };
   let suppressions = 0;
-  await new ProcessGHLWebhookUseCase(repository, undefined, { suppress: async () => { suppressions += 1; } }).execute({
-    payload: {
-      type: "OutboundMessage",
-      locationId: "location-42",
-      id: "provider-message-1987",
-      contactId: CONTACT_ID,
-      message: { body: "Respuesta de 1987" },
-    },
-    rawBody: Buffer.from("{}"),
-    signature: "test-signature",
-  });
+  await new ProcessInboundWebhookUseCase(repository, undefined, { suppress: async () => { suppressions += 1; } }).execute(testMetaEvent({
+    externalId: "provider-message-1987",
+    contactId: CONTACT_ID,
+    eventType: "meta.message.echo",
+    humanInterruption: { trigger: "staff_message", contactId: CONTACT_ID, staffMessage: {
+      externalId: "provider-message-1987", contactId: CONTACT_ID, channel: "whatsapp", content: "Respuesta de 1987", semanticHash: "registered-outbound",
+    } },
+  }));
   assert.equal(suppressions, 0);
 });
 
@@ -250,25 +235,13 @@ test("una conversación pausada no reactiva IA con un nuevo inbound", async () =
 test("la eliminación y reaplicación de human_takeover son eventos independientes del mismo contacto", async () => {
   const repository = new RlsAwareWebhookRepository();
   let suppressions = 0;
-  const useCase = new ProcessGHLWebhookUseCase(repository, undefined, {
+  const useCase = new ProcessInboundWebhookUseCase(repository, undefined, {
     suppress: async () => { suppressions += 1; },
   });
 
-  await useCase.execute({
-    payload: { eventId: "takeover-apply-1", eventType: "ContactTagUpdate", locationId: "location-42", contactId: CONTACT_ID, tags: ["human_takeover"] },
-    rawBody: Buffer.from("apply-1"),
-    signature: "test-signature",
-  });
-  await useCase.execute({
-    payload: { eventId: "takeover-remove-1", eventType: "ContactTagUpdate", locationId: "location-42", contactId: CONTACT_ID, tags: [] },
-    rawBody: Buffer.from("remove-1"),
-    signature: "test-signature",
-  });
-  await useCase.execute({
-    payload: { eventId: "takeover-apply-2", eventType: "ContactTagUpdate", locationId: "location-42", contactId: CONTACT_ID, tags: [{ name: "human_takeover" }] },
-    rawBody: Buffer.from("apply-2"),
-    signature: "test-signature",
-  });
+  await useCase.execute(testMetaEvent({ externalId: "takeover-apply-1", contactId: CONTACT_ID, eventType: "meta.control.human_takeover", humanInterruption: { trigger: "control_tag", contactId: CONTACT_ID, controlTag: "human_takeover" } }));
+  await useCase.execute(testMetaEvent({ externalId: "takeover-remove-1", contactId: CONTACT_ID, eventType: "meta.control.tag_removed" }));
+  await useCase.execute(testMetaEvent({ externalId: "takeover-apply-2", contactId: CONTACT_ID, eventType: "meta.control.human_takeover", humanInterruption: { trigger: "control_tag", contactId: CONTACT_ID, controlTag: "human_takeover" } }));
 
   assert.equal(suppressions, 2);
   assert.equal(repository.state, "paused");
@@ -293,24 +266,21 @@ test("takeover pausa, un nuevo inbound no activa IA y el búfer queda consumido 
       return setTimeout(() => undefined, 60_000).unref();
     },
   });
-  const useCase = new ProcessGHLWebhookUseCase(
+  const useCase = new ProcessInboundWebhookUseCase(
     repository,
     burstBuffer,
     new HumanSuppressionService(burstBuffer, mutex),
   );
 
-  await useCase.execute({
-    payload: { eventId: "takeover-sequence-1", eventType: "ContactTagUpdate", locationId: "location-42", contactId: CONTACT_ID, tags: ["human_takeover"] },
-    rawBody: Buffer.from("takeover-sequence-1"),
-    signature: "test-signature",
-  });
+  await useCase.execute(testMetaEvent({ externalId: "takeover-sequence-1", contactId: CONTACT_ID, eventType: "meta.control.human_takeover", humanInterruption: { trigger: "control_tag", contactId: CONTACT_ID, controlTag: "human_takeover" } }));
   assert.equal(repository.state, "paused");
 
-  await useCase.execute({
-    payload: { eventId: "inbound-after-takeover-1", eventType: "InboundMessage", direction: "inbound", locationId: "location-42", contactId: CONTACT_ID, messageType: "WhatsApp", content: "Nuevo mensaje después del takeover" },
-    rawBody: Buffer.from("inbound-after-takeover-1"),
-    signature: "test-signature",
-  });
+  await useCase.execute(testMetaEvent({
+    externalId: "inbound-after-takeover-1",
+    contactId: CONTACT_ID,
+    eventType: "meta.message.received",
+    inboundMessage: { contactId: CONTACT_ID, channel: "whatsapp", content: "Nuevo mensaje después del takeover" },
+  }));
   assert.ok(scheduledCallback);
   scheduledCallback();
   await new Promise<void>((resolve) => setImmediate(resolve));

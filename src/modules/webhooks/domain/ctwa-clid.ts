@@ -1,4 +1,4 @@
-import type { JsonObject } from "@/modules/webhooks/domain/ghl-webhook-event";
+import type { JsonObject } from "@/modules/webhooks/domain/inbound-webhook-event";
 
 export type CtwaAttribution = {
   ctwaClid?: string;
@@ -26,9 +26,9 @@ function stringAt(payload: JsonObject, paths: string[]): string | undefined {
 }
 
 /**
- * GHL has used more than one nesting/name convention for WhatsApp referral
- * data. Keep the raw webhook as the source of truth and normalize only the
- * queryable contact attribution fields here.
+ * Meta webhook versions expose WhatsApp referral data under more than one
+ * nesting convention. Keep the raw webhook as the source of truth and
+ * normalize only the queryable contact attribution fields here.
  */
 export function extractCtwaAttribution(payload: JsonObject): CtwaAttribution {
   const ctwaClid = stringAt(payload, [

@@ -2,7 +2,6 @@ import type { MessageDirection, MessageSenderType, TenantFeatureFlags } from "@/
 
 export type TenantProfile = {
   id: string;
-  ghlLocationId?: string;
   dealerName?: string;
   financialPolicy?: Record<string, unknown>;
   facebookPageId?: string;
@@ -15,7 +14,7 @@ export type TenantProfile = {
 export type ContactConversation = {
   contact: {
     id: string;
-    ghlContactId: string;
+    providerContactId: string;
     preferredLanguage: string;
     consentState: string;
   };
@@ -44,7 +43,7 @@ export type ObjectiveLedgerEntry = {
 
 export interface HydrationRepositoryPort {
   loadTenant(tenantId: string): Promise<TenantProfile>;
-  loadContactConversation(tenantId: string, ghlContactId: string): Promise<ContactConversation>;
+  loadContactConversation(tenantId: string, providerContactId: string): Promise<ContactConversation>;
   loadRecentTranscript(tenantId: string, conversationId: string, limit: number): Promise<RecentTranscriptMessage[]>;
   loadActiveFacts(tenantId: string, contactId: string): Promise<ActiveFact[]>;
   loadObjectives(tenantId: string, contactId: string): Promise<ObjectiveLedgerEntry[]>;

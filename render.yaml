@@ -27,8 +27,6 @@ services:
         value: "false"
       - key: SOFIA_ENABLED
         value: "false"
-      - key: SOFIA_DEALER_NAME
-        value: Koons Automotive of Culpeper
       - key: CONVERSATIONAL_AI_ENABLED
         value: "false"
       - key: CONVERSATIONAL_AI_SEND_ENABLED
@@ -43,8 +41,6 @@ services:
         value: gpt-5.6-luna
       - key: CONVERSATIONAL_MODEL_TIMEOUT_MS
         value: "20000"
-      - key: COUNTRY_CLUB_GHL_LOCATION_ID
-        value: k9DePpsNBu9qWT1C6pW0
       - key: MEDIA_UNDERSTANDING_ENABLED
         value: "false"
       - key: WHISPER_CLI_PATH
@@ -57,33 +53,7 @@ services:
         value: "5000"
       - key: META_CAPI_EVENT_NAME
         value: Lead_Calificado
-      - key: META_CAPI_DATASET_COUNTRY_CLUB
-        sync: false
-      - key: META_CAPI_TOKEN_COUNTRY_CLUB
-        sync: false
-      - key: META_CAPI_DATASET_OFFLEASE
-        sync: false
-      - key: META_CAPI_TOKEN_OFFLEASE
-        sync: false
-      - key: META_CAPI_DATASET_KOONS_CULPEPER
-        sync: false
-      - key: META_CAPI_TOKEN_KOONS_CULPEPER
-        sync: false
-      - key: META_CAPI_DATASET_KOONS_FBURG_ES
-        sync: false
-      - key: META_CAPI_TOKEN_KOONS_FBURG_ES
-        sync: false
-      - key: META_CAPI_DATASET_ACTION
-        sync: false
-      - key: META_CAPI_TOKEN_ACTION
-        sync: false
-      - key: META_CAPI_DATASET_ARLINGTON
-        sync: false
-      - key: META_CAPI_TOKEN_ARLINGTON
-        sync: false
-      - key: META_CAPI_DATASET_EASTERNS_ES
-        sync: false
-      - key: META_CAPI_TOKEN_EASTERNS_ES
+      - key: META_CAPI_DEALERS_JSON
         sync: false
       - key: WEBHOOK_QUEUE_MAX_ATTEMPTS
         value: "5"
@@ -91,20 +61,6 @@ services:
         value: "1000"
       - key: WEBHOOK_QUEUE_MAX_BACKOFF_MS
         value: "60000"
-      - key: GHL_CLIENT_ID
-        sync: false
-      - key: GHL_CLIENT_SECRET
-        sync: false
-      - key: GHL_APP_VERSION_ID
-        value: 6a84ce51032e61130732e5cd
-      - key: GHL_REDIRECT_URI
-        sync: false
-      - key: GHL_AUTHORIZATION_URL
-        value: https://marketplace.gohighlevel.com/oauth/chooselocation
-      - key: GHL_TOKEN_URL
-        value: https://services.leadconnectorhq.com/oauth/token
-      - key: GHL_SCOPES
-        sync: false
       - key: ENCRYPTION_SECRET
         sync: false
       - key: OAUTH_STATE_SECRET
