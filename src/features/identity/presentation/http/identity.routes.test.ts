@@ -178,6 +178,10 @@ test("admin creates an inert dealer and one-time invitation; invitee chooses a h
   assert.match(page.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
   assert.match(page.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
   assert.equal(page.headers.get("referrer-policy"), "no-referrer");
+  const activationHtml = await page.text();
+  assert.match(activationHtml, /Cuenta activada\. Ya puedes iniciar sesión\./);
+  assert.match(activationHtml, /window\.setTimeout\(\(\)=>window\.location\.assign\(loginUrl\),1000\)/);
+  assert.match(activationHtml, /const loginUrl="http:\/\/localhost:3000\/"/);
 
   const accepted = await fetch(`${baseUrl}/invitations/accept`, {
     method: "POST", headers: { "content-type": "application/json" },
