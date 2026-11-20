@@ -204,6 +204,28 @@ export function createIdentityRouter(pool: Pool, options: { production: boolean;
     }
   });
 
+  router.delete("/admin/dealers/:dealerId", async (request: Request, response: Response) => {
+    const dealerId = request.params.dealerId;
+    if (typeof dealerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dealerId)) {
+      response.status(400).json({ error: "El identificador del dealer no es válido." });
+      return;
+    }
+    try {
+      if (!await requireAdmin(pool, request, response)) return;
+      const result = await pool.query<{ id: string }>(
+        "DELETE FROM public.tenants WHERE dealer_id = $1 RETURNING dealer_id::text AS id",
+        [dealerId],
+      );
+      if (!result.rows[0]) {
+        response.status(404).json({ error: "No encontramos ese dealer." });
+        return;
+      }
+      response.status(204).end();
+    } catch {
+      response.status(500).json({ error: "No pudimos eliminar el dealer." });
+    }
+  });
+
   router.post("/admin/dealers", async (request: Request, response: Response) => {
     const dealerName = typeof request.body?.dealerName === "string" ? request.body.dealerName.trim() : "";
     const ownerName = typeof request.body?.ownerName === "string" ? request.body.ownerName.trim() : "";
