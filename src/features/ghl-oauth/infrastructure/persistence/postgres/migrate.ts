@@ -9,6 +9,7 @@ import { ensureTenantFeatureFlags } from "@/modules/control/infrastructure/persi
 import { ensureCountryClubPolicy } from "@/modules/control/infrastructure/persistence/postgres/country-club-policy.migration";
 import { ensureConversationAiShadowTables } from "@/modules/control/infrastructure/persistence/postgres/conversation-ai-shadow.migration";
 import { ensureInternalDiagnosticAuditTable } from "@/presentation/http/internal-diagnostic-audit.migration";
+import { ensureIdentityTables } from "@/features/identity/infrastructure/persistence/postgres/identity.migration";
 
 async function main(): Promise<void> {
   const config = loadAppConfig();
@@ -16,6 +17,7 @@ async function main(): Promise<void> {
   try {
     await ensureIntegrationsTable(pool);
     await ensureWebhookTables(pool);
+    await ensureIdentityTables(pool);
     await ensureTenantFeatureFlags(pool);
     await ensureMemoryTables(pool);
     await ensureDecisionLogsTable(pool);

@@ -33,11 +33,13 @@ export function createHttpApp(
   outboundDeliveryReconciliationController?: OutboundDeliveryReconciliationController,
   dashboardRouter?: express.Router,
   internalDiagnostics?: InternalDiagnosticsOptions,
+  identityRouter?: express.Router,
 ): Express {
   const app = express();
   app.disable("x-powered-by");
   if (dashboardRouter) app.use("/mi-dia", dashboardRouter);
   app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
+  if (identityRouter) app.use("/auth", express.json({ limit: "16kb" }), identityRouter);
   app.use("/oauth", createGhlOAuthRouter(controller));
   app.use(
     "/webhooks/ghl",
