@@ -1,5 +1,5 @@
-import { createHash, randomBytes } from "node:crypto";
-import type { Pool } from "pg";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import type { Pool, PoolClient } from "pg";
 import express, { type Request, type Response } from "express";
 import { hashScryptPassword, verifyScryptPassword } from "@/features/identity/infrastructure/crypto/scrypt-password";
 import type { DealerInvitationMailer } from "@/features/identity/infrastructure/email/smtp-dealer-invitation-mailer";
@@ -26,6 +26,34 @@ function invitationUrl(publicAppUrl: string, token: string): string {
   const url = new URL("/auth/invitations/accept", origin);
   url.searchParams.set("token", token);
   return url.toString();
+}
+
+type AuditCategory = "dealers" | "users" | "invitations" | "settings" | "security";
+type AuditInput = {
+  actor: IdentityUser;
+  dealerId?: string | null;
+  dealerName?: string | null;
+  category: AuditCategory;
+  action: string;
+  summary: string;
+  referenceId: string;
+};
+
+function auditReference(request: Request): string {
+  const provided = request.get("x-correlation-id")?.trim();
+  const reference = provided && /^[A-Za-z0-9._:-]{1,128}$/.test(provided) ? provided : randomUUID();
+  request.res?.setHeader("X-Correlation-Id", reference);
+  return reference;
+}
+
+async function appendAudit(client: PoolClient, input: AuditInput): Promise<void> {
+  await client.query(
+    `INSERT INTO public.admin_audit_events
+       (actor_user_id, actor_email, actor_name, target_tenant_id, dealer_name, category, action, outcome, summary, reference_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'success', $8, $9)`,
+    [input.actor.id, input.actor.email, input.actor.display_name, input.dealerId ?? null,
+      input.dealerName ?? null, input.category, input.action, input.summary, input.referenceId],
+  );
 }
 
 async function requireAdmin(pool: Pool, request: Request, response: Response): Promise<IdentityUser | undefined> {
@@ -183,6 +211,52 @@ export function createIdentityRouter(pool: Pool, options: { production: boolean;
     }
   });
 
+  router.get("/admin/audit", async (request: Request, response: Response) => {
+    try {
+      if (!await requireAdmin(pool, request, response)) return;
+      const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
+      const actor = typeof request.query.actor === "string" ? request.query.actor.trim() : "";
+      const category = typeof request.query.category === "string" ? request.query.category : "";
+      const from = typeof request.query.from === "string" ? request.query.from : "";
+      const to = typeof request.query.to === "string" ? request.query.to : "";
+      const search = typeof request.query.search === "string" ? request.query.search.trim() : "";
+      const limitValue = Number(request.query.limit ?? 50);
+      const offsetValue = Number(request.query.offset ?? 0);
+      const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      const validDate = (value: string) => { if (!value) return true; if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const parsed = new Date(`${value}T00:00:00Z`); return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value; };
+      if ((dealerId && !validUuid.test(dealerId)) || (category && !["dealers", "users", "invitations", "settings", "security"].includes(category))
+          || actor.length > 254 || search.length > 180 || !validDate(from) || !validDate(to)
+          || (from && to && from > to) || !Number.isInteger(limitValue) || limitValue < 1 || limitValue > 100
+          || !Number.isInteger(offsetValue) || offsetValue < 0 || offsetValue > 1000000) {
+        response.status(400).json({ error: "Los filtros de auditoría no son válidos." });
+        return;
+      }
+      const clauses: string[] = [];
+      const values: unknown[] = [];
+      const add = (sql: (index: number) => string, value: unknown) => { values.push(value); clauses.push(sql(values.length)); };
+      if (dealerId) add((i) => `target_tenant_id = $${i}::uuid`, dealerId);
+      if (actor) add((i) => `(lower(actor_email) LIKE lower($${i}) OR lower(actor_name) LIKE lower($${i}))`, `%${actor}%`);
+      if (category) add((i) => `category = $${i}`, category);
+      if (from) add((i) => `created_at >= $${i}::date`, from);
+      if (to) add((i) => `created_at < ($${i}::date + interval '1 day')`, to);
+      if (search) add((i) => `concat_ws(' ', actor_name, actor_email, dealer_name, action, summary, reference_id) ILIKE $${i}`, `%${search}%`);
+      const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+      const count = await pool.query<{ total: string }>(`SELECT COUNT(*)::text AS total FROM public.admin_audit_events ${where}`, values);
+      const pageValues = [...values, limitValue, offsetValue];
+      const events = await pool.query(
+        `SELECT id::text, actor_email, actor_name, target_tenant_id::text AS dealer_id, dealer_name,
+                category, action, outcome, summary, reference_id, created_at
+           FROM public.admin_audit_events ${where}
+          ORDER BY created_at DESC, id DESC
+          LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        pageValues,
+      );
+      response.status(200).json({ events: events.rows, total: Number(count.rows[0]?.total ?? 0), limit: limitValue, offset: offsetValue });
+    } catch {
+      response.status(500).json({ error: "No pudimos cargar la auditoría administrativa." });
+    }
+  });
+
   router.get("/admin/dealers", async (request: Request, response: Response) => {
     try {
       if (!await requireAdmin(pool, request, response)) return;
@@ -210,20 +284,32 @@ export function createIdentityRouter(pool: Pool, options: { production: boolean;
       response.status(400).json({ error: "El identificador del dealer no es válido." });
       return;
     }
+    let admin: IdentityUser | undefined;
+    try { admin = await requireAdmin(pool, request, response); } catch {
+      response.status(500).json({ error: "No pudimos verificar la sesión." });
+      return;
+    }
+    if (!admin) return;
+    const client = await pool.connect();
     try {
-      if (!await requireAdmin(pool, request, response)) return;
-      const result = await pool.query<{ id: string }>(
-        "DELETE FROM public.tenants WHERE dealer_id = $1 RETURNING dealer_id::text AS id",
-        [dealerId],
+      await client.query("BEGIN");
+      const existing = await client.query<{ dealer_name: string | null }>(
+        "SELECT dealer_name FROM public.tenants WHERE dealer_id = $1 FOR UPDATE", [dealerId],
       );
-      if (!result.rows[0]) {
+      if (!existing.rows[0]) {
+        await client.query("ROLLBACK");
         response.status(404).json({ error: "No encontramos ese dealer." });
         return;
       }
+      await client.query("DELETE FROM public.tenants WHERE dealer_id = $1", [dealerId]);
+      await appendAudit(client, { actor: admin, dealerId, dealerName: existing.rows[0].dealer_name,
+        category: "dealers", action: "dealer.deleted", summary: "Dealer eliminado por el administrador.", referenceId: auditReference(request) });
+      await client.query("COMMIT");
       response.status(204).end();
     } catch {
+      await client.query("ROLLBACK").catch(() => undefined);
       response.status(500).json({ error: "No pudimos eliminar el dealer." });
-    }
+    } finally { client.release(); }
   });
 
   router.post("/admin/dealers", async (request: Request, response: Response) => {
@@ -274,6 +360,8 @@ export function createIdentityRouter(pool: Pool, options: { production: boolean;
          VALUES ($1, $2, $3, $4, $5, now() + ($6 * interval '1 hour'))`,
         [dealerId, email, ownerName, tokenDigest(rawToken), admin.id, INVITATION_TTL_HOURS],
       );
+      await appendAudit(client, { actor: admin, dealerId, dealerName, category: "dealers", action: "dealer.created",
+        summary: `Dealer creado y se registró la invitación para ${email}.`, referenceId: auditReference(request) });
       await client.query("COMMIT");
       const url = invitationUrl(publicAppUrl, rawToken);
       let delivery: "sent" | "manual" | "failed" = "manual";
@@ -356,6 +444,8 @@ export function createIdentityRouter(pool: Pool, options: { production: boolean;
          VALUES ($1, $2, $3, $4, $5, now() + ($6 * interval '1 hour'))`,
         [tenant.rows[0].id, email, displayName, tokenDigest(rawToken), admin.id, INVITATION_TTL_HOURS],
       );
+      await appendAudit(client, { actor: admin, dealerId: tenant.rows[0].id, dealerName: tenant.rows[0].dealer_name,
+        category: "invitations", action: "invitation.created", summary: `Invitación emitida para ${email}.`, referenceId: auditReference(request) });
       await client.query("COMMIT");
       const url = invitationUrl(publicAppUrl, rawToken);
       let delivery: "sent" | "manual" | "failed" = "manual";
@@ -440,6 +530,9 @@ export function createIdentityRouter(pool: Pool, options: { production: boolean;
         [userId, invite.tenant_id],
       );
       await client.query("UPDATE public.dealer_invitations SET accepted_at = now() WHERE id = $1", [invite.id]);
+      await appendAudit(client, { actor: { id: userId, email: invite.email, display_name: invite.display_name, account_type: "user" },
+        dealerId: invite.tenant_id, dealerName: invite.dealer_name, category: "invitations", action: "invitation.accepted",
+        summary: `Invitación aceptada por ${invite.email}; se activó su acceso al dealer.`, referenceId: auditReference(request) });
       await client.query("COMMIT");
       response.status(200).json({ activated: true, existingAccount, dealerName: invite.dealer_name });
     } catch {

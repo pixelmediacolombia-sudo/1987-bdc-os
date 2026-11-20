@@ -102,9 +102,11 @@ test("admin creates an inert dealer and one-time invitation; invitee chooses a h
   let invitationDigest = "";
   let createdPasswordHash = "";
   let invitationAccepted = false;
+  const auditEvents: unknown[][] = [];
   const client = {
     query: async (sql: string, values: unknown[] = []) => {
       if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [] };
+      if (sql.includes("INSERT INTO public.admin_audit_events")) { auditEvents.push(values); return { rows: [] }; }
       if (sql.includes("FROM public.app_users WHERE lower(email) = $1")) return { rows: [] };
       if (sql.includes("INSERT INTO public.tenants")) {
         assert.equal(values[0], "Sample Dealer");
@@ -191,6 +193,10 @@ test("admin creates an inert dealer and one-time invitation; invitee chooses a h
   assert.deepEqual(await accepted.json(), { activated: true, existingAccount: false, dealerName: "Sample Dealer" });
   assert.match(createdPasswordHash, /^scrypt\$32768\$8\$1\$/);
   assert.equal(await verifyScryptPassword("dealer-password-long-enough", createdPasswordHash), true);
+  assert.equal(auditEvents.length, 2);
+  assert.equal(auditEvents[0]?.[6], "dealer.created");
+  assert.equal(auditEvents[1]?.[6], "invitation.accepted");
+  assert.ok(auditEvents.every((event) => !String(event).includes(rawToken)));
 
   const reused = await fetch(`${baseUrl}/invitations/accept`, {
     method: "POST", headers: { "content-type": "application/json" },
@@ -227,17 +233,23 @@ test("only an admin can delete a dealer and the handler reports missing dealers"
   const admin = { id: "admin-id", email, display_name: "Local Admin", account_type: "admin" as const };
   const dealerUser = { id: "dealer-id", email: "dealer@example.com", display_name: "Dealer User", account_type: "user" as const };
   const deleted: string[] = [];
+  const auditEvents: unknown[][] = [];
+  const client = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+      if (sql.includes("SELECT dealer_name FROM public.tenants")) return values[0] === "11111111-1111-4111-8111-111111111113" ? { rows: [] } : { rows: [{ dealer_name: "Delete Test Dealer" }] };
+      if (sql.includes("DELETE FROM public.tenants")) { deleted.push(String(values[0])); return { rows: [] }; }
+      if (sql.includes("INSERT INTO public.admin_audit_events")) { auditEvents.push(values); return { rows: [] }; }
+      throw new Error(`Unexpected identity delete SQL: ${sql.slice(0, 80)}`);
+    },
+    release: () => undefined,
+  };
   const pool = {
     query: async (sql: string, values: unknown[] = []) => {
       if (sql.includes("FROM public.app_sessions")) return { rows: values[0] === sessionHash ? [admin] : values[0] === dealerHash ? [dealerUser] : [] };
-      if (sql.includes("DELETE FROM public.tenants")) {
-        const id = String(values[0]);
-        if (id === "11111111-1111-4111-8111-111111111113") return { rows: [] };
-        deleted.push(id);
-        return { rows: [{ id }] };
-      }
-      throw new Error(`Unexpected identity delete SQL: ${sql.slice(0, 80)}`);
+      throw new Error(`Unexpected identity pool SQL: ${sql.slice(0, 80)}`);
     },
+    connect: async () => client,
   } as unknown as Pool;
   const app = express();
   app.use(express.json());
@@ -253,6 +265,9 @@ test("only an admin can delete a dealer and the handler reports missing dealers"
   const removed = await fetch(`${baseUrl}/11111111-1111-4111-8111-111111111111`, { method: "DELETE", headers: { cookie } });
   assert.equal(removed.status, 204);
   assert.deepEqual(deleted, ["11111111-1111-4111-8111-111111111111"]);
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0]?.[6], "dealer.deleted");
+  assert.equal(auditEvents[0]?.[4], "Delete Test Dealer");
 
   const denied = await fetch(`${baseUrl}/11111111-1111-4111-8111-111111111112`, { method: "DELETE", headers: { cookie: `bdc_os_session=${dealerToken}` } });
   assert.equal(denied.status, 403);

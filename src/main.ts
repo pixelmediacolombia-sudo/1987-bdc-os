@@ -59,6 +59,7 @@ import { OutboundDeliveryReconciliationController } from "@/presentation/http/ou
 import { ensureInternalDiagnosticAuditTable } from "@/presentation/http/internal-diagnostic-audit.migration";
 import { PostgresInternalDiagnosticAudit } from "@/presentation/http/postgres-internal-diagnostic-audit";
 import { ensureIdentityTables } from "@/features/identity/infrastructure/persistence/postgres/identity.migration";
+import { ensureAdminAuditTable } from "@/features/identity/infrastructure/persistence/postgres/admin-audit.migration";
 import { bootstrapLocalAdmin } from "@/features/identity/infrastructure/persistence/postgres/local-admin.bootstrap";
 import { createIdentityRouter } from "@/features/identity/presentation/http/identity.routes";
 import { createSmtpDealerInvitationMailer } from "@/features/identity/infrastructure/email/smtp-dealer-invitation-mailer";
@@ -71,6 +72,7 @@ async function start(): Promise<void> {
   // to support new BDC OS dealers that have not connected GHL yet.
   await ensureWebhookTables(pool);
   await ensureIdentityTables(pool);
+  await ensureAdminAuditTable(pool);
   const localAdminCreated = await bootstrapLocalAdmin(pool);
   if (localAdminCreated) console.info("[Identity] local platform admin bootstrapped");
   await ensureIntegrationsTable(pool);
