@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS public.integrations (
   access_token_expires_at TIMESTAMPTZ,
   health_state TEXT NOT NULL DEFAULT 'healthy'
     CHECK (health_state IN ('healthy', 'degraded', 'revoked', 'unknown')),
+  last_verified_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT integrations_tenant_provider_uq UNIQUE (tenant_id, provider)
@@ -25,6 +26,7 @@ CREATE INDEX IF NOT EXISTS integrations_provider_health_idx
 
 ALTER TABLE public.integrations ADD COLUMN IF NOT EXISTS ghl_location_id TEXT;
 ALTER TABLE public.integrations ADD COLUMN IF NOT EXISTS access_token_expires_at TIMESTAMPTZ;
+ALTER TABLE public.integrations ADD COLUMN IF NOT EXISTS last_verified_at TIMESTAMPTZ;
 
 ALTER TABLE public.integrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.integrations FORCE ROW LEVEL SECURITY;

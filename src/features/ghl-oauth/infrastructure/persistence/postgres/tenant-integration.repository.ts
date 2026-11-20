@@ -34,8 +34,8 @@ export class PostgresTenantIntegrationRepository implements TenantIntegrationRep
       const tenantId = tenant.rows[0].dealer_id;
       await client.query(
         `INSERT INTO public.integrations
-           (tenant_id, provider, ghl_location_id, encrypted_access_token, encrypted_refresh_token, scopes, access_token_expires_at, health_state)
-         VALUES ($1, 'ghl', $2, $3, $4, $5::text[], $6, 'healthy')
+           (tenant_id, provider, ghl_location_id, encrypted_access_token, encrypted_refresh_token, scopes, access_token_expires_at, health_state, last_verified_at)
+         VALUES ($1, 'ghl', $2, $3, $4, $5::text[], $6, 'healthy', now())
          ON CONFLICT (tenant_id, provider) DO UPDATE SET
            ghl_location_id = EXCLUDED.ghl_location_id,
            encrypted_access_token = EXCLUDED.encrypted_access_token,
@@ -43,6 +43,7 @@ export class PostgresTenantIntegrationRepository implements TenantIntegrationRep
            scopes = EXCLUDED.scopes,
            access_token_expires_at = EXCLUDED.access_token_expires_at,
            health_state = 'healthy',
+           last_verified_at = now(),
            updated_at = now()`,
         [
           tenantId,
@@ -121,6 +122,7 @@ export class PostgresTenantIntegrationRepository implements TenantIntegrationRep
                 scopes = $4::text[],
                 access_token_expires_at = $5,
                 health_state = 'healthy',
+                last_verified_at = now(),
                 updated_at = now()
           WHERE id = $1`,
         [

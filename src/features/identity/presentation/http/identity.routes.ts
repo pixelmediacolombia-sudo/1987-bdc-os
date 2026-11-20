@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import express, { type Request, type Response } from "express";
 import { hashScryptPassword, verifyScryptPassword } from "@/features/identity/infrastructure/crypto/scrypt-password";
 import type { DealerInvitationMailer } from "@/features/identity/infrastructure/email/smtp-dealer-invitation-mailer";
+import { findMetaCapiEnvConfig, type MetaCapiTenantConfig } from "@/modules/control/infrastructure/meta-capi.config";
 
 const SESSION_COOKIE = "bdc_os_session";
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
@@ -127,7 +128,7 @@ async function activeSession(pool: Pool, request: Request): Promise<IdentityUser
   return result.rows[0];
 }
 
-export function createIdentityRouter(pool: Pool, options: { production: boolean; publicAppUrl?: string; invitationMailer?: DealerInvitationMailer }): express.Router {
+export function createIdentityRouter(pool: Pool, options: { production: boolean; publicAppUrl?: string; invitationMailer?: DealerInvitationMailer; metaCapiDealers?: MetaCapiTenantConfig[]; metaCapiEventName?: string }): express.Router {
   const router = express.Router();
   const publicAppUrl = options.publicAppUrl ?? (options.production ? undefined : "http://localhost:3000");
 
@@ -275,6 +276,100 @@ export function createIdentityRouter(pool: Pool, options: { production: boolean;
       response.status(200).json({ dealers: result.rows });
     } catch {
       response.status(500).json({ error: "No pudimos cargar los dealers." });
+    }
+  });
+
+  router.get("/admin/dealers/:dealerId/configuration", async (request: Request, response: Response) => {
+    const dealerId = request.params.dealerId;
+    if (typeof dealerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dealerId)) {
+      response.status(400).json({ error: "El identificador del dealer no es válido." });
+      return;
+    }
+    try {
+      if (!await requireAdmin(pool, request, response)) return;
+      const dealerResult = await pool.query<{
+        id: string; name: string | null; status: string; timezone: string | null; policy_version: string | null;
+        financial_policy: Record<string, unknown> | null; ghl_location_id: string | null; sofia_enabled: boolean;
+        qualification_flow_enabled: boolean; qualification_signal_enabled: boolean; meta_dataset_id: string | null;
+        has_meta_access_token: boolean; meta_event_name: string | null; meta_capi_enabled: boolean;
+        has_meta_test_event_code: boolean; facebook_page_id: string | null; conversational_ai_shadow_enabled: boolean;
+        conversational_ai_send_enabled: boolean;
+      }>(
+        `SELECT dealer_id::text AS id, dealer_name AS name, status, timezone, policy_version, financial_policy,
+                ghl_location_id, sofia_enabled, qualification_flow_enabled, qualification_signal_enabled,
+                meta_dataset_id, (encrypted_meta_access_token IS NOT NULL AND length(encrypted_meta_access_token) > 0) AS has_meta_access_token,
+                meta_event_name, meta_capi_enabled, (meta_test_event_code IS NOT NULL AND length(meta_test_event_code) > 0) AS has_meta_test_event_code,
+                facebook_page_id, conversational_ai_shadow_enabled, conversational_ai_send_enabled
+           FROM public.tenants WHERE dealer_id = $1 LIMIT 1`, [dealerId],
+      );
+      const dealer = dealerResult.rows[0];
+      if (!dealer) { response.status(404).json({ error: "No encontramos ese dealer." }); return; }
+
+      const client = await pool.connect();
+      let integration: {
+        ghl_location_id: string | null; scopes: string[]; health_state: string; access_token_expires_at: Date | null;
+        has_stored_access_token: boolean; has_stored_refresh_token: boolean; created_at: Date; updated_at: Date; last_verified_at: Date | null;
+      } | undefined;
+      let lastCapiEvent: { status: string; created_at: Date } | undefined;
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.tenant_id', $1, true)", [dealerId]);
+        const integrationResult = await client.query(
+          `SELECT ghl_location_id, scopes, health_state, access_token_expires_at,
+                  (encrypted_access_token IS NOT NULL AND length(encrypted_access_token) > 0) AS has_stored_access_token,
+                  (encrypted_refresh_token IS NOT NULL AND length(encrypted_refresh_token) > 0) AS has_stored_refresh_token,
+                  created_at, updated_at, last_verified_at
+             FROM public.integrations WHERE tenant_id = $1 AND provider = 'ghl' LIMIT 1`, [dealerId],
+        );
+        integration = integrationResult.rows[0];
+        const capiResult = await client.query(
+          "SELECT status, created_at FROM public.capi_events WHERE dealer_id = $1 ORDER BY created_at DESC LIMIT 1", [dealerId],
+        );
+        lastCapiEvent = capiResult.rows[0];
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally { client.release(); }
+
+      const envMeta = findMetaCapiEnvConfig(JSON.stringify({ dealer_name: dealer.name }), options.metaCapiDealers ?? [], dealer.ghl_location_id ?? undefined);
+      const metaHasDealerCredential = dealer.has_meta_access_token;
+      const metaCredentialSource = metaHasDealerCredential ? "dealer" : envMeta ? "environment" : "none";
+      const expiresAt = integration?.access_token_expires_at ? new Date(integration.access_token_expires_at) : undefined;
+      const isExpired = Boolean(expiresAt && expiresAt.getTime() <= Date.now());
+      const ghlStatus = !integration ? "not_connected" : integration.health_state === "revoked" ? "revoked"
+        : integration.health_state === "degraded" || integration.health_state === "unknown" || isExpired ? "degraded" : "connected";
+      const financialPolicy = dealer.financial_policy && typeof dealer.financial_policy === "object" ? dealer.financial_policy : {};
+      response.status(200).json({
+        dealer: { id: dealer.id, name: dealer.name, status: dealer.status, timezone: dealer.timezone, ghlLocationId: dealer.ghl_location_id },
+        policy: { version: dealer.policy_version, financialPolicyKeys: Object.keys(financialPolicy).slice(0, 30) },
+        flags: {
+          sofiaEnabled: dealer.sofia_enabled, qualificationFlowEnabled: dealer.qualification_flow_enabled,
+          qualificationSignalEnabled: dealer.qualification_signal_enabled, metaCapiEnabled: dealer.meta_capi_enabled,
+          conversationAiShadowEnabled: dealer.conversational_ai_shadow_enabled,
+          conversationAiSendEnabled: dealer.conversational_ai_send_enabled,
+          facebookPageConfigured: Boolean(dealer.facebook_page_id),
+        },
+        integrations: {
+          ghl: {
+            status: ghlStatus, locationId: integration?.ghl_location_id ?? dealer.ghl_location_id,
+            scopes: integration?.scopes ?? [], hasStoredAccessToken: integration?.has_stored_access_token ?? false,
+            hasStoredRefreshToken: integration?.has_stored_refresh_token ?? false,
+            tokenExpiresAt: integration?.access_token_expires_at ?? null, connectedAt: integration?.created_at ?? null,
+            updatedAt: integration?.updated_at ?? null, lastVerifiedAt: integration?.last_verified_at ?? null,
+          },
+          metaCapi: {
+            enabled: dealer.meta_capi_enabled, status: !dealer.meta_capi_enabled ? "disabled" : metaCredentialSource === "none" ? "incomplete" : "configured",
+            credentialSource: metaCredentialSource, hasCredential: metaCredentialSource !== "none",
+            datasetId: dealer.meta_dataset_id ?? envMeta?.datasetId ?? null,
+            eventName: dealer.meta_event_name ?? options.metaCapiEventName ?? "LeadSubmitted",
+            testEventCodeConfigured: dealer.has_meta_test_event_code,
+            lastEventStatus: lastCapiEvent?.status ?? null, lastEventAt: lastCapiEvent?.created_at ?? null,
+          },
+        },
+      });
+    } catch {
+      if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar la configuración del dealer." });
     }
   });
 

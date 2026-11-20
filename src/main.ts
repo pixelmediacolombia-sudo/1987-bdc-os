@@ -253,6 +253,8 @@ async function start(): Promise<void> {
       production: config.nodeEnv === "production",
       publicAppUrl: process.env.BDC_APP_URL,
       invitationMailer: createSmtpDealerInvitationMailer(),
+      metaCapiDealers: config.metaCapiDealers,
+      metaCapiEventName: config.metaCapiEventName,
     }),
   );
   const server = app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
