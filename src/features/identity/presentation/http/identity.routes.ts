@@ -128,7 +128,7 @@ async function activeSession(pool: Pool, request: Request): Promise<IdentityUser
   return result.rows[0];
 }
 
-export function createIdentityRouter(pool: Pool, options: { production: boolean; publicAppUrl?: string; invitationMailer?: DealerInvitationMailer; metaCapiDealers?: MetaCapiTenantConfig[]; metaCapiEventName?: string; metaOAuthStart?: (tenantId: string) => string }): express.Router {
+export function createIdentityRouter(pool: Pool, options: { production: boolean; publicAppUrl?: string; invitationMailer?: DealerInvitationMailer; metaCapiDealers?: MetaCapiTenantConfig[]; metaCapiEventName?: string; metaOAuthStart?: (tenantId: string) => string; redisPing?: () => Promise<string> }): express.Router {
   const router = express.Router();
   const publicAppUrl = options.publicAppUrl ?? (options.production ? undefined : "http://localhost:3000");
 
@@ -212,6 +212,34 @@ export function createIdentityRouter(pool: Pool, options: { production: boolean;
     }
   });
 
+  router.get("/admin/system/health", async (request: Request, response: Response) => {
+    try {
+      if (!await requireAdmin(pool, request, response)) return;
+      await pool.query("SELECT 1");
+
+      let redisStatus: "healthy" | "unavailable" = "unavailable";
+      try {
+        redisStatus = await options.redisPing?.() === "PONG" ? "healthy" : "unavailable";
+      } catch {
+        redisStatus = "unavailable";
+      }
+
+      const services = {
+        api: "healthy" as const,
+        postgresql: "healthy" as const,
+        redis: redisStatus,
+      };
+      response.status(200).json({
+        overall: redisStatus === "healthy" ? "healthy" : "degraded",
+        checked_at: new Date().toISOString(),
+        services,
+      });
+    } catch {
+      if (!response.headersSent) {
+        response.status(503).json({ error: "No pudimos consultar el estado global del sistema." });
+      }
+    }
+  });
   router.get("/admin/audit", async (request: Request, response: Response) => {
     try {
       if (!await requireAdmin(pool, request, response)) return;

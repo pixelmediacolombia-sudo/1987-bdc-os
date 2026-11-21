@@ -238,6 +238,7 @@ async function start(): Promise<void> {
       metaCapiDealers: config.metaCapiDealers,
       metaCapiEventName: config.metaCapiEventName,
       metaOAuthStart: (tenantId) => metaOAuthController.authorizationUrl(tenantId),
+      redisPing: () => redis.ping(),
     }),
     metaWebhook: { controller: metaWebhookController, appSecret: config.metaAppSecret },
     metaOAuth: metaOAuthController,
