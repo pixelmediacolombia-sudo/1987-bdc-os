@@ -26,51 +26,81 @@ test("identity migration runs in one transaction", async () => {
   assert.deepEqual(calls, ["BEGIN", CREATE_IDENTITY_TABLES_SQL, "COMMIT"]);
 });
 
-test("local admin bootstrap refuses non-development and incomplete credentials", async () => {
+test("admin bootstrap refuses unsupported environments and incomplete credentials", async () => {
   const pool = { query: async () => { throw new Error("must not query"); } } as unknown as Pool;
   await assert.rejects(
-    bootstrapLocalAdmin(pool, { NODE_ENV: "production", BDC_ADMIN_EMAIL: "admin@example.com" }),
-    /only when NODE_ENV=development/,
+    bootstrapLocalAdmin(pool, { NODE_ENV: "test", BDC_ADMIN_EMAIL: "admin@example.com" }),
+    /NODE_ENV=development or production/,
   );
   await assert.rejects(
     bootstrapLocalAdmin(pool, { NODE_ENV: "development", BDC_ADMIN_EMAIL: "admin@example.com" }),
     /must all be set/,
   );
+  await assert.rejects(
+    bootstrapLocalAdmin(pool, { NODE_ENV: "production", BDC_ADMIN_EMAIL: "admin@example.com" }),
+    /must all be set/,
+  );
 });
 
-test("local admin bootstrap inserts one normalized admin without overwriting an existing admin", async () => {
-  const calls: Array<{ sql: string; values?: unknown[] }> = [];
+test("admin bootstrap creates the normalized account in development and production", async () => {
+  const hash = "scrypt$32768$8$1$" + "a".repeat(22) + "$" + "b".repeat(86);
+  for (const nodeEnvironment of ["development", "production"] as const) {
+    const calls: Array<{ sql: string; values?: unknown[] }> = [];
+    const pool = {
+      query: async (sql: string, values?: unknown[]) => {
+        calls.push({ sql, values });
+        if (sql.startsWith("SELECT")) return { rows: [] };
+        return { rows: [] };
+      },
+    } as unknown as Pool;
+    const inserted = await bootstrapLocalAdmin(pool, {
+      NODE_ENV: nodeEnvironment,
+      BDC_ADMIN_EMAIL: " Admin@Example.com ",
+      BDC_ADMIN_NAME: "Test Admin",
+      BDC_ADMIN_PASSWORD_HASH: hash,
+    });
+    assert.equal(inserted, true);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0]?.values?.[0], "admin@example.com");
+    assert.equal(calls[1]?.values?.[0], "admin@example.com");
+    assert.equal(calls[1]?.values?.[2], hash);
+  }
+});
+
+test("admin bootstrap is idempotent and never replaces a different production admin", async () => {
+  const hash = "scrypt$32768$8$1$" + "a".repeat(22) + "$" + "b".repeat(86);
+  const environment = (NODE_ENV: "development" | "production") => ({
+    NODE_ENV,
+    BDC_ADMIN_EMAIL: "admin@example.com",
+    BDC_ADMIN_NAME: "Test Admin",
+    BDC_ADMIN_PASSWORD_HASH: hash,
+  });
+  const existingAdmin = (email: string) => ({
+    query: async () => ({ rows: [{ id: "platform-admin", email, account_type: "admin" as const }] }),
+  }) as unknown as Pool;
+
+  assert.equal(await bootstrapLocalAdmin(existingAdmin("ADMIN@example.com"), environment("development")), false);
+  assert.equal(await bootstrapLocalAdmin(existingAdmin("ADMIN@example.com"), environment("production")), false);
+  await assert.rejects(bootstrapLocalAdmin(existingAdmin("other@example.com"), environment("development")), /already exists locally/);
+  assert.equal(await bootstrapLocalAdmin(existingAdmin("other@example.com"), environment("production")), false);
+});
+
+test("production admin bootstrap never elevates an existing regular account", async () => {
+  const hash = "scrypt$32768$8$1$" + "a".repeat(22) + "$" + "b".repeat(86);
+  let insertCalled = false;
   const pool = {
-    query: async (sql: string, values?: unknown[]) => {
-      calls.push({ sql, values });
-      if (sql.startsWith("SELECT")) return { rows: [] };
+    query: async (sql: string) => {
+      if (sql.startsWith("SELECT")) return { rows: [{ id: "user-id", email: "admin@example.com", account_type: "user" }] };
+      insertCalled = true;
       return { rows: [] };
     },
   } as unknown as Pool;
   const inserted = await bootstrapLocalAdmin(pool, {
-    NODE_ENV: "development",
-    BDC_ADMIN_EMAIL: " Admin@Example.com ",
-    BDC_ADMIN_NAME: "Local Admin",
-    BDC_ADMIN_PASSWORD_HASH: `scrypt$32768$8$1$${"a".repeat(22)}$${"b".repeat(86)}`,
-  });
-  assert.equal(inserted, true);
-  assert.equal(calls.length, 2);
-  assert.equal(calls[1]?.values?.[0], "admin@example.com");
-  assert.equal(calls[1]?.values?.[2]?.toString().startsWith("scrypt$"), true);
-});
-
-test("local admin bootstrap is idempotent for its configured email and rejects a second admin", async () => {
-  const hash = `scrypt$32768$8$1$${"a".repeat(22)}$${"b".repeat(86)}`;
-  const environment = {
-    NODE_ENV: "development",
+    NODE_ENV: "production",
     BDC_ADMIN_EMAIL: "admin@example.com",
-    BDC_ADMIN_NAME: "Local Admin",
+    BDC_ADMIN_NAME: "Test Admin",
     BDC_ADMIN_PASSWORD_HASH: hash,
-  };
-  const existingAdmin = (email: string) => ({
-    query: async () => ({ rows: [{ id: "local-admin", email }] }),
-  }) as unknown as Pool;
-
-  assert.equal(await bootstrapLocalAdmin(existingAdmin("ADMIN@example.com"), environment), false);
-  await assert.rejects(bootstrapLocalAdmin(existingAdmin("other@example.com"), environment), /already exists locally/);
+  });
+  assert.equal(inserted, false);
+  assert.equal(insertCalled, false);
 });

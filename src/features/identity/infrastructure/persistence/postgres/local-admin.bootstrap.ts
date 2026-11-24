@@ -20,8 +20,9 @@ export async function bootstrapLocalAdmin(
   ];
 
   if (configured.every((value) => !value)) return false;
-  if (environment.NODE_ENV !== "development") {
-    throw new Error("Local BDC OS admin bootstrap is allowed only when NODE_ENV=development");
+  const nodeEnvironment = environment.NODE_ENV;
+  if (nodeEnvironment !== "development" && nodeEnvironment !== "production") {
+    throw new Error("BDC OS admin bootstrap is allowed only when NODE_ENV=development or production");
   }
   if (configured.some((value) => !value?.trim())) {
     throw new Error("BDC_ADMIN_EMAIL, BDC_ADMIN_NAME, and BDC_ADMIN_PASSWORD_HASH must all be set");
@@ -37,17 +38,35 @@ export async function bootstrapLocalAdmin(
     throw new Error("BDC_ADMIN_PASSWORD_HASH must be a scrypt hash using N=32768, r=8, and p=1");
   }
 
-  const existing = await pool.query<{ id: string; email: string }>(
-    "SELECT id::text, email FROM public.app_users WHERE account_type = 'admin' LIMIT 1",
+  const existing = await pool.query<{ id: string; email: string; account_type: "admin" | "user" }>(
+    "SELECT id::text, email, account_type " +
+      "FROM public.app_users " +
+      "WHERE lower(email) = $1 OR account_type = 'admin' " +
+      "LIMIT 2",
+    [email],
   );
-  if (existing.rows[0]) {
-    if (existing.rows[0].email.toLowerCase() === email) return false;
+  const configuredAccount = existing.rows.find((row) => row.email.toLowerCase() === email);
+  if (configuredAccount) {
+    if (configuredAccount.account_type === "admin") return false;
+    if (nodeEnvironment === "production") {
+      console.warn("[Identity] admin bootstrap skipped because the configured account is not an admin");
+      return false;
+    }
+    throw new Error("A user already exists locally with the configured admin email");
+  }
+
+  const existingAdmin = existing.rows.find((row) => row.account_type === "admin");
+  if (existingAdmin) {
+    if (nodeEnvironment === "production") {
+      console.warn("[Identity] admin bootstrap skipped because a platform admin already exists");
+      return false;
+    }
     throw new Error("A platform admin already exists locally with a different email");
   }
 
   await pool.query(
-    `INSERT INTO public.app_users (email, display_name, password_hash, account_type, status)
-     VALUES ($1, $2, $3, 'admin', 'active')`,
+    "INSERT INTO public.app_users (email, display_name, password_hash, account_type, status) " +
+      "VALUES ($1, $2, $3, 'admin', 'active')",
     [email, displayName, passwordHash],
   );
   return true;
