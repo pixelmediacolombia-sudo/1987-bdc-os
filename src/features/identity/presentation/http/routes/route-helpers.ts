@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { Request, Response } from "express";
 import type { DealerInvitationMailer } from "@/features/identity/infrastructure/email/smtp-dealer-invitation-mailer";
-import { resolveDealerName } from "@/features/identity/dealer-name";
 import type { MetaCapiTenantConfig } from "@/modules/control/infrastructure/meta-capi.config";
 
 export type IdentityRouteOptions = {
@@ -37,8 +36,8 @@ export async function loadAdminDealerDirectory(pool: Pool): Promise<AdminDealerD
       await client.query("BEGIN");
       try {
         await client.query("SELECT set_config('app.tenant_id', $1, true)", [dealerId]);
-        const result = await client.query<AdminDealerDirectoryEntry & { ghl_location_id: string | null }>(
-          `SELECT t.dealer_id::text AS id, t.dealer_name AS name, t.status, t.ghl_location_id,
+        const result = await client.query<AdminDealerDirectoryEntry>(
+          `SELECT t.dealer_id::text AS id, t.dealer_name AS name, t.status,
                   (SELECT COUNT(*)::int FROM public.user_tenant_memberships AS m WHERE m.tenant_id = t.dealer_id) AS user_count,
                   (SELECT COUNT(*)::int FROM public.dealer_invitations AS i
                     WHERE i.tenant_id = t.dealer_id AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()) AS pending_invitation_count
@@ -46,7 +45,7 @@ export async function loadAdminDealerDirectory(pool: Pool): Promise<AdminDealerD
           [dealerId],
         );
         await client.query("COMMIT");
-        if (result.rows[0]) dealers.push({ ...result.rows[0], name: resolveDealerName(result.rows[0].name, result.rows[0].ghl_location_id) });
+        if (result.rows[0]) dealers.push(result.rows[0]);
       } catch (error) {
         await client.query("ROLLBACK").catch(() => undefined);
         throw error;

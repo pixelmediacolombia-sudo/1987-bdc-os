@@ -1,7 +1,6 @@
 import express, { type Request, type Response } from "express";
 import type { Pool } from "pg";
 import { hashScryptPassword } from "@/features/identity/infrastructure/crypto/scrypt-password";
-import { resolveDealerName } from "@/features/identity/dealer-name";
 import { appendAudit, auditReference, tokenDigest, type IdentityRouteOptions, type Invitation, type IdentityUser } from "./route-helpers";
 
 export function createInvitationRoutes(pool: Pool, options: IdentityRouteOptions): express.Router {
@@ -45,15 +44,15 @@ export function createInvitationRoutes(pool: Pool, options: IdentityRouteOptions
         return;
       }
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [inviteDetails.tenant_id]);
-      const tenant = await client.query<{ dealer_name: string | null; ghl_location_id: string | null }>(
-        "SELECT dealer_name, ghl_location_id FROM public.tenants WHERE dealer_id = $1 LIMIT 1", [inviteDetails.tenant_id],
+      const tenant = await client.query<{ dealer_name: string | null }>(
+        "SELECT dealer_name FROM public.tenants WHERE dealer_id = $1 LIMIT 1", [inviteDetails.tenant_id],
       );
       if (!tenant.rows[0]) {
         await client.query("ROLLBACK");
         response.status(400).json({ error: "La invitación no corresponde a un dealer activo." });
         return;
       }
-      const invite: Invitation = { ...inviteDetails, dealer_name: resolveDealerName(tenant.rows[0].dealer_name, tenant.rows[0].ghl_location_id) ?? "tu dealer" };
+      const invite: Invitation = { ...inviteDetails, dealer_name: tenant.rows[0].dealer_name?.trim() || "tu dealer" };
       const account = await client.query<{ id: string; account_type: string; status: string }>(
         "SELECT id::text, account_type, status FROM public.app_users WHERE lower(email) = $1 FOR UPDATE",
         [invite.email.toLowerCase()],

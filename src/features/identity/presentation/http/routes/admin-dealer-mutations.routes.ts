@@ -1,7 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import express, { type Request, type Response } from "express";
 import type { Pool } from "pg";
-import { resolveDealerName } from "@/features/identity/dealer-name";
 import { appendAudit, auditReference, invitationUrl, requireAdmin, tokenDigest, validEmail, INVITATION_TTL_HOURS, type IdentityRouteOptions, type IdentityUser } from "./route-helpers";
 
 export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRouteOptions): express.Router {
@@ -23,8 +22,8 @@ export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRou
     try {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [dealerId]);
-      const existing = await client.query<{ dealer_name: string | null; ghl_location_id: string | null }>(
-        "SELECT dealer_name, ghl_location_id FROM public.tenants WHERE dealer_id = $1 FOR UPDATE", [dealerId],
+      const existing = await client.query<{ dealer_name: string | null }>(
+        "SELECT dealer_name FROM public.tenants WHERE dealer_id = $1 FOR UPDATE", [dealerId],
       );
       if (!existing.rows[0]) {
         await client.query("ROLLBACK");
@@ -32,13 +31,55 @@ export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRou
         return;
       }
       await client.query("DELETE FROM public.tenants WHERE dealer_id = $1", [dealerId]);
-      await appendAudit(client, { actor: admin, dealerId, dealerName: resolveDealerName(existing.rows[0].dealer_name, existing.rows[0].ghl_location_id),
+      await appendAudit(client, { actor: admin, dealerId, dealerName: existing.rows[0].dealer_name,
         category: "dealers", action: "dealer.deleted", summary: "Dealer eliminado por el administrador.", referenceId: auditReference(request) });
       await client.query("COMMIT");
       response.status(204).end();
     } catch {
       await client.query("ROLLBACK").catch(() => undefined);
       response.status(500).json({ error: "No pudimos eliminar el dealer." });
+    } finally { client.release(); }
+  });
+
+  router.patch("/admin/dealers/:dealerId/name", async (request: Request, response: Response) => {
+    const dealerId = request.params.dealerId;
+    if (typeof dealerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dealerId)) {
+      response.status(400).json({ error: "El identificador del dealer no es válido." });
+      return;
+    }
+    const name = typeof request.body?.name === "string" ? request.body.name.trim() : "";
+    if (!name || name.length > 160) {
+      response.status(400).json({ error: "Ingresa un nombre de hasta 160 caracteres." });
+      return;
+    }
+    let admin: IdentityUser | undefined;
+    try { admin = await requireAdmin(pool, request, response); } catch {
+      response.status(500).json({ error: "No pudimos verificar la sesión." });
+      return;
+    }
+    if (!admin) return;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [dealerId]);
+      const existing = await client.query<{ dealer_name: string | null }>(
+        "SELECT dealer_name FROM public.tenants WHERE dealer_id = $1 FOR UPDATE", [dealerId],
+      );
+      if (!existing.rows[0]) {
+        await client.query("ROLLBACK");
+        response.status(404).json({ error: "No encontramos ese dealer." });
+        return;
+      }
+      await client.query("UPDATE public.tenants SET dealer_name = $2 WHERE dealer_id = $1", [dealerId, name]);
+      await appendAudit(client, {
+        actor: admin, dealerId, dealerName: name, category: "dealers", action: "dealer.renamed",
+        summary: "Nombre del dealer actualizado por el administrador.", referenceId: auditReference(request),
+      });
+      await client.query("COMMIT");
+      response.status(200).json({ dealer: { id: dealerId, name } });
+    } catch {
+      await client.query("ROLLBACK").catch(() => undefined);
+      response.status(500).json({ error: "No pudimos guardar el nombre del dealer." });
     } finally { client.release(); }
   });
 
@@ -140,8 +181,8 @@ export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRou
     try {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [request.params.dealerId]);
-      const tenant = await client.query<{ id: string; dealer_name: string | null; ghl_location_id: string | null }>(
-        "SELECT dealer_id::text AS id, dealer_name, ghl_location_id FROM public.tenants WHERE dealer_id = $1 FOR UPDATE",
+      const tenant = await client.query<{ id: string; dealer_name: string | null }>(
+        "SELECT dealer_id::text AS id, dealer_name FROM public.tenants WHERE dealer_id = $1 FOR UPDATE",
         [request.params.dealerId],
       );
       if (!tenant.rows[0]) {
@@ -153,7 +194,7 @@ export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRou
         "SELECT account_type, status FROM public.app_users WHERE lower(email) = $1 LIMIT 1",
         [email],
       );
-      const dealerName = resolveDealerName(tenant.rows[0].dealer_name, tenant.rows[0].ghl_location_id) ?? "tu dealer";
+      const dealerName = tenant.rows[0].dealer_name?.trim() || "tu dealer";
       if (existing.rows[0]?.account_type === "admin") {
         await client.query("ROLLBACK");
         response.status(409).json({ error: "No se puede invitar una cuenta administradora como usuario de dealer." });

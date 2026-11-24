@@ -126,7 +126,7 @@ test("admin creates an inert dealer and one-time invitation; invitee chooses a h
           id: "invite-1", tenant_id: createdDealerId, email: "owner@example.com", display_name: "Dealer Owner", dealer_name: "Sample Dealer",
         }] };
       }
-      if (sql.includes("SELECT dealer_name, ghl_location_id FROM public.tenants")) return { rows: [{ dealer_name: "Sample Dealer", ghl_location_id: null }] };
+      if (sql.includes("SELECT dealer_name FROM public.tenants")) return { rows: [{ dealer_name: "Sample Dealer" }] };
       if (sql.includes("SELECT id::text, account_type, status FROM public.app_users")) return { rows: [] };
       if (sql.includes("INSERT INTO public.app_users")) {
         createdPasswordHash = String(values[2]);
@@ -241,7 +241,7 @@ test("only an admin can delete a dealer and the handler reports missing dealers"
     query: async (sql: string, values: unknown[] = []) => {
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
       if (sql.includes("set_config('app.tenant_id'")) return { rows: [] };
-      if (sql.includes("SELECT dealer_name, ghl_location_id FROM public.tenants")) return values[0] === "11111111-1111-4111-8111-111111111113" ? { rows: [] } : { rows: [{ dealer_name: "Delete Test Dealer", ghl_location_id: null }] };
+      if (sql.includes("SELECT dealer_name FROM public.tenants")) return values[0] === "11111111-1111-4111-8111-111111111113" ? { rows: [] } : { rows: [{ dealer_name: "Delete Test Dealer" }] };
       if (sql.includes("DELETE FROM public.tenants")) { deleted.push(String(values[0])); return { rows: [] }; }
       if (sql.includes("INSERT INTO public.admin_audit_events")) { auditEvents.push(values); return { rows: [] }; }
       throw new Error(`Unexpected identity delete SQL: ${sql.slice(0, 80)}`);
@@ -282,5 +282,55 @@ test("only an admin can delete a dealer and the handler reports missing dealers"
   assert.deepEqual(await missing.json(), { error: "No encontramos ese dealer." });
 
   const invalid = await fetch(`${baseUrl}/missing-dealer`, { method: "DELETE", headers: { cookie } });
+  assert.equal(invalid.status, 400);
+});
+
+
+test("only an admin can rename a dealer and the name is stored and audited", async (context) => {
+  const sessionToken = "admin-rename-session";
+  const sessionHash = createHash("sha256").update(sessionToken).digest("hex");
+  const dealerToken = "dealer-rename-session";
+  const dealerHash = createHash("sha256").update(dealerToken).digest("hex");
+  const admin = { id: "admin-id", email, display_name: "Local Admin", account_type: "admin" as const };
+  const dealerUser = { id: "dealer-id", email: "dealer@example.com", display_name: "Dealer User", account_type: "user" as const };
+  let dealerName: string | null = null;
+  const auditEvents: unknown[][] = [];
+  const client = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+      if (sql.includes("set_config('app.tenant_id'")) return { rows: [] };
+      if (sql.includes("SELECT dealer_name FROM public.tenants")) return { rows: [{ dealer_name: dealerName }] };
+      if (sql.includes("UPDATE public.tenants SET dealer_name")) { dealerName = String(values[1]); return { rows: [] }; }
+      if (sql.includes("INSERT INTO public.admin_audit_events")) { auditEvents.push(values); return { rows: [] }; }
+      throw new Error("Unexpected dealer rename SQL: " + sql.slice(0, 80));
+    },
+    release: () => undefined,
+  };
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes("FROM public.app_sessions")) return { rows: values[0] === sessionHash ? [admin] : values[0] === dealerHash ? [dealerUser] : [] };
+      throw new Error("Unexpected identity pool SQL: " + sql.slice(0, 80));
+    },
+    connect: async () => client,
+  } as unknown as Pool;
+  const app = express();
+  app.use(express.json());
+  app.use("/auth", createIdentityRouter(pool, { production: false }));
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port + "/auth/admin/dealers/11111111-1111-4111-8111-111111111111/name";
+  const headers = { "content-type": "application/json", cookie: "bdc_os_session=" + sessionToken };
+  const response = await fetch(baseUrl, { method: "PATCH", headers, body: JSON.stringify({ name: "Country Club DMV" }) });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { dealer: { id: "11111111-1111-4111-8111-111111111111", name: "Country Club DMV" } });
+  assert.equal(dealerName, "Country Club DMV");
+  assert.equal(auditEvents[0]?.[6], "dealer.renamed");
+  const denied = await fetch(baseUrl, { method: "PATCH", headers: { ...headers, cookie: "bdc_os_session=" + dealerToken }, body: JSON.stringify({ name: "Not allowed" }) });
+  assert.equal(denied.status, 403);
+  assert.equal(dealerName, "Country Club DMV");
+  const invalid = await fetch(baseUrl, { method: "PATCH", headers, body: JSON.stringify({ name: "   " }) });
   assert.equal(invalid.status, 400);
 });
