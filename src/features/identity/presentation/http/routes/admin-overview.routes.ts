@@ -118,7 +118,7 @@ export function createAdminOverviewRoutes(pool: Pool, options: IdentityRouteOpti
       const offsetValue = Number(request.query.offset ?? 0);
       const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       const validDate = (value: string) => { if (!value) return true; if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const parsed = new Date(`${value}T00:00:00Z`); return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value; };
-      if ((dealerId && !validUuid.test(dealerId)) || (category && !["dealers", "users", "invitations", "settings", "security"].includes(category))
+      if ((dealerId && !validUuid.test(dealerId)) || (category && !["dealers", "users", "invitations", "settings", "security", "contacts"].includes(category))
           || actor.length > 254 || search.length > 180 || !validDate(from) || !validDate(to)
           || (from && to && from > to) || !Number.isInteger(limitValue) || limitValue < 1 || limitValue > 100
           || !Number.isInteger(offsetValue) || offsetValue < 0 || offsetValue > 1000000) {

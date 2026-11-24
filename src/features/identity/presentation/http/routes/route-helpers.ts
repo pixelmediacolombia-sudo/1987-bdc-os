@@ -70,7 +70,7 @@ export function invitationUrl(publicAppUrl: string, token: string): string {
   return url.toString();
 }
 
-type AuditCategory = "dealers" | "users" | "invitations" | "settings" | "security";
+type AuditCategory = "dealers" | "users" | "invitations" | "settings" | "security" | "contacts";
 type AuditInput = {
   actor: IdentityUser;
   dealerId?: string | null;

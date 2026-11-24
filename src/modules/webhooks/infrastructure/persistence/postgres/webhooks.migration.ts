@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS public.raw_webhooks (
   CONSTRAINT raw_webhooks_tenant_external_uq UNIQUE (tenant_id, external_id)
 );
 
+-- CRM contact records may receive a human-confirmed name after webhook ingestion.
+ALTER TABLE public.contacts ADD COLUMN IF NOT EXISTS display_name TEXT;
+
 ALTER TABLE public.raw_webhooks
   ADD COLUMN IF NOT EXISTS suppression_required BOOLEAN NOT NULL DEFAULT false;
 
