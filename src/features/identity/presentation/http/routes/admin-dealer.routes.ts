@@ -1,6 +1,7 @@
 import express, { type Request, type Response } from "express";
 import type { Pool } from "pg";
 import { findMetaCapiEnvConfig } from "@/modules/control/infrastructure/meta-capi.config";
+import { resolveDealerName } from "@/features/identity/dealer-name";
 import { loadAdminDealerDirectory, requireAdmin, type IdentityRouteOptions, type IdentityUser } from "./route-helpers";
 
 export function createAdminDealerRoutes(pool: Pool, options: IdentityRouteOptions): express.Router {
@@ -63,7 +64,7 @@ export function createAdminDealerRoutes(pool: Pool, options: IdentityRouteOption
       if (!await requireAdmin(pool, request, response)) return;
       const client = await pool.connect();
       let dealer: {
-        id: string; name: string | null; status: string; timezone: string | null; policy_version: string | null;
+        id: string; name: string | null; ghl_location_id: string | null; status: string; timezone: string | null; policy_version: string | null;
         financial_policy: Record<string, unknown> | null; sofia_enabled: boolean;
         qualification_flow_enabled: boolean; qualification_signal_enabled: boolean; meta_dataset_id: string | null;
         has_meta_access_token: boolean; meta_event_name: string | null; meta_capi_enabled: boolean;
@@ -75,7 +76,7 @@ export function createAdminDealerRoutes(pool: Pool, options: IdentityRouteOption
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.tenant_id', $1, true)", [dealerId]);
         const dealerResult = await client.query<NonNullable<typeof dealer>>(
-          `SELECT dealer_id::text AS id, dealer_name AS name, status, timezone, policy_version, financial_policy,
+          `SELECT dealer_id::text AS id, dealer_name AS name, ghl_location_id, status, timezone, policy_version, financial_policy,
                   sofia_enabled, qualification_flow_enabled, qualification_signal_enabled,
                   meta_dataset_id, (encrypted_meta_access_token IS NOT NULL AND length(encrypted_meta_access_token) > 0) AS has_meta_access_token,
                   meta_event_name, meta_capi_enabled, (meta_test_event_code IS NOT NULL AND length(meta_test_event_code) > 0) AS has_meta_test_event_code,
@@ -101,7 +102,7 @@ export function createAdminDealerRoutes(pool: Pool, options: IdentityRouteOption
       const metaCredentialSource = metaHasDealerCredential ? "dealer" : envMeta ? "environment" : "none";
       const financialPolicy = dealer.financial_policy && typeof dealer.financial_policy === "object" ? dealer.financial_policy : {};
       response.status(200).json({
-        dealer: { id: dealer.id, name: dealer.name, status: dealer.status, timezone: dealer.timezone },
+        dealer: { id: dealer.id, name: resolveDealerName(dealer.name, dealer.ghl_location_id), status: dealer.status, timezone: dealer.timezone },
         policy: { version: dealer.policy_version, financialPolicyKeys: Object.keys(financialPolicy).slice(0, 30) },
         flags: {
           sofiaEnabled: dealer.sofia_enabled, qualificationFlowEnabled: dealer.qualification_flow_enabled,

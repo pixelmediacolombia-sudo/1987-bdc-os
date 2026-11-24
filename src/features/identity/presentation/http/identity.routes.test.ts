@@ -126,7 +126,7 @@ test("admin creates an inert dealer and one-time invitation; invitee chooses a h
           id: "invite-1", tenant_id: createdDealerId, email: "owner@example.com", display_name: "Dealer Owner", dealer_name: "Sample Dealer",
         }] };
       }
-      if (sql.includes("SELECT dealer_name FROM public.tenants")) return { rows: [{ dealer_name: "Sample Dealer" }] };
+      if (sql.includes("SELECT dealer_name, ghl_location_id FROM public.tenants")) return { rows: [{ dealer_name: "Sample Dealer", ghl_location_id: null }] };
       if (sql.includes("SELECT id::text, account_type, status FROM public.app_users")) return { rows: [] };
       if (sql.includes("INSERT INTO public.app_users")) {
         createdPasswordHash = String(values[2]);
@@ -241,7 +241,7 @@ test("only an admin can delete a dealer and the handler reports missing dealers"
     query: async (sql: string, values: unknown[] = []) => {
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
       if (sql.includes("set_config('app.tenant_id'")) return { rows: [] };
-      if (sql.includes("SELECT dealer_name FROM public.tenants")) return values[0] === "11111111-1111-4111-8111-111111111113" ? { rows: [] } : { rows: [{ dealer_name: "Delete Test Dealer" }] };
+      if (sql.includes("SELECT dealer_name, ghl_location_id FROM public.tenants")) return values[0] === "11111111-1111-4111-8111-111111111113" ? { rows: [] } : { rows: [{ dealer_name: "Delete Test Dealer", ghl_location_id: null }] };
       if (sql.includes("DELETE FROM public.tenants")) { deleted.push(String(values[0])); return { rows: [] }; }
       if (sql.includes("INSERT INTO public.admin_audit_events")) { auditEvents.push(values); return { rows: [] }; }
       throw new Error(`Unexpected identity delete SQL: ${sql.slice(0, 80)}`);

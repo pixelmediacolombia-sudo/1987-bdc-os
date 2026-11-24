@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import express, { type Request, type Response } from "express";
 import type { Pool } from "pg";
+import { resolveDealerName } from "@/features/identity/dealer-name";
 import { appendAudit, auditReference, invitationUrl, requireAdmin, tokenDigest, validEmail, INVITATION_TTL_HOURS, type IdentityRouteOptions, type IdentityUser } from "./route-helpers";
 
 export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRouteOptions): express.Router {
@@ -22,8 +23,8 @@ export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRou
     try {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [dealerId]);
-      const existing = await client.query<{ dealer_name: string | null }>(
-        "SELECT dealer_name FROM public.tenants WHERE dealer_id = $1 FOR UPDATE", [dealerId],
+      const existing = await client.query<{ dealer_name: string | null; ghl_location_id: string | null }>(
+        "SELECT dealer_name, ghl_location_id FROM public.tenants WHERE dealer_id = $1 FOR UPDATE", [dealerId],
       );
       if (!existing.rows[0]) {
         await client.query("ROLLBACK");
@@ -31,7 +32,7 @@ export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRou
         return;
       }
       await client.query("DELETE FROM public.tenants WHERE dealer_id = $1", [dealerId]);
-      await appendAudit(client, { actor: admin, dealerId, dealerName: existing.rows[0].dealer_name,
+      await appendAudit(client, { actor: admin, dealerId, dealerName: resolveDealerName(existing.rows[0].dealer_name, existing.rows[0].ghl_location_id),
         category: "dealers", action: "dealer.deleted", summary: "Dealer eliminado por el administrador.", referenceId: auditReference(request) });
       await client.query("COMMIT");
       response.status(204).end();
@@ -139,8 +140,8 @@ export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRou
     try {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [request.params.dealerId]);
-      const tenant = await client.query<{ id: string; dealer_name: string | null }>(
-        "SELECT dealer_id::text AS id, dealer_name FROM public.tenants WHERE dealer_id = $1 FOR UPDATE",
+      const tenant = await client.query<{ id: string; dealer_name: string | null; ghl_location_id: string | null }>(
+        "SELECT dealer_id::text AS id, dealer_name, ghl_location_id FROM public.tenants WHERE dealer_id = $1 FOR UPDATE",
         [request.params.dealerId],
       );
       if (!tenant.rows[0]) {
@@ -152,6 +153,7 @@ export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRou
         "SELECT account_type, status FROM public.app_users WHERE lower(email) = $1 LIMIT 1",
         [email],
       );
+      const dealerName = resolveDealerName(tenant.rows[0].dealer_name, tenant.rows[0].ghl_location_id) ?? "tu dealer";
       if (existing.rows[0]?.account_type === "admin") {
         await client.query("ROLLBACK");
         response.status(409).json({ error: "No se puede invitar una cuenta administradora como usuario de dealer." });
@@ -175,14 +177,14 @@ export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRou
          VALUES ($1, $2, $3, $4, $5, now() + ($6 * interval '1 hour'))`,
         [tenant.rows[0].id, email, displayName, tokenDigest(rawToken), admin.id, INVITATION_TTL_HOURS],
       );
-      await appendAudit(client, { actor: admin, dealerId: tenant.rows[0].id, dealerName: tenant.rows[0].dealer_name,
+      await appendAudit(client, { actor: admin, dealerId: tenant.rows[0].id, dealerName,
         category: "invitations", action: "invitation.created", summary: `Invitación emitida para ${email}.`, referenceId: auditReference(request) });
       await client.query("COMMIT");
       const url = invitationUrl(publicAppUrl, rawToken);
       let delivery: "sent" | "manual" | "failed" = "manual";
       if (options.invitationMailer) {
         try {
-          await options.invitationMailer.send({ to: email, displayName, dealerName: tenant.rows[0].dealer_name ?? "tu dealer", invitationUrl: url, expiresInHours: INVITATION_TTL_HOURS });
+          await options.invitationMailer.send({ to: email, displayName, dealerName, invitationUrl: url, expiresInHours: INVITATION_TTL_HOURS });
           delivery = "sent";
         } catch {
           delivery = "failed";

@@ -17,7 +17,7 @@ test("admin dealer configuration exposes safe state and never returns stored cre
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
       if (sql.includes("set_config")) { assert.deepEqual(values, [dealerId]); return { rows: [] }; }
       if (sql.includes("FROM public.capi_events")) return { rows: [{ status: "sent", created_at: "2026-11-20T12:30:00.000Z" }] };
-      if (sql.includes("FROM public.tenants")) return { rows: [{ id: dealerId, name: "Demo Dealer", status: "active", timezone: "America/Bogota", policy_version: "policy-v1", financial_policy: { downPaymentMinimum: 1000 }, sofia_enabled: true, qualification_flow_enabled: true, qualification_signal_enabled: false, meta_dataset_id: "dataset-1", has_meta_access_token: true, meta_event_name: "LeadSubmitted", meta_capi_enabled: true, has_meta_test_event_code: true, facebook_page_id: "page-1", conversational_ai_shadow_enabled: true, conversational_ai_send_enabled: false }] };
+      if (sql.includes("FROM public.tenants")) return { rows: [{ id: dealerId, name: null, ghl_location_id: "k9DePpsNBu9qWT1C6pW0", status: "active", timezone: "America/Bogota", policy_version: "policy-v1", financial_policy: { downPaymentMinimum: 1000 }, sofia_enabled: true, qualification_flow_enabled: true, qualification_signal_enabled: false, meta_dataset_id: "dataset-1", has_meta_access_token: true, meta_event_name: "LeadSubmitted", meta_capi_enabled: true, has_meta_test_event_code: true, facebook_page_id: "page-1", conversational_ai_shadow_enabled: true, conversational_ai_send_enabled: false }] };
       return { rows: [] };
     }, release: () => undefined,
   } as unknown as PoolClient;
@@ -39,6 +39,7 @@ test("admin dealer configuration exposes safe state and never returns stored cre
   assert.equal(response.status, 200);
   const body = await response.text();
   assert.doesNotMatch(body, /ENCRYPTED_META_SECRET|TEST_SECRET/);
+  assert.match(body, /"name":"Country Club DMV"/);
   assert.match(body, /"hasCredential":true/);
   assert.match(body, /"lastEventStatus":"sent"/);
   assert.ok(calls.some((sql) => sql.includes("set_config('app.tenant_id'")));
