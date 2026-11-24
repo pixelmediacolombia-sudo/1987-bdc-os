@@ -38,8 +38,6 @@ import { RegisteredOutboundMessageSender } from "@/modules/control/application/r
 import { OutboundDeliveryReconciliationController } from "@/presentation/http/outbound-delivery-reconciliation.controller";
 import { PostgresInternalDiagnosticAudit } from "@/presentation/http/postgres-internal-diagnostic-audit";
 import { createIdentityRouter } from "@/features/identity/presentation/http/identity.routes";
-import { LocalSofiaSimulatorService } from "@/features/local-sofia-simulator/application/local-sofia-simulator.service";
-import { createLocalSofiaSimulatorRouter } from "@/features/local-sofia-simulator/presentation/http/local-sofia-simulator.routes";
 import { createSmtpDealerInvitationMailer } from "@/features/identity/infrastructure/email/smtp-dealer-invitation-mailer";
 import { MetaWebhookController } from "@/features/meta/presentation/http/meta-webhook.controller";
 import { MetaGraphApiClient } from "@/features/meta/infrastructure/meta-graph-api.client";
@@ -92,17 +90,17 @@ export async function createBackendRuntime(config: AppConfig, pool: Pool, redis:
     outboundRegistry,
     metaOutboundProvider,
   );
-  const conversationalModel = config.conversationalAiEnabled
-    ? new OpenAICompatibleConversationalModel(
-        config.conversationalModelBaseUrl,
-        config.conversationalModelApiKey!,
-        config.conversationalExtractionModel,
-        config.conversationalDraftingModel,
-        config.conversationalModelTimeoutMs,
+  const conversationalAi = config.conversationalAiEnabled
+    ? new ConversationAiService(
+        new OpenAICompatibleConversationalModel(
+          config.conversationalModelBaseUrl,
+          config.conversationalModelApiKey!,
+          config.conversationalExtractionModel,
+          config.conversationalDraftingModel,
+          config.conversationalModelTimeoutMs,
+        ),
+        new PostgresConversationAiShadowRepository(pool),
       )
-    : undefined;
-  const conversationalAi = conversationalModel
-    ? new ConversationAiService(conversationalModel, new PostgresConversationAiShadowRepository(pool))
     : undefined;
   const sofiaRepository = config.sofiaEnabled ? new PostgresSofiaStateRepository(pool) : undefined;
   const qualificationFlow = config.qualificationFlowEnabled
@@ -207,11 +205,6 @@ export async function createBackendRuntime(config: AppConfig, pool: Pool, redis:
       production: config.nodeEnv === "production",
       allowedRemoteIps: config.internalDiagnosticAllowedRemoteIps,
     } : undefined,
-    localSofiaSimulatorRouter: config.nodeEnv === "development"
-      ? createLocalSofiaSimulatorRouter(pool, config.sofiaEnabled && conversationalModel
-        ? new LocalSofiaSimulatorService(conversationalModel)
-        : undefined, config.conversationalModelBaseUrl)
-      : undefined,
     identityRouter: createIdentityRouter(pool, {
       production: config.nodeEnv === "production",
       publicAppUrl: process.env.BDC_APP_URL,

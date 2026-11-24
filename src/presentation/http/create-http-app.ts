@@ -24,7 +24,6 @@ export type HttpAppOptions = {
   dashboardRouter?: express.Router;
   internalDiagnostics?: InternalDiagnosticsOptions;
   identityRouter?: express.Router;
-  localSofiaSimulatorRouter?: express.Router;
   metaWebhook?: { controller: MetaWebhookController; appSecret?: string };
   metaOAuth?: MetaOAuthController;
 };
@@ -35,7 +34,6 @@ export function createHttpApp(options: HttpAppOptions = {}): Express {
   if (options.dashboardRouter) app.use("/mi-dia", options.dashboardRouter);
   app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
   if (options.identityRouter) app.use("/auth", express.json({ limit: "16kb" }), options.identityRouter);
-  if (options.localSofiaSimulatorRouter) app.use("/auth", express.json({ limit: "16kb" }), options.localSofiaSimulatorRouter);
   if (options.metaOAuth) app.get("/oauth/meta/callback", options.metaOAuth.callback);
   if (options.metaWebhook) app.use("/webhooks/meta", createMetaWebhookRouter(options.metaWebhook.controller, options.metaWebhook.appSecret));
   if (options.internalDiagnostics) {
