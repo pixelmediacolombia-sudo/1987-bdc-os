@@ -57,7 +57,7 @@ test("admin bootstrap creates the normalized account in development and producti
       NODE_ENV: nodeEnvironment,
       BDC_ADMIN_EMAIL: " Admin@Example.com ",
       BDC_ADMIN_NAME: "Test Admin",
-      BDC_ADMIN_PASSWORD_HASH: hash,
+      BDC_ADMIN_PASSWORD_HASH: nodeEnvironment === "production" ? hash.replace(/\$/g, "$$") : hash,
     });
     assert.equal(inserted, true);
     assert.equal(calls.length, 2);

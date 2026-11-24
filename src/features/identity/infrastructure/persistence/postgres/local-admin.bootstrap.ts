@@ -30,7 +30,7 @@ export async function bootstrapLocalAdmin(
 
   const email = environment.BDC_ADMIN_EMAIL!.trim().toLowerCase();
   const displayName = environment.BDC_ADMIN_NAME!.trim();
-  const passwordHash = environment.BDC_ADMIN_PASSWORD_HASH!.trim();
+  const passwordHash = environment.BDC_ADMIN_PASSWORD_HASH!.trim().replace(/\$\$/g, "$");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error("BDC_ADMIN_EMAIL must be a valid email address");
   }
