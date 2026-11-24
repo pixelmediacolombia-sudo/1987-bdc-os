@@ -70,8 +70,23 @@ CREATE TABLE IF NOT EXISTS public.tenant_processing_routes (
   dealer_id UUID PRIMARY KEY REFERENCES public.tenants(dealer_id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Backfill only identifiers already present in trusted child records. Directly
+-- scanning public.tenants here is ineffective because FORCE RLS hides rows
+-- without app.tenant_id; do not weaken that policy for migrations.
 INSERT INTO public.tenant_processing_routes (dealer_id)
-SELECT dealer_id FROM public.tenants ON CONFLICT (dealer_id) DO NOTHING;
+SELECT tenant_id FROM public.user_tenant_memberships
+UNION
+SELECT tenant_id FROM public.dealer_invitations
+ON CONFLICT (dealer_id) DO NOTHING;
+DO $backfill_legacy_routes$
+BEGIN
+  IF to_regclass('public.tenant_location_routes') IS NOT NULL THEN
+    EXECUTE 'INSERT INTO public.tenant_processing_routes (dealer_id)
+             SELECT dealer_id FROM public.tenant_location_routes
+             ON CONFLICT (dealer_id) DO NOTHING';
+  END IF;
+END;
+$backfill_legacy_routes$;
 CREATE OR REPLACE FUNCTION public.sync_tenant_processing_route()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 BEGIN
@@ -85,7 +100,7 @@ CREATE TRIGGER tenants_sync_processing_route AFTER INSERT ON public.tenants
 FOR EACH ROW EXECUTE FUNCTION public.sync_tenant_processing_route();
 REVOKE ALL ON TABLE public.tenant_processing_routes FROM PUBLIC;
 
-CREATE OR REPLACE FUNCTION public.list_qualification_signal_dealers()
+CREATE OR REPLACE FUNCTION public.list_tenant_route_ids()
 RETURNS TABLE(dealer_id UUID)
 LANGUAGE SQL
 STABLE
@@ -95,7 +110,19 @@ AS $$
   SELECT route.dealer_id FROM public.tenant_processing_routes AS route;
 $$;
 
+CREATE OR REPLACE FUNCTION public.list_qualification_signal_dealers()
+RETURNS TABLE(dealer_id UUID)
+LANGUAGE SQL
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+  SELECT route.dealer_id FROM public.list_tenant_route_ids() AS route;
+$$;
+
+REVOKE ALL ON FUNCTION public.list_tenant_route_ids() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.list_qualification_signal_dealers() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.list_tenant_route_ids() TO bdc;
 GRANT EXECUTE ON FUNCTION public.list_qualification_signal_dealers() TO bdc;
 `;
 

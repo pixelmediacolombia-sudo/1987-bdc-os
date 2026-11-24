@@ -51,18 +51,29 @@ export class MetaOAuthController {
     }
 
     try {
-      const tenant = await this.pool.query<{ facebook_page_id: string | null }>(
-        "SELECT facebook_page_id FROM public.tenants WHERE dealer_id = $1 LIMIT 1", [tenantId],
-      );
-      if (!tenant.rows[0]) {
+      const tenantClient = await this.pool.connect();
+      let tenant: { facebook_page_id: string | null } | undefined;
+      try {
+        await tenantClient.query("BEGIN");
+        await tenantClient.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+        const result = await tenantClient.query<{ facebook_page_id: string | null }>(
+          "SELECT facebook_page_id FROM public.tenants WHERE dealer_id = $1 LIMIT 1", [tenantId],
+        );
+        tenant = result.rows[0];
+        await tenantClient.query("COMMIT");
+      } catch (error) {
+        await tenantClient.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally { tenantClient.release(); }
+      if (!tenant) {
         response.status(404).json({ error: "Dealer for Meta connection was not found" });
         return;
       }
       const shortLived = await this.client.exchangeCode(code);
       const userToken = await this.client.exchangeLongLivedToken(shortLived.accessToken);
       const assets = await this.client.listAssets(userToken.accessToken);
-      const page = tenant.rows[0].facebook_page_id
-        ? assets.pages.find((asset) => asset.id === tenant.rows[0]?.facebook_page_id)
+      const page = tenant.facebook_page_id
+        ? assets.pages.find((asset) => asset.id === tenant?.facebook_page_id)
         : assets.pages.length === 1 ? assets.pages[0] : undefined;
       if (!page && assets.pages.length > 0) {
         response.status(409).json({ error: "Meta returned multiple Pages; configure the dealer's Page ID before connecting" });
@@ -79,7 +90,18 @@ export class MetaOAuthController {
         ...(whatsappPhoneNumberId ? { whatsappAccessToken: userToken.accessToken } : {}),
         grantedScopes: assets.grantedScopes,
       });
-      if (page) await this.pool.query("UPDATE public.tenants SET facebook_page_id = $2 WHERE dealer_id = $1", [tenantId, page.id]);
+      if (page) {
+        const updateClient = await this.pool.connect();
+        try {
+          await updateClient.query("BEGIN");
+          await updateClient.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+          await updateClient.query("UPDATE public.tenants SET facebook_page_id = $2 WHERE dealer_id = $1", [tenantId, page.id]);
+          await updateClient.query("COMMIT");
+        } catch (error) {
+          await updateClient.query("ROLLBACK").catch(() => undefined);
+          throw error;
+        } finally { updateClient.release(); }
+      }
       const result = new URL(this.appUrl ?? this.redirectUri);
       result.searchParams.set("meta_connection", "connected");
       result.searchParams.set("dealer_id", tenantId);

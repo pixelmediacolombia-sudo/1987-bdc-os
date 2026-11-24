@@ -14,15 +14,16 @@ test("admin dealer configuration exposes safe state and never returns stored cre
   const client = {
     query: async (sql: string, values: unknown[] = []) => {
       calls.push(sql);
+      if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
       if (sql.includes("set_config")) { assert.deepEqual(values, [dealerId]); return { rows: [] }; }
       if (sql.includes("FROM public.capi_events")) return { rows: [{ status: "sent", created_at: "2026-11-20T12:30:00.000Z" }] };
+      if (sql.includes("FROM public.tenants")) return { rows: [{ id: dealerId, name: "Demo Dealer", status: "active", timezone: "America/Bogota", policy_version: "policy-v1", financial_policy: { downPaymentMinimum: 1000 }, sofia_enabled: true, qualification_flow_enabled: true, qualification_signal_enabled: false, meta_dataset_id: "dataset-1", has_meta_access_token: true, meta_event_name: "LeadSubmitted", meta_capi_enabled: true, has_meta_test_event_code: true, facebook_page_id: "page-1", conversational_ai_shadow_enabled: true, conversational_ai_send_enabled: false }] };
       return { rows: [] };
     }, release: () => undefined,
   } as unknown as PoolClient;
   const pool = {
     query: async (sql: string, values: unknown[] = []) => {
       if (sql.includes("FROM public.app_sessions")) return { rows: values[0] === tokenHash ? [{ id: "admin-id", email: "admin@example.com", display_name: "Admin", account_type: "admin" }] : [] };
-      if (sql.includes("FROM public.tenants")) return { rows: [{ id: dealerId, name: "Demo Dealer", status: "active", timezone: "America/Bogota", policy_version: "policy-v1", financial_policy: { downPaymentMinimum: 1000 }, sofia_enabled: true, qualification_flow_enabled: true, qualification_signal_enabled: false, meta_dataset_id: "dataset-1", has_meta_access_token: true, meta_event_name: "LeadSubmitted", meta_capi_enabled: true, has_meta_test_event_code: true, facebook_page_id: "page-1", conversational_ai_shadow_enabled: true, conversational_ai_send_enabled: false }] };
       throw new Error(`Unexpected configuration SQL: ${sql.slice(0, 100)}`);
     }, connect: async () => client,
   } as unknown as Pool;
@@ -69,11 +70,15 @@ test("dealer configuration rejects invalid and unauthenticated requests", async 
 test("dealer configuration returns not found for a dealer that does not exist", async (context) => {
   const token = "configuration-missing-dealer-admin";
   const tokenHash = createHash("sha256").update(token).digest("hex");
+  const client = { query: async (sql: string) => {
+    if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+    if (sql.includes("FROM public.tenants")) return { rows: [] };
+    return { rows: [] };
+  }, release: () => undefined };
   const pool = { query: async (sql: string, values: unknown[] = []) => {
     if (sql.includes("FROM public.app_sessions")) return { rows: values[0] === tokenHash ? [{ id: "admin-id", email: "admin@example.com", display_name: "Admin", account_type: "admin" }] : [] };
-    if (sql.includes("FROM public.tenants")) return { rows: [] };
     throw new Error(`Unexpected dealer configuration SQL: ${sql.slice(0, 100)}`);
-  } } as unknown as Pool;
+  }, connect: async () => client } as unknown as Pool;
   const app = express();
   app.use("/auth", createIdentityRouter(pool, { production: false }));
   const server = app.listen(0, "127.0.0.1");

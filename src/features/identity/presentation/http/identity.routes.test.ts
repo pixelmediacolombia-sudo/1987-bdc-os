@@ -98,7 +98,7 @@ test("admin creates an inert dealer and one-time invitation; invitee chooses a h
   const sessionToken = "admin-browser-session";
   const sessionHash = createHash("sha256").update(sessionToken).digest("hex");
   const admin = { id: "admin-id", email, display_name: "Local Admin", account_type: "admin" as const };
-  const dealerId = "dealer-123";
+  let createdDealerId = "";
   let invitationDigest = "";
   let createdPasswordHash = "";
   let invitationAccepted = false;
@@ -106,13 +106,15 @@ test("admin creates an inert dealer and one-time invitation; invitee chooses a h
   const client = {
     query: async (sql: string, values: unknown[] = []) => {
       if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [] };
+      if (sql.includes("set_config('app.tenant_id'")) { createdDealerId = String(values[0]); return { rows: [] }; }
       if (sql.includes("INSERT INTO public.admin_audit_events")) { auditEvents.push(values); return { rows: [] }; }
       if (sql.includes("FROM public.app_users WHERE lower(email) = $1")) return { rows: [] };
       if (sql.includes("INSERT INTO public.tenants")) {
-        assert.equal(values[0], "Sample Dealer");
-        assert.match(sql, /NULL, \$1/);
+        assert.equal(values[1], "Sample Dealer");
+        assert.match(sql, /VALUES \(\$1, \$2/);
         assert.match(sql, /false, false, false/);
-        return { rows: [{ id: dealerId }] };
+        assert.equal(values[0], createdDealerId);
+        return { rows: [{ id: createdDealerId }] };
       }
       if (sql.includes("INSERT INTO public.dealer_invitations")) {
         invitationDigest = String(values[3]);
@@ -121,16 +123,17 @@ test("admin creates an inert dealer and one-time invitation; invitee chooses a h
       if (sql.includes("SELECT i.id::text")) {
         assert.equal(values[0], invitationDigest);
         return { rows: invitationAccepted ? [] : [{
-          id: "invite-1", tenant_id: dealerId, email: "owner@example.com", display_name: "Dealer Owner", dealer_name: "Sample Dealer",
+          id: "invite-1", tenant_id: createdDealerId, email: "owner@example.com", display_name: "Dealer Owner", dealer_name: "Sample Dealer",
         }] };
       }
+      if (sql.includes("SELECT dealer_name FROM public.tenants")) return { rows: [{ dealer_name: "Sample Dealer" }] };
       if (sql.includes("SELECT id::text, account_type, status FROM public.app_users")) return { rows: [] };
       if (sql.includes("INSERT INTO public.app_users")) {
         createdPasswordHash = String(values[2]);
         return { rows: [{ id: "owner-id" }] };
       }
       if (sql.includes("INSERT INTO public.user_tenant_memberships")) {
-        assert.deepEqual(values, ["owner-id", dealerId]);
+        assert.deepEqual(values, ["owner-id", createdDealerId]);
         return { rows: [] };
       }
       if (sql.includes("UPDATE public.dealer_invitations SET accepted_at")) {
@@ -165,7 +168,7 @@ test("admin creates an inert dealer and one-time invitation; invitee chooses a h
   });
   assert.equal(created.status, 201);
   const createdBody = await created.json() as { dealer: { id: string; status: string }; invitation: { url: string; expiresInHours: number } };
-  assert.equal(createdBody.dealer.id, dealerId);
+  assert.equal(createdBody.dealer.id, createdDealerId);
   assert.equal(createdBody.dealer.status, "onboarding");
   assert.equal(createdBody.invitation.expiresInHours, 72);
   const inviteUrl = new URL(createdBody.invitation.url);
@@ -237,6 +240,7 @@ test("only an admin can delete a dealer and the handler reports missing dealers"
   const client = {
     query: async (sql: string, values: unknown[] = []) => {
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+      if (sql.includes("set_config('app.tenant_id'")) return { rows: [] };
       if (sql.includes("SELECT dealer_name FROM public.tenants")) return values[0] === "11111111-1111-4111-8111-111111111113" ? { rows: [] } : { rows: [{ dealer_name: "Delete Test Dealer" }] };
       if (sql.includes("DELETE FROM public.tenants")) { deleted.push(String(values[0])); return { rows: [] }; }
       if (sql.includes("INSERT INTO public.admin_audit_events")) { auditEvents.push(values); return { rows: [] }; }

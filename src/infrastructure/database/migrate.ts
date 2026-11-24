@@ -9,6 +9,8 @@ import { ensureSharedDealerPolicy } from "@/modules/control/infrastructure/persi
 import { ensureConversationAiShadowTables } from "@/modules/control/infrastructure/persistence/postgres/conversation-ai-shadow.migration";
 import { ensureInternalDiagnosticAuditTable } from "@/presentation/http/internal-diagnostic-audit.migration";
 import { ensureIdentityTables } from "@/features/identity/infrastructure/persistence/postgres/identity.migration";
+import { ensureAdminAuditTable } from "@/features/identity/infrastructure/persistence/postgres/admin-audit.migration";
+import { ensureTenantRowLevelSecurity } from "@/features/identity/infrastructure/persistence/postgres/tenant-rls.migration";
 
 async function main(): Promise<void> {
   const config = loadAppConfig();
@@ -16,6 +18,7 @@ async function main(): Promise<void> {
   try {
     await ensureWebhookTables(pool);
     await ensureIdentityTables(pool);
+    await ensureAdminAuditTable(pool);
     await ensureTenantFeatureFlags(pool);
     await ensureMemoryTables(pool);
     await ensureDecisionLogsTable(pool);
@@ -23,6 +26,7 @@ async function main(): Promise<void> {
     await ensureConversationAiShadowTables(pool);
     await ensureInternalDiagnosticAuditTable(pool);
     const sharedDealerActivated = await ensureSharedDealerPolicy(pool);
+    await ensureTenantRowLevelSecurity(pool);
     console.log(`Database migration completed: webhooks, identity, tenant flags, facts, objectives, Sofia state, qualification signals, Meta messaging, and shared dealer policy baseline are ready (shared_dealer_activated=${sharedDealerActivated}).`);
   } finally {
     await pool.end();
