@@ -258,7 +258,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
       message.channel,
     );
 
-    await client.query(
+    const insertedMessage = await client.query(
       `INSERT INTO public.messages
          (tenant_id, conversation_id, external_id, direction, sender_type, content, semantic_hash, status)
        VALUES ($1, $2, $3, 'inbound', 'client', $4, $5, 'received')
@@ -269,9 +269,11 @@ export class PostgresWebhookRepository implements WebhookRepository {
     await client.query(
       `UPDATE public.conversations
           SET last_activity = now(),
-              state = CASE WHEN state = 'paused' THEN state ELSE 'open' END
+              state = CASE WHEN state = 'paused' THEN state ELSE 'open' END,
+              read_at = CASE WHEN $2 THEN NULL ELSE read_at END,
+              read_by_user_id = CASE WHEN $2 THEN NULL ELSE read_by_user_id END
         WHERE id = $1`,
-      [conversation.id],
+      [conversation.id, insertedMessage.rowCount === 1],
     );
   }
 

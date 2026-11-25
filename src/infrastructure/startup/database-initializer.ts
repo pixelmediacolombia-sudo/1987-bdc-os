@@ -8,6 +8,7 @@ import { ensureSharedDealerPolicy } from "@/modules/control/infrastructure/persi
 import { ensureConversationAiShadowTables } from "@/modules/control/infrastructure/persistence/postgres/conversation-ai-shadow.migration";
 import { ensureInternalDiagnosticAuditTable } from "@/presentation/http/internal-diagnostic-audit.migration";
 import { ensureIdentityTables } from "@/features/identity/infrastructure/persistence/postgres/identity.migration";
+import { ensureConversationWorkflowColumns } from "@/features/contacts/infrastructure/persistence/postgres/conversation-workflow.migration";
 import { ensureAdminAuditTable } from "@/features/identity/infrastructure/persistence/postgres/admin-audit.migration";
 import { ensureTenantRowLevelSecurity } from "@/features/identity/infrastructure/persistence/postgres/tenant-rls.migration";
 import { bootstrapLocalAdmin } from "@/features/identity/infrastructure/persistence/postgres/local-admin.bootstrap";
@@ -17,6 +18,7 @@ import { ensureRuntimeRolePrivileges } from "@/infrastructure/database/runtime-r
 export async function initializeDatabase(pool: Pool): Promise<void> {
   await ensureWebhookTables(pool);
   await ensureIdentityTables(pool);
+  await ensureConversationWorkflowColumns(pool);
   await ensureAdminAuditTable(pool);
   const localAdminCreated = await bootstrapLocalAdmin(pool);
   if (localAdminCreated) console.info("[Identity] local platform admin bootstrapped");
