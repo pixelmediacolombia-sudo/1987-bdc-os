@@ -370,8 +370,9 @@ test("local Docker Admin directory and tenant data respect forced RLS", {
 
     const contactDetailResponse = await fetch(`http://127.0.0.1:${address.port}/auth/contacts/${contactId}?dealerId=${tenantIds[0]}`, { headers: memberHeaders });
     assert.equal(contactDetailResponse.status, 200);
-    const contactDetail = await contactDetailResponse.json() as { contact: { conversations: Array<{ messages: Array<{ content: string }> }> } };
+    const contactDetail = await contactDetailResponse.json() as { contact: { conversations: Array<{ messages: Array<{ content: string }> }>; activities: Array<{ action: string }> } };
     assert.equal(contactDetail.contact.conversations[0]?.messages[0]?.content, "synthetic RLS message");
+    assert.deepEqual(contactDetail.contact.activities, []);
 
     const crossTenantContactResponse = await fetch(`http://127.0.0.1:${address.port}/auth/contacts?dealerId=${tenantIds[1]}`, { headers: memberHeaders });
     assert.equal(crossTenantContactResponse.status, 403);
@@ -399,6 +400,13 @@ test("local Docker Admin directory and tenant data respect forced RLS", {
     const updatedContact = await updateContactResponse.json() as { contact: { displayName: string; consentState: string } };
     assert.equal(updatedContact.contact.displayName, "Updated Synthetic Runtime Contact");
     assert.equal(updatedContact.contact.consentState, "unknown");
+
+    const persistedContactDetailResponse = await fetch(`http://127.0.0.1:${address.port}/auth/contacts/${createdContact.contact.id}?dealerId=${tenantIds[0]}`, { headers: memberHeaders });
+    assert.equal(persistedContactDetailResponse.status, 200);
+    const persistedContactDetail = await persistedContactDetailResponse.json() as { contact: { activities: Array<{ action: string; actorName: string; summary: string }> } };
+    assert.deepEqual(persistedContactDetail.contact.activities.map((item) => item.action).sort(), ["contact.created", "contact.updated"]);
+    assert.ok(persistedContactDetail.contact.activities.every((item) => item.actorName === "Synthetic RLS Member"));
+    assert.ok(persistedContactDetail.contact.activities.every((item) => !item.summary.includes(createdContact.contact.id)));
   } finally {
     if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
     await client.query("ROLLBACK").catch(() => undefined);

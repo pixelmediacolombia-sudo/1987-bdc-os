@@ -79,6 +79,7 @@ type AuditInput = {
   action: string;
   summary: string;
   referenceId: string;
+  entityId?: string | null;
 };
 
 export function auditReference(request: Request): string {
@@ -91,10 +92,10 @@ export function auditReference(request: Request): string {
 export async function appendAudit(client: PoolClient, input: AuditInput): Promise<void> {
   await client.query(
     `INSERT INTO public.admin_audit_events
-       (actor_user_id, actor_email, actor_name, target_tenant_id, dealer_name, category, action, outcome, summary, reference_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'success', $8, $9)`,
+       (actor_user_id, actor_email, actor_name, target_tenant_id, dealer_name, category, action, outcome, summary, reference_id, entity_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'success', $8, $9, $10)`,
     [input.actor.id, input.actor.email, input.actor.display_name, input.dealerId ?? null,
-      input.dealerName ?? null, input.category, input.action, input.summary, input.referenceId],
+      input.dealerName ?? null, input.category, input.action, input.summary, input.referenceId, input.entityId ?? null],
   );
 }
 

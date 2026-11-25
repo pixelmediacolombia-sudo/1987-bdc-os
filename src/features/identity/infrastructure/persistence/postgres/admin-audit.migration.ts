@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS public.admin_audit_events (
   actor_email TEXT NOT NULL,
   actor_name TEXT NOT NULL,
   target_tenant_id UUID,
+  entity_id TEXT,
   dealer_name TEXT,
   category TEXT NOT NULL CHECK (category IN ('dealers', 'users', 'invitations', 'settings', 'security', 'contacts')),
   action TEXT NOT NULL,
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS public.admin_audit_events (
 ALTER TABLE public.admin_audit_events DROP CONSTRAINT IF EXISTS admin_audit_events_category_check;
 ALTER TABLE public.admin_audit_events ADD CONSTRAINT admin_audit_events_category_check
   CHECK (category IN ('dealers', 'users', 'invitations', 'settings', 'security', 'contacts'));
+ALTER TABLE public.admin_audit_events ADD COLUMN IF NOT EXISTS entity_id TEXT;
 
 CREATE INDEX IF NOT EXISTS admin_audit_events_created_idx
   ON public.admin_audit_events (created_at DESC, id DESC);
@@ -28,6 +30,9 @@ CREATE INDEX IF NOT EXISTS admin_audit_events_actor_idx
   ON public.admin_audit_events (lower(actor_email), created_at DESC);
 CREATE INDEX IF NOT EXISTS admin_audit_events_category_idx
   ON public.admin_audit_events (category, created_at DESC);
+CREATE INDEX IF NOT EXISTS admin_audit_events_entity_idx
+  ON public.admin_audit_events (target_tenant_id, category, entity_id, created_at DESC, id DESC)
+  WHERE entity_id IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION public.prevent_admin_audit_mutation()
 RETURNS trigger LANGUAGE plpgsql AS $function$

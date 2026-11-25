@@ -40,6 +40,10 @@ function fakePool(options: { accountType?: "admin" | "user"; member?: boolean; c
         lastActivity: "2026-11-24T10:00:00.000Z", messageId: "66666666-6666-4666-8666-666666666666",
         direction: "inbound", senderType: "contact", content: "Mensaje de prueba", createdAt: "2026-11-24T10:00:00.000Z",
       }], rowCount: 1 };
+      if (sql.includes("FROM public.admin_audit_events") && sql.includes("entity_id")) return { rows: [{
+        id: "77777777-7777-4777-8777-777777777777", action: "contact.updated", actorName: "Dealer",
+        summary: "Se actualizaron campos de la ficha: displayName.", createdAt: "2026-11-24T11:00:00.000Z",
+      }], rowCount: 1 };
       if (sql.includes("INSERT INTO public.contacts")) return { rows: [{
         id: contactId, dealerId, providerContactId: "manual:contact-1", displayName: "Ana Prueba", source: "manual",
         phone: "+15550101000", email: "ana@example.test", preferredLanguage: "es", consentState: "unknown",
@@ -105,6 +109,8 @@ test("contact detail exposes the selected dealer conversation history", async ()
   const result = await send("/contacts/" + contactId + "?dealerId=" + dealerId);
   assert.equal(result.response.status, 200);
   assert.equal(result.payload.contact.conversations[0].messages[0].content, "Mensaje de prueba");
+  assert.equal(result.payload.contact.activities[0].action, "contact.updated");
+  assert.equal(result.payload.contact.activities[0].actorName, "Dealer");
 });
 
 test("contact detail returns not found when the contact is not in that dealer", async () => {

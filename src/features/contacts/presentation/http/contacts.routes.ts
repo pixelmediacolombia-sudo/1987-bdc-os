@@ -13,6 +13,7 @@ type ContactRow = {
   lastActivity: Date | string | null; channels: string[];
 };
 type ContactInput = { displayName?: string | null; phone?: string | null; email?: string | null; preferredLanguage?: string | null };
+type ContactActivity = { id: string; action: string; actorName: string; summary: string; createdAt: Date | string };
 
 async function dealerUser(pool: Pool, request: Request, response: Response): Promise<IdentityUser | undefined> {
   const user = await activeSession(pool, request);
@@ -127,13 +128,13 @@ async function lockContactIdentity(client: PoolClient, dealerId: string, input: 
   for (const key of keys) await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
 }
 
-async function auditContact(client: PoolClient, actor: IdentityUser, dealerId: string, action: string, summary: string, request: Request): Promise<void> {
+async function auditContact(client: PoolClient, actor: IdentityUser, dealerId: string, action: string, contactId: string, summary: string, request: Request): Promise<void> {
   const tenant = await client.query<{ dealer_name: string | null }>(
     "SELECT dealer_name FROM public.tenants WHERE dealer_id = $1::uuid", [dealerId],
   );
   await appendAudit(client, {
     actor, dealerId, dealerName: tenant.rows[0]?.dealer_name ?? null, category: "contacts", action,
-    summary, referenceId: auditReference(request),
+    summary, referenceId: auditReference(request), entityId: contactId,
   });
 }
 
@@ -245,7 +246,7 @@ export function createContactsRouter(pool: Pool): express.Router {
         if (!id) throw new Error("Contact creation did not return a record");
         const contact = await loadContactSummary(client, dealerId, id);
         if (!contact) throw new Error("Created contact could not be loaded");
-        await auditContact(client, user, dealerId, "contact.created", `Se creó el contacto manual ${contact.id}.`, request);
+        await auditContact(client, user, dealerId, "contact.created", contact.id, "Se creó el contacto manual.", request);
         return { contact };
       });
       if ("duplicate" in created) { response.status(409).json({ error: "Ya existe un contacto con ese teléfono o correo.", contactId: created.duplicate }); return; }
@@ -293,7 +294,7 @@ export function createContactsRouter(pool: Pool): express.Router {
         );
         const contact = saved.rows[0]?.id ? await loadContactSummary(client, dealerId, saved.rows[0].id) : undefined;
         if (!contact) throw new Error("Updated contact could not be loaded");
-        await auditContact(client, user, dealerId, "contact.updated", `Se actualizaron campos del contacto ${contactId}: ${fields.join(", ")}.`, request);
+        await auditContact(client, user, dealerId, "contact.updated", contactId, `Se actualizaron campos de la ficha: ${fields.join(", ")}.`, request);
         return { contact };
       });
       if ("missing" in update) { response.status(404).json({ error: "No encontramos ese contacto en este dealer." }); return; }
@@ -327,6 +328,14 @@ export function createContactsRouter(pool: Pool): express.Router {
              WHERE tenant_id = $1::uuid AND conversation_id = cv.id ORDER BY created_at DESC LIMIT 10) AS m ON true
            ORDER BY cv.last_activity DESC, m.created_at ASC`, [dealerId, contactId],
         );
+        const contactActivities = await client.query<ContactActivity>(
+          `SELECT id::text AS id, action, actor_name AS "actorName", summary, created_at AS "createdAt"
+             FROM public.admin_audit_events
+            WHERE target_tenant_id = $1::uuid AND category = 'contacts'
+              AND (entity_id = $2 OR (entity_id IS NULL AND summary LIKE '%' || $2 || '%'))
+            ORDER BY created_at DESC, id DESC LIMIT 50`,
+          [dealerId, contactId.toLowerCase()],
+        );
         const conversations = new Map<string, { id: string; channel: string; owner: string | null; state: string; lastActivity: Date | string; messages: Array<Record<string, unknown>> }>();
         for (const row of activity.rows) {
           let conversation = conversations.get(row.conversationId);
@@ -336,7 +345,14 @@ export function createContactsRouter(pool: Pool): express.Router {
           }
           if (row.messageId) conversation.messages.push({ id: row.messageId, direction: row.direction, senderType: row.senderType, content: row.content, createdAt: row.createdAt });
         }
-        return { ...result.rows[0], conversations: [...conversations.values()] };
+        return {
+          ...result.rows[0],
+          conversations: [...conversations.values()],
+          activities: contactActivities.rows.map((item) => ({
+            ...item,
+            summary: item.summary.replaceAll(contactId.toLowerCase(), "").replace(/\s+/g, " ").trim(),
+          })),
+        };
       });
       if (!contact) { response.status(404).json({ error: "No encontramos ese contacto en este dealer." }); return; }
       response.status(200).json({ contact });
