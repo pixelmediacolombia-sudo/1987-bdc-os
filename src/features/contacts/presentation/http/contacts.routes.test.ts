@@ -22,6 +22,11 @@ function fakePool(options: { accountType?: "admin" | "user"; member?: boolean; c
         ? { rows: [{ id: contactId }], rowCount: 1 }
         : { rows: [], rowCount: 0 };
       if (sql.includes("COUNT(*)::int AS total")) return { rows: [{ total: 1 }], rowCount: 1 };
+      if (sql.includes("FROM public.conversations AS cv") && sql.includes("lastMessage")) return { rows: [{
+        id: "55555555-5555-4555-8555-555555555555", dealerId, contactId, contactName: "Ana Prueba", phone: "+15550101000",
+        channel: "messenger", owner: null, state: "open", lastActivity: "2026-11-24T10:00:00.000Z",
+        lastMessage: "Mensaje de prueba", lastDirection: "inbound",
+      }], rowCount: 1 };
       if (sql.includes("COUNT(DISTINCT cv.id)")) return { rows: [{
         id: contactId, dealerId, providerContactId: "manual:contact-1", displayName, source: "manual", phone: "+15550101000", email: null,
         preferredLanguage: "en", consentState: "unknown", createdAt: "2026-11-24T10:00:00.000Z",
@@ -101,6 +106,17 @@ test("dealer contact list checks membership and scopes reads to the selected ten
   const allowed = await send("/contacts?dealerId=" + dealerId + "&search=1555");
   assert.equal(allowed.response.status, 200);
   assert.equal(allowed.payload.contacts[0].phone, "+15550101000");
+  assert.equal(allowed.payload.total, 1);
+  assert.ok(allowed.pool.trace.some((sql) => sql.includes("set_config('app.tenant_id'")));
+});
+
+test("dealer inbox lists persisted conversations only for an authorized tenant", async () => {
+  const denied = await send("/conversations?dealerId=" + otherDealerId, fakePool({ member: false }));
+  assert.equal(denied.response.status, 403);
+  const allowed = await send("/conversations?dealerId=" + dealerId + "&channel=messenger");
+  assert.equal(allowed.response.status, 200);
+  assert.equal(allowed.payload.conversations[0].lastMessage, "Mensaje de prueba");
+  assert.equal(allowed.payload.conversations[0].dealerId, dealerId);
   assert.equal(allowed.payload.total, 1);
   assert.ok(allowed.pool.trace.some((sql) => sql.includes("set_config('app.tenant_id'")));
 });
