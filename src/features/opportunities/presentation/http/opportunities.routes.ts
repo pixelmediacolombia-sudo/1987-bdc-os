@@ -41,11 +41,9 @@ export function createOpportunitiesRouter(pool: Pool): express.Router {
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       const dashboard = await withTenant(pool, dealerId, async (client) => {
-        const [counts, attention, activities] = await Promise.all([
-          client.query(`SELECT (SELECT COUNT(*)::int FROM public.conversations WHERE tenant_id=$1::uuid AND read_at IS NULL) AS "unreadConversations", (SELECT COUNT(*)::int FROM public.contacts WHERE tenant_id=$1::uuid AND created_at >= date_trunc('month', now())) AS "newContacts", (SELECT COUNT(*)::int FROM public.opportunities WHERE tenant_id=$1::uuid AND stage IN ('new','working','closing')) AS "activeOpportunities", (SELECT COALESCE(SUM(amount_cents),0)::text FROM public.opportunities WHERE tenant_id=$1::uuid AND stage IN ('new','working','closing')) AS "pipelineValueCents"`, [dealerId]),
-          client.query(`SELECT cv.id::text AS id, c.id::text AS "contactId", COALESCE(NULLIF(c.display_name,''), c.phone, c.email, 'Contacto sin nombre') AS name, cv.channel, cv.last_activity AS "lastActivity", (SELECT m.content FROM public.messages m WHERE m.conversation_id=cv.id AND m.tenant_id=cv.tenant_id ORDER BY m.created_at DESC LIMIT 1) AS summary FROM public.conversations cv JOIN public.contacts c ON c.id=cv.contact_id AND c.tenant_id=cv.tenant_id WHERE cv.tenant_id=$1::uuid AND cv.read_at IS NULL ORDER BY cv.last_activity ASC LIMIT 8`, [dealerId]),
-          client.query(`SELECT id::text AS id, category, action, summary, created_at AS "createdAt" FROM public.admin_audit_events WHERE target_tenant_id=$1::uuid AND category IN ('contacts','opportunities') ORDER BY created_at DESC LIMIT 5`, [dealerId]),
-        ]);
+        const counts = await client.query(`SELECT (SELECT COUNT(*)::int FROM public.conversations WHERE tenant_id=$1::uuid AND read_at IS NULL) AS "unreadConversations", (SELECT COUNT(*)::int FROM public.contacts WHERE tenant_id=$1::uuid AND created_at >= date_trunc('month', now())) AS "newContacts", (SELECT COUNT(*)::int FROM public.opportunities WHERE tenant_id=$1::uuid AND stage IN ('new','working','closing')) AS "activeOpportunities", (SELECT COALESCE(SUM(amount_cents),0)::text FROM public.opportunities WHERE tenant_id=$1::uuid AND stage IN ('new','working','closing')) AS "pipelineValueCents"`, [dealerId]);
+        const attention = await client.query(`SELECT cv.id::text AS id, c.id::text AS "contactId", COALESCE(NULLIF(c.display_name,''), c.phone, c.email, 'Contacto sin nombre') AS name, cv.channel, cv.last_activity AS "lastActivity", (SELECT m.content FROM public.messages m WHERE m.conversation_id=cv.id AND m.tenant_id=cv.tenant_id ORDER BY m.created_at DESC LIMIT 1) AS summary FROM public.conversations cv JOIN public.contacts c ON c.id=cv.contact_id AND c.tenant_id=cv.tenant_id WHERE cv.tenant_id=$1::uuid AND cv.read_at IS NULL ORDER BY cv.last_activity ASC LIMIT 8`, [dealerId]);
+        const activities = await client.query(`SELECT id::text AS id, category, action, summary, created_at AS "createdAt" FROM public.admin_audit_events WHERE target_tenant_id=$1::uuid AND category IN ('contacts','opportunities') ORDER BY created_at DESC LIMIT 5`, [dealerId]);
         return { metrics: counts.rows[0], attention: attention.rows, activities: activities.rows };
       });
       response.json(dashboard);
@@ -71,11 +69,15 @@ export function createOpportunitiesRouter(pool: Pool): express.Router {
       const stage = parseStage(body.stage ?? "new");
       if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       if (title.length < 2 || title.length > 120 || !contactName || contactName.length > 120 || !Number.isSafeInteger(amountCents) || amountCents < 0 || !stage) { response.status(400).json({ error: "Revisa los datos de la oportunidad." }); return; }
+      const contactId = typeof body.contactId === "string" ? body.contactId : null;
+      const assignedUserId = typeof body.assignedUserId === "string" ? body.assignedUserId : user.id;
+      const scopeValid = await withTenant(pool, dealerId, async (client) => {
+        const contactValid = !contactId || (await client.query("SELECT 1 FROM public.contacts WHERE id=$1::uuid AND tenant_id=$2::uuid", [contactId, dealerId])).rowCount === 1;
+        const assigneeValid = (await client.query("SELECT 1 FROM public.user_tenant_memberships WHERE user_id=$1::uuid AND tenant_id=$2::uuid", [assignedUserId, dealerId])).rowCount === 1;
+        return contactValid && assigneeValid;
+      });
+      if (!scopeValid) { response.status(400).json({ error: "El contacto y el responsable deben pertenecer al dealer actual." }); return; }
       const saved = await withTenant(pool, dealerId, async (client) => {
-        const contactId = typeof body.contactId === "string" ? body.contactId : null;
-        if (contactId && !(await client.query("SELECT 1 FROM public.contacts WHERE id=$1::uuid AND tenant_id=$2::uuid", [contactId,dealerId])).rowCount) throw new Error("Contact is outside dealer scope");
-        const assignedUserId = typeof body.assignedUserId === "string" ? body.assignedUserId : user.id;
-        if (!(await client.query("SELECT 1 FROM public.user_tenant_memberships WHERE user_id=$1::uuid AND tenant_id=$2::uuid", [assignedUserId,dealerId])).rowCount) throw new Error("Assignee is outside dealer scope");
         const inserted = await client.query<{ id: string }>(`INSERT INTO public.opportunities (tenant_id,title,contact_id,contact_name,contact_phone,amount_cents,stage,assigned_user_id,expected_close_date,notes,created_by_user_id) VALUES ($1::uuid,$2,$3::uuid,$4,$5,$6,$7,$8::uuid,$9::date,$10,$11::uuid) RETURNING id::text AS id`, [dealerId,title,contactId,contactName,typeof body.contactPhone === "string" ? body.contactPhone : null,amountCents,stage,assignedUserId,typeof body.expectedCloseDate === "string" ? body.expectedCloseDate : null,typeof body.notes === "string" ? body.notes.trim().slice(0,2000) : null,user.id]);
         const result = await client.query<Opportunity>(`SELECT ${COLUMNS} FROM public.opportunities o LEFT JOIN public.app_users u ON u.id=o.assigned_user_id WHERE o.id=$1::uuid AND o.tenant_id=$2::uuid`,[inserted.rows[0].id,dealerId]);
         const tenant = await client.query<{ dealer_name: string }>("SELECT dealer_name FROM public.tenants WHERE dealer_id=$1::uuid", [dealerId]);
@@ -110,11 +112,14 @@ export function createOpportunitiesRouter(pool: Pool): express.Router {
       const stage = body.stage === undefined ? undefined : parseStage(body.stage);
       const assignee = body.assignedUserId === undefined ? undefined : body.assignedUserId === null ? null : typeof body.assignedUserId === "string" && UUID.test(body.assignedUserId) ? body.assignedUserId : undefined;
       if ((body.stage !== undefined && !stage) || (body.assignedUserId !== undefined && assignee === undefined)) { response.status(400).json({ error: "El cambio solicitado no es válido." }); return; }
+      if (typeof body.assignedUserId === "string") {
+        const assigneeAllowed = await withTenant(pool,dealerId,async (client) => (await client.query("SELECT 1 FROM public.user_tenant_memberships WHERE user_id=$1::uuid AND tenant_id=$2::uuid",[assignee,dealerId])).rowCount === 1);
+        if (!assigneeAllowed) { response.status(400).json({ error: "El responsable debe pertenecer al dealer actual." }); return; }
+      }
       const saved = await withTenant(pool,dealerId,async (client) => {
         const current = await client.query<{ stage: Stage; title: string }>("SELECT stage,title FROM public.opportunities WHERE id=$1::uuid AND tenant_id=$2::uuid FOR UPDATE",[id,dealerId]);
         if (!current.rows[0]) return undefined;
         await client.query(`UPDATE public.opportunities SET stage=COALESCE($3,stage), assigned_user_id=CASE WHEN $4 THEN $5::uuid ELSE assigned_user_id END, updated_at=now() WHERE id=$1::uuid AND tenant_id=$2::uuid`,[id,dealerId,stage ?? null,body.assignedUserId !== undefined,assignee ?? null]);
-        if (body.assignedUserId && !(await client.query("SELECT 1 FROM public.user_tenant_memberships WHERE user_id=$1::uuid AND tenant_id=$2::uuid",[assignee,dealerId])).rowCount) throw new Error("Assignee is outside dealer scope");
         const updated = await client.query<Opportunity>(`SELECT ${COLUMNS} FROM public.opportunities o LEFT JOIN public.app_users u ON u.id=o.assigned_user_id WHERE o.id=$1::uuid AND o.tenant_id=$2::uuid`,[id,dealerId]);
         const action = stage && stage !== current.rows[0].stage ? "opportunity.stage_changed" : "opportunity.assigned";
         const tenant = await client.query<{ dealer_name: string }>("SELECT dealer_name FROM public.tenants WHERE dealer_id=$1::uuid",[dealerId]);
