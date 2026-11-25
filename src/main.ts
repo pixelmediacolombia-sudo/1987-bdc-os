@@ -7,8 +7,15 @@ import { createBackendRuntime } from "@/infrastructure/startup/create-backend-ru
 async function start(): Promise<void> {
   const config = loadAppConfig();
   const pool = createPostgresPool(config.databaseUrl, config.pgSsl);
+  const migrationPool = config.migrationDatabaseUrl
+    ? createPostgresPool(config.migrationDatabaseUrl, config.pgSsl)
+    : pool;
   const redis = new IoredisClient(config.redisUrl);
-  await initializeDatabase(pool);
+  try {
+    await initializeDatabase(migrationPool);
+  } finally {
+    if (migrationPool !== pool) await migrationPool.end();
+  }
   const runtime = await createBackendRuntime(config, pool, redis);
   const server = runtime.app.listen(config.port, () => console.log(`1987 BDC OS backend listening on port ${config.port}`));
 

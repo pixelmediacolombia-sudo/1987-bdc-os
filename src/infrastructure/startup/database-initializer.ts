@@ -12,6 +12,7 @@ import { ensureAdminAuditTable } from "@/features/identity/infrastructure/persis
 import { ensureTenantRowLevelSecurity } from "@/features/identity/infrastructure/persistence/postgres/tenant-rls.migration";
 import { bootstrapLocalAdmin } from "@/features/identity/infrastructure/persistence/postgres/local-admin.bootstrap";
 import { ensureMetaMessagingTables } from "@/features/meta/infrastructure/persistence/postgres/meta-messaging.migration";
+import { ensureRuntimeRolePrivileges } from "@/infrastructure/database/runtime-role.migration";
 
 export async function initializeDatabase(pool: Pool): Promise<void> {
   await ensureWebhookTables(pool);
@@ -29,4 +30,5 @@ export async function initializeDatabase(pool: Pool): Promise<void> {
   await ensureConversationAiShadowTables(pool);
   await ensureInternalDiagnosticAuditTable(pool);
   await ensureTenantRowLevelSecurity(pool);
+  await ensureRuntimeRolePrivileges(pool);
 }

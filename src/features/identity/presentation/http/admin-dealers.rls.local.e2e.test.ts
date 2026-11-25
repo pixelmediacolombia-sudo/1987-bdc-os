@@ -14,9 +14,9 @@ test("local Docker Admin directory and tenant data respect forced RLS", {
     ssl: ["1", "true", "yes"].includes((process.env.PGSSL ?? "").toLowerCase()) ? { rejectUnauthorized: false } : undefined,
   });
   const apiPool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: process.env.RUNTIME_DATABASE_URL ?? process.env.DATABASE_URL,
     ssl: ["1", "true", "yes"].includes((process.env.PGSSL ?? "").toLowerCase()) ? { rejectUnauthorized: false } : undefined,
-    options: "-c role=bdc",
+    ...(process.env.RUNTIME_DATABASE_URL ? {} : { options: "-c role=bdc" }),
   });
   const client = await pool.connect();
   const tenantIds: string[] = [randomUUID(), randomUUID()];
@@ -68,6 +68,11 @@ test("local Docker Admin directory and tenant data respect forced RLS", {
       "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = 'public.dealer_invitations'::regclass",
     );
     assert.equal(role.rows[0]?.rolbypassrls, false, "local test role must not bypass RLS");
+    const runtimeIdentity = await apiPool.query<{ current_user: string; rolbypassrls: boolean }>(
+      "SELECT current_user, (SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user) AS rolbypassrls",
+    );
+    assert.equal(runtimeIdentity.rows[0]?.current_user, "bdc");
+    assert.equal(runtimeIdentity.rows[0]?.rolbypassrls, false, "normal runtime connection must not bypass RLS");
     assert.equal(rls.rows[0]?.relrowsecurity, true);
     assert.equal(rls.rows[0]?.relforcerowsecurity, true);
     assert.equal(contactsRls.rows[0]?.relrowsecurity, true);

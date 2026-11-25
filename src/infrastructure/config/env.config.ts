@@ -5,6 +5,7 @@ export type AppConfig = {
   nodeEnv: string;
   port: number;
   databaseUrl: string;
+  migrationDatabaseUrl?: string;
   pgSsl: boolean;
   redisUrl: string;
   burstBufferSeconds: number;
@@ -91,6 +92,7 @@ export function loadAppConfig(): AppConfig {
     nodeEnv,
     port: Number.parseInt(process.env.PORT ?? "3000", 10),
     databaseUrl: required("DATABASE_URL"),
+    migrationDatabaseUrl: process.env.DATABASE_MIGRATION_URL?.trim() || undefined,
     pgSsl: booleanEnv("PGSSL", false),
     redisUrl: required("REDIS_URL"),
     burstBufferSeconds: positiveNumberEnv("BURST_BUFFER_SECONDS", 15),
