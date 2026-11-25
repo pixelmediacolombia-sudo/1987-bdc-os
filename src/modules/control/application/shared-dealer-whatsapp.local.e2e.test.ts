@@ -300,7 +300,11 @@ test(
       assert.ok(qualificationRows.rows.every((row) => (row.payload_sent.data as Array<{ user_data: { ctwa_clid?: string } }>)[0]?.user_data.ctwa_clid));
       console.log(`LOCAL_WHATSAPP_SIMULATION ${JSON.stringify({ ids: { tenantId: TENANT_ID, contacts: [CONTACT_ONE_ID, CONTACT_TWO_ID, CONTACT_THREE_ID, CONTACT_FOUR_ID, CONTACT_FIVE_ID, CONTACT_SIX_ID, CONTACT_SEVEN_ID, CONTACT_EIGHT_ID] }, conversations: [spanishResponses.length, englishResponses.length, unknownModelResponses.length, coSignerResponses.length, typoResponses.length, terseResponses.length, selfEmployedResponses.length, familyTradeInResponses.length], outboundCaptured: outbound.length, stateLevels: stateRows.rows.map((row) => row.lead_level) })}`);
     } finally {
-      await pool.end();
+      try {
+        await pool.query("DELETE FROM public.tenants WHERE dealer_id = $1::uuid", [TENANT_ID]);
+      } finally {
+        await pool.end();
+      }
     }
   },
 );
