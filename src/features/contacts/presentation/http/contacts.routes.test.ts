@@ -16,6 +16,7 @@ function fakePool(options: { accountType?: "admin" | "user"; member?: boolean; c
     query: async (sql: string, values?: unknown[]) => {
       trace.push(sql);
       if (sql.startsWith("SELECT set_config")) return { rows: [{ set_config: dealerId }], rowCount: 1 };
+      if (sql.includes("FROM public.user_tenant_memberships WHERE user_id = $1 AND tenant_id")) return options.member === false ? { rows: [], rowCount: 0 } : { rows: [{ "?column?": 1 }], rowCount: 1 };
       if (sql.includes("FROM public.tenants")) return { rows: [{ id: dealerId, name: null }], rowCount: 1 };
       if (sql.includes("FROM public.contacts") && sql.includes("SELECT id::text AS id")) return options.duplicate
         ? { rows: [{ id: contactId }], rowCount: 1 }

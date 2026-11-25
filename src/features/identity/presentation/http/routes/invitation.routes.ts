@@ -30,12 +30,14 @@ export function createInvitationRoutes(pool: Pool, options: IdentityRouteOptions
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      const invitationHash = tokenDigest(token);
+      await client.query("SELECT set_config('app.invitation_token_hash', $1, true)", [invitationHash]);
       const invitation = await client.query<Omit<Invitation, "dealer_name">>(
         `SELECT i.id::text, i.tenant_id::text, i.email, i.display_name
            FROM public.dealer_invitations AS i
           WHERE i.token_hash = $1 AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()
           FOR UPDATE OF i`,
-        [tokenDigest(token)],
+        [invitationHash],
       );
       const inviteDetails = invitation.rows[0];
       if (!inviteDetails) {

@@ -106,6 +106,7 @@ test("admin creates an inert dealer and one-time invitation; invitee chooses a h
   const client = {
     query: async (sql: string, values: unknown[] = []) => {
       if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [] };
+      if (sql.includes("set_config('app.invitation_token_hash'")) return { rows: [] };
       if (sql.includes("set_config('app.tenant_id'")) { createdDealerId = String(values[0]); return { rows: [] }; }
       if (sql.includes("INSERT INTO public.admin_audit_events")) { auditEvents.push(values); return { rows: [] }; }
       if (sql.includes("FROM public.app_users WHERE lower(email) = $1")) return { rows: [] };

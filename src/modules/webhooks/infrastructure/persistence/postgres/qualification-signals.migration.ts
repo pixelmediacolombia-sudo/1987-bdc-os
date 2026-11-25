@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS public.tenant_processing_routes (
 -- Backfill only identifiers already present in trusted child records. Directly
 -- scanning public.tenants here is ineffective because FORCE RLS hides rows
 -- without app.tenant_id; do not weaken that policy for migrations.
+SELECT set_config('app.is_platform_admin', 'true', true);
 INSERT INTO public.tenant_processing_routes (dealer_id)
 SELECT tenant_id FROM public.user_tenant_memberships
 UNION
@@ -98,7 +99,7 @@ $$;
 DROP TRIGGER IF EXISTS tenants_sync_processing_route ON public.tenants;
 CREATE TRIGGER tenants_sync_processing_route AFTER INSERT ON public.tenants
 FOR EACH ROW EXECUTE FUNCTION public.sync_tenant_processing_route();
-REVOKE ALL ON TABLE public.tenant_processing_routes FROM PUBLIC;
+REVOKE ALL ON TABLE public.tenant_processing_routes FROM PUBLIC, bdc;
 
 CREATE OR REPLACE FUNCTION public.list_tenant_route_ids()
 RETURNS TABLE(dealer_id UUID)

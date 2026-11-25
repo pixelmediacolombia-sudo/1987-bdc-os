@@ -1,6 +1,34 @@
 import express, { type Request, type Response } from "express";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { loadAdminDealerDirectory, requireAdmin, type IdentityRouteOptions } from "./route-helpers";
+
+type AdminUserDirectoryEntry = {
+  record_type: string;
+  id: string;
+  display_name: string;
+  email: string;
+  account_type: string;
+  status: string;
+  created_at: Date | string;
+  expires_at: Date | string | null;
+  dealers: unknown;
+};
+
+async function withPlatformAdmin<T>(pool: Pool, action: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.is_platform_admin', 'true', true)");
+    const value = await action(client);
+    await client.query("COMMIT");
+    return value;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 export function createAdminOverviewRoutes(pool: Pool, options: IdentityRouteOptions): express.Router {
   const router = express.Router();
@@ -86,21 +114,24 @@ export function createAdminOverviewRoutes(pool: Pool, options: IdentityRouteOpti
           UNION ALL
           SELECT * FROM invitation_entries
         )`;
-      const count = await pool.query<{ total: string }>(`WITH ${directoryCte} SELECT COUNT(*)::text AS total FROM directory ${where}`, values);
-      const entries = await pool.query(
-        `WITH ${directoryCte}
-         SELECT record_type, id, display_name, email, account_type, status, created_at, expires_at, dealers
-           FROM directory ${where}
-          ORDER BY created_at DESC, record_type ASC, id ASC
-          LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
-        [...values, limitValue, offsetValue],
-      );
-      const mappedEntries = entries.rows.map((entry) => ({
+      const directoryPage = await withPlatformAdmin(pool, async (client) => {
+        const count = await client.query<{ total: string }>(`WITH ${directoryCte} SELECT COUNT(*)::text AS total FROM directory ${where}`, values);
+        const entries = await client.query<AdminUserDirectoryEntry>(
+          `WITH ${directoryCte}
+           SELECT record_type, id, display_name, email, account_type, status, created_at, expires_at, dealers
+             FROM directory ${where}
+            ORDER BY created_at DESC, record_type ASC, id ASC
+            LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+          [...values, limitValue, offsetValue],
+        );
+        return { total: Number(count.rows[0]?.total ?? 0), entries: entries.rows };
+      });
+      const mappedEntries = directoryPage.entries.map((entry) => ({
         ...entry,
         dealers: (Array.isArray(entry.dealers) ? entry.dealers as Array<{ id: string; name: string | null }> : [])
           .map((dealer) => ({ ...dealer, name: dealerNames.get(dealer.id) ?? null })),
       }));
-      response.status(200).json({ entries: mappedEntries, total: Number(count.rows[0]?.total ?? 0), limit: limitValue, offset: offsetValue });
+      response.status(200).json({ entries: mappedEntries, total: directoryPage.total, limit: limitValue, offset: offsetValue });
     } catch {
       response.status(500).json({ error: "No pudimos cargar los usuarios de la plataforma." });
     }

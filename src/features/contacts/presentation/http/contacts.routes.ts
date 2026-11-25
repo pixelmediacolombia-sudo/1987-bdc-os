@@ -23,11 +23,14 @@ async function dealerUser(pool: Pool, request: Request, response: Response): Pro
 
 async function isMember(pool: Pool, userId: string, dealerId: string): Promise<boolean> {
   if (!UUID.test(dealerId)) return false;
-  const membership = await pool.query(
-    "SELECT 1 FROM public.user_tenant_memberships WHERE user_id = $1 AND tenant_id = $2::uuid",
-    [userId, dealerId],
-  );
-  if (membership.rowCount !== 1) return false;
+  const isMember = await withUser(pool, userId, async (client) => {
+    const membership = await client.query(
+      "SELECT 1 FROM public.user_tenant_memberships WHERE user_id = $1 AND tenant_id = $2::uuid",
+      [userId, dealerId],
+    );
+    return membership.rowCount === 1;
+  });
+  if (!isMember) return false;
   return withTenant(pool, dealerId, async (client) => {
     const tenant = await client.query(
       "SELECT 1 FROM public.tenants WHERE dealer_id = $1::uuid AND status = 'active'", [dealerId],
@@ -41,6 +44,20 @@ async function withTenant<T>(pool: Pool, tenantId: string, action: (client: Pool
   try {
     await client.query("BEGIN");
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+    const value = await action(client);
+    await client.query("COMMIT");
+    return value;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally { client.release(); }
+}
+
+async function withUser<T>(pool: Pool, userId: string, action: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.user_id', $1, true)", [userId]);
     const value = await action(client);
     await client.query("COMMIT");
     return value;
@@ -142,9 +159,9 @@ export function createContactsRouter(pool: Pool): express.Router {
     try {
       const user = await dealerUser(pool, request, response);
       if (!user) return;
-      const memberships = await pool.query<{ tenant_id: string }>(
+      const memberships = await withUser(pool, user.id, (client) => client.query<{ tenant_id: string }>(
         "SELECT tenant_id::text FROM public.user_tenant_memberships WHERE user_id = $1 ORDER BY tenant_id", [user.id],
-      );
+      ));
       const dealers: Tenant[] = [];
       for (const { tenant_id: id } of memberships.rows) {
         const dealer = await withTenant(pool, id, async (client) => {

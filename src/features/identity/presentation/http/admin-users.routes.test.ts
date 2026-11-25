@@ -19,6 +19,16 @@ test("admin user directory lists safe user and invitation entries with filters",
   const client = {
     query: async (sql: string, values: unknown[] = []) => {
       directoryCalls.push(sql);
+      if (sql.includes("set_config('app.is_platform_admin'")) return { rows: [] };
+      if (sql.includes("COUNT(*)::text AS total")) { countSql = sql; return { rows: [{ total: "2" }] }; }
+      if (sql.includes("FROM directory")) {
+        listSql = sql;
+        listValues = values;
+        return { rows: [
+          { record_type: "user", id: "user-1", display_name: "Alex Rivera", email: "alex@example.com", account_type: "user", status: "active", created_at: "2026-11-20T10:00:00.000Z", expires_at: null, dealers: [{ id: dealerId, name: "Dealer Norte" }] },
+          { record_type: "invitation", id: "invite-1", display_name: "Alex Rivera", email: "alex@example.com", account_type: "user", status: "pending", created_at: "2026-11-21T10:00:00.000Z", expires_at: "2026-11-24T10:00:00.000Z", dealers: [{ id: dealerId, name: "Dealer Norte" }] },
+        ] };
+      }
       if (sql.includes("set_config('app.tenant_id'")) { assert.deepEqual(values, [dealerId]); return { rows: [] }; }
       if (sql.includes("FROM public.tenants")) return { rows: [{ id: dealerId, name: "Dealer Norte", status: "active", user_count: 1, pending_invitation_count: 1 }] };
       return { rows: [] };

@@ -32,6 +32,50 @@ CREATE POLICY messages_isolation ON public.messages
   FOR ALL TO PUBLIC
   USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
   WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
+
+ALTER TABLE public.dealer_invitations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.dealer_invitations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS dealer_invitations_select_scope ON public.dealer_invitations;
+DROP POLICY IF EXISTS dealer_invitations_write_scope ON public.dealer_invitations;
+CREATE POLICY dealer_invitations_select_scope ON public.dealer_invitations
+  FOR SELECT TO PUBLIC
+  USING (
+    tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+    OR COALESCE(current_setting('app.is_platform_admin', true) = 'true', false)
+    OR token_hash = NULLIF(current_setting('app.invitation_token_hash', true), '')
+  );
+CREATE POLICY dealer_invitations_write_scope ON public.dealer_invitations
+  FOR ALL TO PUBLIC
+  USING (
+    tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+    OR COALESCE(current_setting('app.is_platform_admin', true) = 'true', false)
+  )
+  WITH CHECK (
+    tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+    OR COALESCE(current_setting('app.is_platform_admin', true) = 'true', false)
+  );
+
+ALTER TABLE public.user_tenant_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_tenant_memberships FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS user_tenant_memberships_select_scope ON public.user_tenant_memberships;
+DROP POLICY IF EXISTS user_tenant_memberships_write_scope ON public.user_tenant_memberships;
+CREATE POLICY user_tenant_memberships_select_scope ON public.user_tenant_memberships
+  FOR SELECT TO PUBLIC
+  USING (
+    tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+    OR user_id = (NULLIF(current_setting('app.user_id', true), '')::uuid)
+    OR COALESCE(current_setting('app.is_platform_admin', true) = 'true', false)
+  );
+CREATE POLICY user_tenant_memberships_write_scope ON public.user_tenant_memberships
+  FOR ALL TO PUBLIC
+  USING (
+    tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+    OR COALESCE(current_setting('app.is_platform_admin', true) = 'true', false)
+  )
+  WITH CHECK (
+    tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+    OR COALESCE(current_setting('app.is_platform_admin', true) = 'true', false)
+  );
 `;
 
 export async function ensureTenantRowLevelSecurity(pool: Pool): Promise<void> {

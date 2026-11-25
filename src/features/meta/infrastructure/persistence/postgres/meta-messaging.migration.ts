@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS public.meta_messaging_routes (
 );
 CREATE INDEX IF NOT EXISTS meta_messaging_routes_tenant_idx
   ON public.meta_messaging_routes (tenant_id, channel);
-REVOKE ALL ON TABLE public.meta_messaging_routes FROM PUBLIC;
+REVOKE ALL ON TABLE public.meta_messaging_routes FROM PUBLIC, bdc;
 
 CREATE OR REPLACE FUNCTION public.sync_meta_messaging_routes()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $function$
