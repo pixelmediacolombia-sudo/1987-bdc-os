@@ -37,6 +37,9 @@ ALTER TABLE public.dealer_invitations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.dealer_invitations FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS dealer_invitations_select_scope ON public.dealer_invitations;
 DROP POLICY IF EXISTS dealer_invitations_write_scope ON public.dealer_invitations;
+DROP POLICY IF EXISTS dealer_invitations_insert_scope ON public.dealer_invitations;
+DROP POLICY IF EXISTS dealer_invitations_update_scope ON public.dealer_invitations;
+DROP POLICY IF EXISTS dealer_invitations_delete_scope ON public.dealer_invitations;
 CREATE POLICY dealer_invitations_select_scope ON public.dealer_invitations
   FOR SELECT TO PUBLIC
   USING (
@@ -44,13 +47,26 @@ CREATE POLICY dealer_invitations_select_scope ON public.dealer_invitations
     OR COALESCE(current_setting('app.is_platform_admin', true) = 'true', false)
     OR token_hash = NULLIF(current_setting('app.invitation_token_hash', true), '')
   );
-CREATE POLICY dealer_invitations_write_scope ON public.dealer_invitations
-  FOR ALL TO PUBLIC
+CREATE POLICY dealer_invitations_insert_scope ON public.dealer_invitations
+  FOR INSERT TO PUBLIC
+  WITH CHECK (
+    tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+    OR COALESCE(current_setting('app.is_platform_admin', true) = 'true', false)
+  );
+CREATE POLICY dealer_invitations_update_scope ON public.dealer_invitations
+  FOR UPDATE TO PUBLIC
   USING (
     tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid)
     OR COALESCE(current_setting('app.is_platform_admin', true) = 'true', false)
+    OR token_hash = NULLIF(current_setting('app.invitation_token_hash', true), '')
   )
   WITH CHECK (
+    tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+    OR COALESCE(current_setting('app.is_platform_admin', true) = 'true', false)
+  );
+CREATE POLICY dealer_invitations_delete_scope ON public.dealer_invitations
+  FOR DELETE TO PUBLIC
+  USING (
     tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid)
     OR COALESCE(current_setting('app.is_platform_admin', true) = 'true', false)
   );

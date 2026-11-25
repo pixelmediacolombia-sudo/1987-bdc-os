@@ -26,13 +26,20 @@ test("local Docker Admin directory and tenant data respect forced RLS", {
   const messageId = randomUUID();
   const memberEmail = `rls-member-${randomUUID()}@example.test`;
   const invitationEmail = `rls-invite-${randomUUID()}@example.test`;
-  const invitationTokenHash = createHash("sha256").update(randomBytes(32)).digest("hex");
+  const invitationToken = randomBytes(32).toString("base64url");
+  const invitationTokenHash = createHash("sha256").update(invitationToken).digest("hex");
   const sessionToken = randomBytes(32).toString("base64url");
   const sessionHash = createHash("sha256").update(sessionToken).digest("hex");
+  const memberSessionToken = randomBytes(32).toString("base64url");
+  const memberSessionHash = createHash("sha256").update(memberSessionToken).digest("hex");
+  const contactCreateAuditId = `rls-contact-create-${randomUUID()}`;
+  const contactUpdateAuditId = `rls-contact-update-${randomUUID()}`;
+  const invitationAcceptAuditId = `rls-invitation-accept-${randomUUID()}`;
   let adminId: string | undefined;
   let memberId: string | undefined;
   let server: ReturnType<typeof app.listen> | undefined;
   const app = express();
+  app.use(express.json());
   const previousGrants = {
     schema: false,
     appUsers: false,
@@ -144,6 +151,10 @@ test("local Docker Admin directory and tenant data respect forced RLS", {
     await client.query(
       "INSERT INTO public.app_sessions (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '5 minutes')",
       [adminId, sessionHash],
+    );
+    await client.query(
+      "INSERT INTO public.app_sessions (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '5 minutes')",
+      [memberId, memberSessionHash],
     );
 
     for (const [index, tenantId] of tenantIds.entries()) {
@@ -263,11 +274,13 @@ test("local Docker Admin directory and tenant data respect forced RLS", {
     await client.query("SELECT set_config('app.invitation_token_hash', $1, true)", [invitationTokenHash]);
     const tokenInvitation = await client.query("SELECT id FROM public.dealer_invitations WHERE token_hash = $1", [invitationTokenHash]);
     assert.equal(tokenInvitation.rowCount, 1, "an invitation token may resolve its own invitation");
-    const crossTenantInvitationUpdate = await client.query(
-      "UPDATE public.dealer_invitations SET revoked_at = now() WHERE token_hash = $1 RETURNING id",
-      [invitationTokenHash],
+    await client.query("SAVEPOINT cross_tenant_invitation_update");
+    await assert.rejects(
+      client.query("UPDATE public.dealer_invitations SET revoked_at = now() WHERE token_hash = $1 RETURNING id", [invitationTokenHash]),
+      { code: "42501" },
+      "token-only context may lock an invitation but must not update it outside its tenant",
     );
-    assert.equal(crossTenantInvitationUpdate.rowCount, 0, "token-only access must not update an invitation outside its tenant");
+    await client.query("ROLLBACK TO SAVEPOINT cross_tenant_invitation_update");
     await client.query("SAVEPOINT cross_tenant_invitation_insert");
     await assert.rejects(
       client.query(
@@ -309,11 +322,101 @@ test("local Docker Admin directory and tenant data respect forced RLS", {
     const usersBody = await usersResponse.json() as { entries: Array<{ email: string; record_type: string }> };
     assert.ok(usersBody.entries.some(({ email, record_type }) => email === memberEmail && record_type === "user"));
     assert.ok(usersBody.entries.some(({ email, record_type }) => email === invitationEmail && record_type === "invitation"));
+
+    const runtimeInvitationClient = await apiPool.connect();
+    try {
+      await runtimeInvitationClient.query("BEGIN");
+      await runtimeInvitationClient.query("SELECT set_config('app.invitation_token_hash', $1, true)", [invitationTokenHash]);
+      const runtimeInvitation = await runtimeInvitationClient.query(
+        "SELECT id FROM public.dealer_invitations WHERE token_hash = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now() FOR UPDATE",
+        [invitationTokenHash],
+      );
+      assert.equal(runtimeInvitation.rowCount, 1, "the real runtime login may lock an invitation by its exact token hash");
+      await runtimeInvitationClient.query("ROLLBACK");
+    } finally {
+      runtimeInvitationClient.release();
+    }
+
+    const invitationPageResponse = await fetch(
+      `http://127.0.0.1:${address.port}/auth/invitations/accept?token=${encodeURIComponent(invitationToken)}`,
+    );
+    assert.equal(invitationPageResponse.status, 200);
+    const invitationAcceptResponse = await fetch(`http://127.0.0.1:${address.port}/auth/invitations/accept`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-correlation-id": invitationAcceptAuditId },
+      body: JSON.stringify({ token: invitationToken, password: "synthetic-local-password-123" }),
+    });
+    const invitationAcceptBody = await invitationAcceptResponse.json() as Record<string, unknown>;
+    assert.equal(invitationAcceptResponse.status, 200, JSON.stringify(invitationAcceptBody));
+    assert.deepEqual(invitationAcceptBody, {
+      activated: true, existingAccount: false, dealerName: "RLS E2E Dealer 1",
+    });
+
+    const memberHeaders = { cookie: `bdc_os_session=${memberSessionToken}` };
+    const memberDealersResponse = await fetch(`http://127.0.0.1:${address.port}/auth/contacts/dealers`, { headers: memberHeaders });
+    assert.equal(memberDealersResponse.status, 200);
+    const memberDealers = await memberDealersResponse.json() as { dealers: Array<{ id: string; name: string }> };
+    assert.deepEqual(memberDealers.dealers.filter(({ id }) => tenantIds.includes(id)), [
+      { id: tenantIds[0], name: "RLS E2E Dealer 1" },
+    ]);
+
+    const contactListResponse = await fetch(`http://127.0.0.1:${address.port}/auth/contacts?dealerId=${tenantIds[0]}`, { headers: memberHeaders });
+    assert.equal(contactListResponse.status, 200);
+    const contactList = await contactListResponse.json() as { contacts: Array<{ id: string; source: string; conversationCount: number }>; total: number };
+    assert.equal(contactList.total, 1);
+    assert.equal(contactList.contacts[0]?.id, contactId);
+    assert.equal(contactList.contacts[0]?.source, "meta");
+    assert.equal(contactList.contacts[0]?.conversationCount, 1);
+
+    const contactDetailResponse = await fetch(`http://127.0.0.1:${address.port}/auth/contacts/${contactId}?dealerId=${tenantIds[0]}`, { headers: memberHeaders });
+    assert.equal(contactDetailResponse.status, 200);
+    const contactDetail = await contactDetailResponse.json() as { contact: { conversations: Array<{ messages: Array<{ content: string }> }> } };
+    assert.equal(contactDetail.contact.conversations[0]?.messages[0]?.content, "synthetic RLS message");
+
+    const crossTenantContactResponse = await fetch(`http://127.0.0.1:${address.port}/auth/contacts?dealerId=${tenantIds[1]}`, { headers: memberHeaders });
+    assert.equal(crossTenantContactResponse.status, 403);
+
+    const createContactResponse = await fetch(`http://127.0.0.1:${address.port}/auth/contacts`, {
+      method: "POST", headers: { ...memberHeaders, "content-type": "application/json", "x-correlation-id": contactCreateAuditId },
+      body: JSON.stringify({ dealerId: tenantIds[0], displayName: "Synthetic Runtime Contact", phone: "+15550109876" }),
+    });
+    assert.equal(createContactResponse.status, 201);
+    const createdContact = await createContactResponse.json() as { contact: { id: string; source: string; consentState: string } };
+    assert.equal(createdContact.contact.source, "manual");
+    assert.equal(createdContact.contact.consentState, "unknown");
+
+    const duplicateContactResponse = await fetch(`http://127.0.0.1:${address.port}/auth/contacts`, {
+      method: "POST", headers: { ...memberHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ dealerId: tenantIds[0], displayName: "Duplicate Synthetic Contact", phone: "+1 (555) 010-9876" }),
+    });
+    assert.equal(duplicateContactResponse.status, 409);
+
+    const updateContactResponse = await fetch(`http://127.0.0.1:${address.port}/auth/contacts/${createdContact.contact.id}?dealerId=${tenantIds[0]}`, {
+      method: "PATCH", headers: { ...memberHeaders, "content-type": "application/json", "x-correlation-id": contactUpdateAuditId },
+      body: JSON.stringify({ displayName: "Updated Synthetic Runtime Contact", consentState: "granted" }),
+    });
+    assert.equal(updateContactResponse.status, 200);
+    const updatedContact = await updateContactResponse.json() as { contact: { displayName: string; consentState: string } };
+    assert.equal(updatedContact.contact.displayName, "Updated Synthetic Runtime Contact");
+    assert.equal(updatedContact.contact.consentState, "unknown");
   } finally {
     if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
     await client.query("ROLLBACK").catch(() => undefined);
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = replica");
+      await client.query(
+        "DELETE FROM public.admin_audit_events WHERE reference_id = ANY($1::text[])",
+        [[contactCreateAuditId, contactUpdateAuditId, invitationAcceptAuditId]],
+      );
+      await client.query("COMMIT");
+    } catch {
+      await client.query("ROLLBACK").catch(() => undefined);
+    }
     await client.query("DELETE FROM public.app_sessions WHERE token_hash = $1", [sessionHash]).catch(() => undefined);
+    await client.query("DELETE FROM public.app_sessions WHERE token_hash = $1", [memberSessionHash]).catch(() => undefined);
     if (memberId) await client.query("DELETE FROM public.app_users WHERE id = $1", [memberId]).catch(() => undefined);
+    await client.query("DELETE FROM public.app_users WHERE email = $1", [invitationEmail]).catch(() => undefined);
     for (const tenantId of tenantIds) {
       try {
         await client.query("BEGIN");

@@ -9,6 +9,7 @@ test("tenant row security is forced and bound to the transaction-local tenant co
   assert.match(TENANT_RLS_SQL, /current_setting\('app\.tenant_id', true\)/);
   assert.match(TENANT_RLS_SQL, /WITH CHECK/);
   assert.doesNotMatch(TENANT_RLS_SQL, /BYPASSRLS|rolbypassrls|SET row_security\s*=\s*off/i);
+  assert.match(TENANT_RLS_SQL, /dealer_invitations_update_scope[\s\S]*?FOR UPDATE[\s\S]*?invitation_token_hash[\s\S]*?WITH CHECK/);
 });
 
 test("tenant row security migration executes its policy as one idempotent migration", async () => {
