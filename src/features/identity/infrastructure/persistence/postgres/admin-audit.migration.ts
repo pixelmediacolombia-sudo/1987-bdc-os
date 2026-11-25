@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS public.admin_audit_events (
   target_tenant_id UUID,
   entity_id TEXT,
   dealer_name TEXT,
-  category TEXT NOT NULL CHECK (category IN ('dealers', 'users', 'invitations', 'settings', 'security', 'contacts')),
+  category TEXT NOT NULL CHECK (category IN ('dealers', 'users', 'invitations', 'settings', 'security', 'contacts', 'opportunities')),
   action TEXT NOT NULL,
   outcome TEXT NOT NULL CHECK (outcome IN ('success', 'failure')),
   summary TEXT NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS public.admin_audit_events (
 
 ALTER TABLE public.admin_audit_events DROP CONSTRAINT IF EXISTS admin_audit_events_category_check;
 ALTER TABLE public.admin_audit_events ADD CONSTRAINT admin_audit_events_category_check
-  CHECK (category IN ('dealers', 'users', 'invitations', 'settings', 'security', 'contacts'));
+  CHECK (category IN ('dealers', 'users', 'invitations', 'settings', 'security', 'contacts', 'opportunities'));
 ALTER TABLE public.admin_audit_events ADD COLUMN IF NOT EXISTS entity_id TEXT;
 
 CREATE INDEX IF NOT EXISTS admin_audit_events_created_idx

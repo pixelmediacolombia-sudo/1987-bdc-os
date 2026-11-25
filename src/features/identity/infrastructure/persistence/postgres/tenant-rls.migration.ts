@@ -25,6 +25,13 @@ CREATE POLICY conversations_isolation ON public.conversations
   USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
   WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
 
+ALTER TABLE public.opportunities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.opportunities FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS opportunities_isolation ON public.opportunities;
+CREATE POLICY opportunities_isolation ON public.opportunities FOR ALL TO PUBLIC
+  USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
+  WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
+
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS messages_isolation ON public.messages;

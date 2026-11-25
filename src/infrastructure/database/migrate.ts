@@ -11,6 +11,7 @@ import { ensureInternalDiagnosticAuditTable } from "@/presentation/http/internal
 import { ensureIdentityTables } from "@/features/identity/infrastructure/persistence/postgres/identity.migration";
 import { ensureAdminAuditTable } from "@/features/identity/infrastructure/persistence/postgres/admin-audit.migration";
 import { ensureTenantRowLevelSecurity } from "@/features/identity/infrastructure/persistence/postgres/tenant-rls.migration";
+import { ensureOpportunitiesTable } from "@/features/opportunities/infrastructure/persistence/postgres/opportunities.migration";
 
 async function main(): Promise<void> {
   const config = loadAppConfig();
@@ -19,6 +20,7 @@ async function main(): Promise<void> {
     await ensureWebhookTables(pool);
     await ensureIdentityTables(pool);
     await ensureAdminAuditTable(pool);
+    await ensureOpportunitiesTable(pool);
     await ensureTenantFeatureFlags(pool);
     await ensureMemoryTables(pool);
     await ensureDecisionLogsTable(pool);
