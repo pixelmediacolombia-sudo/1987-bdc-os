@@ -163,7 +163,8 @@ export class PostgresQualificationSignalRepository implements QualificationCompl
         [dealerId],
       );
       const selected = candidates.rows.find((candidate) => Boolean(
-        envConfig || (candidate.meta_capi_enabled && candidate.meta_dataset_id && candidate.encrypted_meta_access_token),
+        candidate.meta_capi_enabled &&
+        (envConfig || (candidate.meta_dataset_id && candidate.encrypted_meta_access_token)),
       ));
       if (!selected) {
         await client.query("COMMIT");
