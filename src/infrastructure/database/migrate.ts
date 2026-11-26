@@ -9,6 +9,8 @@ import { ensureSharedDealerPolicy } from "@/modules/control/infrastructure/persi
 import { ensureConversationAiShadowTables } from "@/modules/control/infrastructure/persistence/postgres/conversation-ai-shadow.migration";
 import { ensureInternalDiagnosticAuditTable } from "@/presentation/http/internal-diagnostic-audit.migration";
 import { ensureIdentityTables } from "@/features/identity/infrastructure/persistence/postgres/identity.migration";
+import { ensureConversationWorkflowColumns } from "@/features/contacts/infrastructure/persistence/postgres/conversation-workflow.migration";
+import { ensureConversationMessageDelivery } from "@/features/contacts/infrastructure/persistence/postgres/conversation-messages.migration";
 import { ensureAdminAuditTable } from "@/features/identity/infrastructure/persistence/postgres/admin-audit.migration";
 import { ensureTenantRowLevelSecurity } from "@/features/identity/infrastructure/persistence/postgres/tenant-rls.migration";
 import { ensureOpportunitiesTable } from "@/features/opportunities/infrastructure/persistence/postgres/opportunities.migration";
@@ -19,6 +21,8 @@ async function main(): Promise<void> {
   try {
     await ensureWebhookTables(pool);
     await ensureIdentityTables(pool);
+    await ensureConversationWorkflowColumns(pool);
+    await ensureConversationMessageDelivery(pool);
     await ensureAdminAuditTable(pool);
     await ensureOpportunitiesTable(pool);
     await ensureTenantFeatureFlags(pool);

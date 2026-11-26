@@ -16,7 +16,7 @@ export function createIdentityRouter(pool: Pool, options: IdentityRouteOptions):
   router.use(createAdminDealerRoutes(pool, options));
   router.use(createAdminDealerMutationRoutes(pool, options));
   router.use(createInvitationRoutes(pool, options));
-  router.use(createContactsRouter(pool));
+  router.use(createContactsRouter(pool, options.conversationReplySender));
   router.use(createOpportunitiesRouter(pool));
   return router;
 }

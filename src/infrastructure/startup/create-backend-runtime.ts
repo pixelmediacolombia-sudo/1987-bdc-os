@@ -213,6 +213,12 @@ export async function createBackendRuntime(config: AppConfig, pool: Pool, redis:
       metaCapiEventName: config.metaCapiEventName,
       metaOAuthStart: (tenantId) => metaOAuthController.authorizationUrl(tenantId),
       redisPing: () => redis.ping(),
+      conversationReplySender: {
+        send: (input) => metaOutboundProvider.send({
+          tenantId: input.tenantId, contactId: input.contactId, content: input.content,
+          semanticHash: `human-reply:${input.clientMessageId}`, channel: input.channel,
+        }),
+      },
     }),
     metaWebhook: { controller: metaWebhookController, appSecret: config.metaAppSecret },
     metaOAuth: metaOAuthController,

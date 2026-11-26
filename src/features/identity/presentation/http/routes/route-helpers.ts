@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import type { Request, Response } from "express";
 import type { DealerInvitationMailer } from "@/features/identity/infrastructure/email/smtp-dealer-invitation-mailer";
 import type { MetaCapiTenantConfig } from "@/modules/control/infrastructure/meta-capi.config";
+import type { ConversationReplySender } from "@/features/contacts/application/conversation-reply-sender.port";
 
 export type IdentityRouteOptions = {
   production: boolean;
@@ -12,6 +13,7 @@ export type IdentityRouteOptions = {
   metaCapiEventName?: string;
   metaOAuthStart?: (tenantId: string) => string;
   redisPing?: () => Promise<string>;
+  conversationReplySender?: ConversationReplySender;
 };
 
 const SESSION_COOKIE = "bdc_os_session";

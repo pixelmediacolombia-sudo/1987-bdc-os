@@ -9,6 +9,7 @@ import { ensureConversationAiShadowTables } from "@/modules/control/infrastructu
 import { ensureInternalDiagnosticAuditTable } from "@/presentation/http/internal-diagnostic-audit.migration";
 import { ensureIdentityTables } from "@/features/identity/infrastructure/persistence/postgres/identity.migration";
 import { ensureConversationWorkflowColumns } from "@/features/contacts/infrastructure/persistence/postgres/conversation-workflow.migration";
+import { ensureConversationMessageDelivery } from "@/features/contacts/infrastructure/persistence/postgres/conversation-messages.migration";
 import { ensureAdminAuditTable } from "@/features/identity/infrastructure/persistence/postgres/admin-audit.migration";
 import { ensureTenantRowLevelSecurity } from "@/features/identity/infrastructure/persistence/postgres/tenant-rls.migration";
 import { bootstrapLocalAdmin } from "@/features/identity/infrastructure/persistence/postgres/local-admin.bootstrap";
@@ -20,6 +21,7 @@ export async function initializeDatabase(pool: Pool): Promise<void> {
   await ensureWebhookTables(pool);
   await ensureIdentityTables(pool);
   await ensureConversationWorkflowColumns(pool);
+  await ensureConversationMessageDelivery(pool);
   await ensureAdminAuditTable(pool);
   await ensureOpportunitiesTable(pool);
   const localAdminCreated = await bootstrapLocalAdmin(pool);
