@@ -29,7 +29,7 @@ test("local Docker opportunities persist changes and isolate two dealer sessions
   const contactIds = tenantIds.map(() => randomUUID());
   const tokens = tenantIds.map(() => randomBytes(32).toString("base64url"));
   const hashes = tokens.map((token) => createHash("sha256").update(token).digest("hex"));
-  const auditRefs = ["create-a", "create-b", "stage-a", "assign-a"].map((label) => `fe04-${label}-${randomUUID()}`);
+  const auditRefs = ["create-a", "create-b", "stage-a", "assign-a", "config-a", "followup-a", "archive-a", "restore-a"].map((label) => `fe04-${label}-${randomUUID()}`);
   let userIds: string[] = [];
   let server: ReturnType<express.Application["listen"]> | undefined;
   const app = express();
@@ -44,6 +44,7 @@ test("local Docker opportunities persist changes and isolate two dealer sessions
     ["user_tenant_memberships", "SELECT"], ["user_tenant_memberships", "INSERT"], ["user_tenant_memberships", "DELETE"],
     ["contacts", "SELECT"], ["contacts", "INSERT"], ["conversations", "SELECT"], ["messages", "SELECT"],
     ["opportunities", "SELECT"], ["opportunities", "INSERT"], ["opportunities", "UPDATE"], ["opportunities", "DELETE"],
+    ["opportunity_stages", "SELECT"], ["opportunity_stages", "INSERT"], ["opportunity_stages", "UPDATE"], ["opportunity_stages", "DELETE"],
     ["admin_audit_events", "SELECT"], ["admin_audit_events", "INSERT"],
   ];
   if (!hadSchemaUsage) await client.query("GRANT USAGE ON SCHEMA public TO bdc");
@@ -98,13 +99,14 @@ test("local Docker opportunities persist changes and isolate two dealer sessions
       const createResponse = await request(port, tokens[index]!, "/auth/opportunities", {
         method: "POST",
         headers: { "x-correlation-id": auditRefs[index]! },
-        body: JSON.stringify({ dealerId: tenantIds[index], title: `FE04 E2E Synthetic Opportunity ${index + 1}`, contactId: contactIds[index], contactName: `FE04 Synthetic Buyer ${index + 1}`, contactPhone: "+1 555 0104", amountCents: index === 0 ? 4250000 : 9900000, stage: "new" }),
+        body: JSON.stringify({ dealerId: tenantIds[index], title: `FE04 E2E Synthetic Opportunity ${index + 1}`, contactId: contactIds[index], contactName: `FE04 Synthetic Buyer ${index + 1}`, contactPhone: "+1 555 0104", amountCents: index === 0 ? 4250000 : 9900000, stage: "new", nextAction: index === 0 ? "Confirmar prueba de manejo" : null, nextActionAt: index === 0 ? "2026-11-28" : null }),
       });
       assert.equal(createResponse.status, 201);
-      const created = await createResponse.json() as { opportunity: { id: string; dealerId: string; contactId: string; stage: string; amountCents: string } };
+      const created = await createResponse.json() as { opportunity: { id: string; dealerId: string; contactId: string; stage: string; amountCents: string; nextAction: string | null; nextActionAt: string | null } };
       assert.equal(created.opportunity.dealerId, tenantIds[index]);
       assert.equal(created.opportunity.contactId, contactIds[index]);
       assert.equal(created.opportunity.stage, "new");
+      if (index === 0) { assert.equal(created.opportunity.nextAction, "Confirmar prueba de manejo"); assert.equal(created.opportunity.nextActionAt, "2026-11-28"); }
       createdIds[index] = created.opportunity.id;
     }
 
@@ -117,7 +119,7 @@ test("local Docker opportunities persist changes and isolate two dealer sessions
 
       const listResponse = await request(port, tokens[index]!, `/auth/opportunities?dealerId=${tenantIds[index]}`);
       assert.equal(listResponse.status, 200);
-      const list = await listResponse.json() as { opportunities: Array<{ id: string; dealerId: string; contactId: string }> };
+      const list = await listResponse.json() as { opportunities: Array<{ id: string; dealerId: string; contactId: string; nextAction: string | null; archivedAt: string | null }> };
       assert.deepEqual(list.opportunities.map(({ id, dealerId, contactId }) => [id, dealerId, contactId]), [[createdIds[index], tenantIds[index], contactIds[index]]]);
       const otherTenantRead = await request(port, tokens[index]!, `/auth/opportunities?dealerId=${tenantIds[1 - index]}`);
       assert.equal(otherTenantRead.status, 403);
@@ -138,6 +140,20 @@ test("local Docker opportunities persist changes and isolate two dealer sessions
     assert.equal(stageBody.opportunity.stage, "working");
     assert.equal(stageBody.opportunity.assignedUserId, userIds[0]);
 
+    const followupResponse = await request(port, tokens[0]!, `/auth/opportunities/${createdIds[0]}?dealerId=${tenantIds[0]}`, { method: "PATCH", headers: { "x-correlation-id": auditRefs[5]! }, body: JSON.stringify({ nextAction: "Enviar cotización", nextActionAt: "2026-11-29" }) });
+    assert.equal(followupResponse.status, 200);
+    const followup = await followupResponse.json() as { opportunity: { nextAction: string; nextActionAt: string } };
+    assert.deepEqual([followup.opportunity.nextAction, followup.opportunity.nextActionAt], ["Enviar cotización", "2026-11-29"]);
+    const archiveResponse = await request(port, tokens[0]!, `/auth/opportunities/${createdIds[0]}?dealerId=${tenantIds[0]}`, { method: "PATCH", headers: { "x-correlation-id": auditRefs[6]! }, body: JSON.stringify({ archived: true }) });
+    assert.equal(archiveResponse.status, 200);
+    const hiddenArchived = await request(port, tokens[0]!, `/auth/opportunities?dealerId=${tenantIds[0]}`);
+    assert.equal((await hiddenArchived.json() as { opportunities: unknown[] }).opportunities.length, 0);
+    const shownArchived = await request(port, tokens[0]!, `/auth/opportunities?dealerId=${tenantIds[0]}&includeArchived=true`);
+    const archivedList = await shownArchived.json() as { opportunities: Array<{ archivedAt: string | null }> };
+    assert.ok(archivedList.opportunities[0]?.archivedAt);
+    const restoreResponse = await request(port, tokens[0]!, `/auth/opportunities/${createdIds[0]}?dealerId=${tenantIds[0]}`, { method: "PATCH", headers: { "x-correlation-id": auditRefs[7]! }, body: JSON.stringify({ archived: false }) });
+    assert.equal(restoreResponse.status, 200);
+
     const assignResponse = await request(port, tokens[0]!, `/auth/opportunities/${createdIds[0]}?dealerId=${tenantIds[0]}`, {
       method: "PATCH", headers: { "x-correlation-id": auditRefs[3]! }, body: JSON.stringify({ assignedUserId: userIds[0] }),
     });
@@ -145,7 +161,7 @@ test("local Docker opportunities persist changes and isolate two dealer sessions
     const activityResponse = await request(port, tokens[0]!, `/auth/opportunities/${createdIds[0]}/activity?dealerId=${tenantIds[0]}`);
     assert.equal(activityResponse.status, 200);
     const activity = await activityResponse.json() as { activity: Array<{ action: string; summary: string }> };
-    assert.deepEqual(activity.activity.map(({ action }) => action).sort(), ["opportunity.assigned", "opportunity.created", "opportunity.stage_changed"].sort());
+    assert.deepEqual(activity.activity.map(({ action }) => action).sort(), ["opportunity.assigned", "opportunity.created", "opportunity.stage_changed", "opportunity.next_action_updated", "opportunity.archived", "opportunity.restored"].sort());
 
     const dashboardResponse = await request(port, tokens[0]!, `/auth/dashboard?dealerId=${tenantIds[0]}`);
     assert.equal(dashboardResponse.status, 200);
