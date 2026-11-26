@@ -52,6 +52,14 @@ CREATE POLICY automation_event_outbox_isolation ON public.automation_event_outbo
   FOR ALL TO PUBLIC
   USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
   WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
+
+ALTER TABLE public.automation_workflows ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.automation_workflows FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS automation_workflows_isolation ON public.automation_workflows;
+CREATE POLICY automation_workflows_isolation ON public.automation_workflows
+  FOR ALL TO PUBLIC
+  USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
+  WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS messages_isolation ON public.messages;

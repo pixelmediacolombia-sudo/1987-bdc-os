@@ -8,6 +8,7 @@ import { createInvitationRoutes } from "./routes/invitation.routes";
 import { createContactsRouter } from "@/features/contacts/presentation/http/contacts.routes";
 import { createOpportunitiesRouter } from "@/features/opportunities/presentation/http/opportunities.routes";
 import { createAppointmentsRouter } from "@/features/appointments/presentation/http/appointments.routes";
+import { createAutomationWorkflowsRouter } from "@/modules/automations/presentation/http/automation-workflows.routes";
 import type { IdentityRouteOptions } from "./routes/route-helpers";
 
 export function createIdentityRouter(pool: Pool, options: IdentityRouteOptions): express.Router {
@@ -20,6 +21,7 @@ export function createIdentityRouter(pool: Pool, options: IdentityRouteOptions):
   router.use(createContactsRouter(pool, options.conversationReplySender));
   router.use(createOpportunitiesRouter(pool));
   router.use(createAppointmentsRouter(pool));
+  router.use(createAutomationWorkflowsRouter(pool));
   return router;
 }
 
