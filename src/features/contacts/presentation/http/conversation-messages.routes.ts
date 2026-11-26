@@ -24,6 +24,7 @@ export function createConversationMessageRouter(pool: Pool, replySender?: Conver
       if (!replySender) { response.status(503).json({ error: "El envío de mensajes no está disponible en este momento." }); return; }
 
       const reservation = await withTenant(pool, dealerId, async (client) => {
+        await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         const conversation = await client.query<{ contactId: string; providerContactId: string; channel: string; state: string }>(
           `SELECT cv.contact_id::text AS "contactId", c.provider_contact_id AS "providerContactId", cv.channel, cv.state
              FROM public.conversations AS cv JOIN public.contacts AS c ON c.id = cv.contact_id AND c.tenant_id = cv.tenant_id
@@ -96,6 +97,7 @@ export function createConversationMessageRouter(pool: Pool, replySender?: Conver
 
       try {
         const saved = await withTenant(pool, dealerId, async (client) => {
+          await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
           const result = await client.query(
             `UPDATE public.messages SET status = 'sent', external_id = $3
               WHERE id = $1::uuid AND tenant_id = $2::uuid

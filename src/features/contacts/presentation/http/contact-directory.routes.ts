@@ -82,6 +82,7 @@ export function createContactDirectoryRouter(pool: Pool): express.Router {
       if (!contactInput.displayName?.trim()) { response.status(400).json({ error: "Escribe el nombre del contacto." }); return; }
       if (!hasReachableAddress(contactInput)) { response.status(400).json({ error: "Añade un teléfono o correo para identificar el contacto." }); return; }
       const created = await withTenant(pool, dealerId, async (client) => {
+        await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         await lockContactIdentity(client, dealerId, contactInput);
         const duplicate = await duplicateContact(client, dealerId, contactInput);
         if (duplicate) return { duplicate };

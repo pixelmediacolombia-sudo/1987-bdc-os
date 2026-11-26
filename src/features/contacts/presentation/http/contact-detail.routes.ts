@@ -18,6 +18,7 @@ export function createContactDetailRouter(pool: Pool): express.Router {
       const fields = Object.keys(input) as Array<keyof ContactInput>;
       if (!fields.length) { response.status(400).json({ error: "No hay cambios para guardar." }); return; }
       const update = await withTenant(pool, dealerId, async (client) => {
+        await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         const currentResult = await client.query<ContactRow>(
           `SELECT ${CONTACT_COLUMNS} FROM public.contacts AS c WHERE c.id = $1::uuid AND c.tenant_id = $2::uuid FOR UPDATE`, [contactId, dealerId],
         );

@@ -22,6 +22,7 @@ export function createConversationWorkflowRouter(pool: Pool): express.Router {
         response.status(400).json({ error: "La actualización de conversación no es válida." }); return;
       }
       const result = await withTenant(pool, dealerId, async (client) => {
+        await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         if (hasAssignee && body.assignedUserId) {
           const member = await client.query(
             `SELECT 1 FROM public.user_tenant_memberships AS m JOIN public.app_users AS u ON u.id = m.user_id

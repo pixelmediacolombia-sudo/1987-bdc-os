@@ -216,6 +216,7 @@ export class PostgresWebhookRepository implements WebhookRepository {
 
   private async setTenantContext(client: PoolClient, tenantId: string): Promise<void> {
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+    await client.query("SELECT set_config('app.automation_origin', 'meta_webhook', true)");
   }
 
   private async persistInboundMessage(
@@ -480,3 +481,4 @@ function normalizeConversationChannel(channel: string): string {
   };
   return aliases[normalized] ?? normalized;
 }
+

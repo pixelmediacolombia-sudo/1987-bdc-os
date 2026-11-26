@@ -14,6 +14,8 @@ import { ensureConversationMessageDelivery } from "@/features/contacts/infrastru
 import { ensureAdminAuditTable } from "@/features/identity/infrastructure/persistence/postgres/admin-audit.migration";
 import { ensureTenantRowLevelSecurity } from "@/features/identity/infrastructure/persistence/postgres/tenant-rls.migration";
 import { ensureOpportunitiesTable } from "@/features/opportunities/infrastructure/persistence/postgres/opportunities.migration";
+import { ensureAppointmentsTables } from "@/features/appointments/infrastructure/persistence/postgres/appointments.migration";
+import { ensureAutomationEventOutbox } from "@/modules/automations/infrastructure/persistence/postgres/automation-event-outbox.migration";
 
 async function main(): Promise<void> {
   const config = loadAppConfig();
@@ -25,6 +27,8 @@ async function main(): Promise<void> {
     await ensureConversationMessageDelivery(pool);
     await ensureAdminAuditTable(pool);
     await ensureOpportunitiesTable(pool);
+    await ensureAppointmentsTables(pool);
+    await ensureAutomationEventOutbox(pool);
     await ensureTenantFeatureFlags(pool);
     await ensureMemoryTables(pool);
     await ensureDecisionLogsTable(pool);
@@ -54,3 +58,4 @@ main().catch((error: unknown) => {
   }
   process.exitCode = 1;
 });
+

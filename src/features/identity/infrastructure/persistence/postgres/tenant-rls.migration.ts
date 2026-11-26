@@ -45,6 +45,13 @@ DROP POLICY IF EXISTS appointments_isolation ON public.appointments;
 CREATE POLICY appointments_isolation ON public.appointments FOR ALL TO PUBLIC
   USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
   WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
+ALTER TABLE public.automation_event_outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.automation_event_outbox FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS automation_event_outbox_isolation ON public.automation_event_outbox;
+CREATE POLICY automation_event_outbox_isolation ON public.automation_event_outbox
+  FOR ALL TO PUBLIC
+  USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
+  WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS messages_isolation ON public.messages;
@@ -117,4 +124,5 @@ CREATE POLICY user_tenant_memberships_write_scope ON public.user_tenant_membersh
 export async function ensureTenantRowLevelSecurity(pool: Pool): Promise<void> {
   await pool.query(TENANT_RLS_SQL);
 }
+
 

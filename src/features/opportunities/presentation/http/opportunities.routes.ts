@@ -82,6 +82,7 @@ export function createOpportunitiesRouter(pool: Pool): express.Router {
       });
       if (!scopeValid) { response.status(400).json({ error: "El contacto y el responsable deben pertenecer al dealer actual." }); return; }
       const saved = await withTenant(pool, dealerId, async (client) => {
+        await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         await ensureDealerStages(client,dealerId); const nextAction=typeof body.nextAction==="string"?body.nextAction.trim().slice(0,500)||null:null; const nextActionAt=typeof body.nextActionAt==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(body.nextActionAt)?body.nextActionAt:null; const inserted = await client.query<{ id: string }>(`INSERT INTO public.opportunities (tenant_id,title,contact_id,contact_name,contact_phone,amount_cents,stage,assigned_user_id,expected_close_date,notes,next_action,next_action_at,created_by_user_id) VALUES ($1::uuid,$2,$3::uuid,$4,$5,$6,$7,$8::uuid,$9::date,$10,$11,$12::date,$13::uuid) RETURNING id::text AS id`, [dealerId,title,contactId,contactName,typeof body.contactPhone === "string" ? body.contactPhone : null,amountCents,stage,assignedUserId,typeof body.expectedCloseDate === "string" ? body.expectedCloseDate : null,typeof body.notes === "string" ? body.notes.trim().slice(0,2000) : null,nextAction,nextActionAt,user.id]);
         const result = await client.query<Opportunity>(`SELECT ${COLUMNS} FROM public.opportunities o LEFT JOIN public.app_users u ON u.id=o.assigned_user_id WHERE o.id=$1::uuid AND o.tenant_id=$2::uuid`,[inserted.rows[0].id,dealerId]);
         const tenant = await client.query<{ dealer_name: string }>("SELECT dealer_name FROM public.tenants WHERE dealer_id=$1::uuid", [dealerId]);
@@ -122,6 +123,7 @@ export function createOpportunitiesRouter(pool: Pool): express.Router {
         if (!assigneeAllowed) { response.status(400).json({ error: "El responsable debe pertenecer al dealer actual." }); return; }
       }
       const saved = await withTenant(pool,dealerId,async (client) => {
+        await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         const current = await client.query<{ stage: Stage; title: string; archived_at: Date | null }>("SELECT stage,title,archived_at FROM public.opportunities WHERE id=$1::uuid AND tenant_id=$2::uuid FOR UPDATE",[id,dealerId]);
         if (!current.rows[0]) return undefined;
         await client.query(`UPDATE public.opportunities SET stage=COALESCE($3,stage), assigned_user_id=CASE WHEN $4 THEN $5::uuid ELSE assigned_user_id END, next_action=CASE WHEN $6 THEN $7 ELSE next_action END, next_action_at=CASE WHEN $8 THEN $9::date ELSE next_action_at END, archived_at=CASE WHEN $10 THEN CASE WHEN $11 THEN COALESCE(archived_at,now()) ELSE NULL END ELSE archived_at END,updated_at=now() WHERE id=$1::uuid AND tenant_id=$2::uuid`,[id,dealerId,stage??null,body.assignedUserId!==undefined,assignee??null,body.nextAction!==undefined,nextAction??null,body.nextActionAt!==undefined,nextActionAt??null,body.archived!==undefined,body.archived===true]);

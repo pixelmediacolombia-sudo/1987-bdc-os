@@ -17,6 +17,7 @@ import { ensureMetaMessagingTables } from "@/features/meta/infrastructure/persis
 import { ensureOpportunitiesTable } from "@/features/opportunities/infrastructure/persistence/postgres/opportunities.migration";
 import { ensureAppointmentsTables } from "@/features/appointments/infrastructure/persistence/postgres/appointments.migration";
 import { ensureRuntimeRolePrivileges } from "@/infrastructure/database/runtime-role.migration";
+import { ensureAutomationEventOutbox } from "@/modules/automations/infrastructure/persistence/postgres/automation-event-outbox.migration";
 
 export async function initializeDatabase(pool: Pool): Promise<void> {
   await ensureWebhookTables(pool);
@@ -26,6 +27,7 @@ export async function initializeDatabase(pool: Pool): Promise<void> {
   await ensureAdminAuditTable(pool);
   await ensureOpportunitiesTable(pool);
   await ensureAppointmentsTables(pool);
+  await ensureAutomationEventOutbox(pool);
   const localAdminCreated = await bootstrapLocalAdmin(pool);
   if (localAdminCreated) console.info("[Identity] local platform admin bootstrapped");
   await ensureTenantFeatureFlags(pool);
@@ -40,4 +42,5 @@ export async function initializeDatabase(pool: Pool): Promise<void> {
   await ensureTenantRowLevelSecurity(pool);
   await ensureRuntimeRolePrivileges(pool);
 }
+
 

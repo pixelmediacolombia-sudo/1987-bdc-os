@@ -150,6 +150,7 @@ export function createAppointmentsRouter(pool: Pool): express.Router {
       if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       if (title.length < 2 || title.length > 120 || (!contactId && !opportunityId) || (assigneeId !== null && !UUID.test(assigneeId)) || !(reminderMinutes === null || [0, 15, 30, 60].includes(reminderMinutes))) { response.status(400).json({ error: "Revisa el título, vínculo, responsable y recordatorio de la cita." }); return; }
       const appointment = await withTenant(pool, dealerId, async (client) => {
+        await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [dealerId]);
         const timeZone = await timezoneFor(client, dealerId);
         const start = parseLocal(body.startsAtLocal, timeZone), end = parseLocal(body.endsAtLocal, timeZone);
@@ -178,6 +179,7 @@ export function createAppointmentsRouter(pool: Pool): express.Router {
       if (!UUID.test(id) || !await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a esta cita." }); return; }
       if (body.status !== undefined && (typeof body.status !== "string" || !statuses.includes(body.status))) { response.status(400).json({ error: "El estado de la cita no es válido." }); return; }
       const appointment = await withTenant(pool, dealerId, async (client) => {
+        await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [dealerId]);
         const found = await client.query<Appointment>(`SELECT ${COLUMNS} FROM public.appointments a LEFT JOIN public.app_users u ON u.id=a.assigned_user_id WHERE a.id=$1::uuid AND a.tenant_id=$2::uuid FOR UPDATE OF a`, [id, dealerId]);
         if (!found.rows[0]) return undefined;
