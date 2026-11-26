@@ -26,6 +26,7 @@ test("local Docker opportunities persist changes and isolate two dealer sessions
   const client = await pool.connect();
   const tenantIds = [randomUUID(), randomUUID()];
   const emails = tenantIds.map((_, index) => `fe04-opportunity-${index + 1}-${randomUUID()}@example.test`);
+  const contactIds = tenantIds.map(() => randomUUID());
   const tokens = tenantIds.map(() => randomBytes(32).toString("base64url"));
   const hashes = tokens.map((token) => createHash("sha256").update(token).digest("hex"));
   const auditRefs = ["create-a", "create-b", "stage-a", "assign-a"].map((label) => `fe04-${label}-${randomUUID()}`);
@@ -41,7 +42,7 @@ test("local Docker opportunities persist changes and isolate two dealer sessions
     ["app_users", "SELECT"], ["app_sessions", "SELECT"], ["app_sessions", "INSERT"], ["app_sessions", "DELETE"],
     ["tenants", "SELECT"], ["tenants", "INSERT"], ["tenants", "DELETE"],
     ["user_tenant_memberships", "SELECT"], ["user_tenant_memberships", "INSERT"], ["user_tenant_memberships", "DELETE"],
-    ["contacts", "SELECT"], ["conversations", "SELECT"], ["messages", "SELECT"],
+    ["contacts", "SELECT"], ["contacts", "INSERT"], ["conversations", "SELECT"], ["messages", "SELECT"],
     ["opportunities", "SELECT"], ["opportunities", "INSERT"], ["opportunities", "UPDATE"], ["opportunities", "DELETE"],
     ["admin_audit_events", "SELECT"], ["admin_audit_events", "INSERT"],
   ];
@@ -72,6 +73,7 @@ test("local Docker opportunities persist changes and isolate two dealer sessions
          VALUES ($1, $2, 'America/Bogota', 'fe04-e2e', 'active', false, false, false)`,
         [tenantId, `FE04 E2E Dealer ${index + 1}`],
       );
+      await client.query(`INSERT INTO public.contacts (id, tenant_id, provider_contact_id, display_name, phone, preferred_language, consent_state) VALUES ($1, $2, $3, $4, $5, 'es', 'unknown')`, [contactIds[index], tenantId, `manual:fe04-${contactIds[index]}`, `FE04 E2E Contact ${index + 1}`, `+1 555 01${String(index + 1).padStart(2, '0')}`]);
       await client.query("INSERT INTO public.user_tenant_memberships (user_id, tenant_id) VALUES ($1, $2)", [userIds[index], tenantId]);
       await client.query("COMMIT");
       await client.query("INSERT INTO public.app_sessions (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '10 minutes')", [userIds[index], hashes[index]]);
@@ -96,20 +98,27 @@ test("local Docker opportunities persist changes and isolate two dealer sessions
       const createResponse = await request(port, tokens[index]!, "/auth/opportunities", {
         method: "POST",
         headers: { "x-correlation-id": auditRefs[index]! },
-        body: JSON.stringify({ dealerId: tenantIds[index], title: `FE04 E2E Synthetic Opportunity ${index + 1}`, contactName: `FE04 Synthetic Buyer ${index + 1}`, contactPhone: "+1 555 0104", amountCents: index === 0 ? 4250000 : 9900000, stage: "new" }),
+        body: JSON.stringify({ dealerId: tenantIds[index], title: `FE04 E2E Synthetic Opportunity ${index + 1}`, contactId: contactIds[index], contactName: `FE04 Synthetic Buyer ${index + 1}`, contactPhone: "+1 555 0104", amountCents: index === 0 ? 4250000 : 9900000, stage: "new" }),
       });
       assert.equal(createResponse.status, 201);
-      const created = await createResponse.json() as { opportunity: { id: string; dealerId: string; stage: string; amountCents: string } };
+      const created = await createResponse.json() as { opportunity: { id: string; dealerId: string; contactId: string; stage: string; amountCents: string } };
       assert.equal(created.opportunity.dealerId, tenantIds[index]);
+      assert.equal(created.opportunity.contactId, contactIds[index]);
       assert.equal(created.opportunity.stage, "new");
       createdIds[index] = created.opportunity.id;
     }
 
+    const crossDealerContact = await request(port, tokens[1]!, "/auth/opportunities", {
+      method: "POST", body: JSON.stringify({ dealerId: tenantIds[1], title: "FE04 Cross Dealer Contact Attempt", contactId: contactIds[0], contactName: "FE04 E2E Contact 1", amountCents: 1000 }),
+    });
+    assert.equal(crossDealerContact.status, 400, "a dealer cannot link another dealer's contact");
+
     for (const index of [0, 1]) {
+
       const listResponse = await request(port, tokens[index]!, `/auth/opportunities?dealerId=${tenantIds[index]}`);
       assert.equal(listResponse.status, 200);
-      const list = await listResponse.json() as { opportunities: Array<{ id: string; dealerId: string }> };
-      assert.deepEqual(list.opportunities.map(({ id, dealerId }) => [id, dealerId]), [[createdIds[index], tenantIds[index]]]);
+      const list = await listResponse.json() as { opportunities: Array<{ id: string; dealerId: string; contactId: string }> };
+      assert.deepEqual(list.opportunities.map(({ id, dealerId, contactId }) => [id, dealerId, contactId]), [[createdIds[index], tenantIds[index], contactIds[index]]]);
       const otherTenantRead = await request(port, tokens[index]!, `/auth/opportunities?dealerId=${tenantIds[1 - index]}`);
       assert.equal(otherTenantRead.status, 403);
       const otherDashboard = await request(port, tokens[index]!, `/auth/dashboard?dealerId=${tenantIds[1 - index]}`);
