@@ -15,6 +15,7 @@ import { ensureTenantRowLevelSecurity } from "@/features/identity/infrastructure
 import { bootstrapLocalAdmin } from "@/features/identity/infrastructure/persistence/postgres/local-admin.bootstrap";
 import { ensureMetaMessagingTables } from "@/features/meta/infrastructure/persistence/postgres/meta-messaging.migration";
 import { ensureOpportunitiesTable } from "@/features/opportunities/infrastructure/persistence/postgres/opportunities.migration";
+import { ensureAppointmentsTables } from "@/features/appointments/infrastructure/persistence/postgres/appointments.migration";
 import { ensureRuntimeRolePrivileges } from "@/infrastructure/database/runtime-role.migration";
 
 export async function initializeDatabase(pool: Pool): Promise<void> {
@@ -24,6 +25,7 @@ export async function initializeDatabase(pool: Pool): Promise<void> {
   await ensureConversationMessageDelivery(pool);
   await ensureAdminAuditTable(pool);
   await ensureOpportunitiesTable(pool);
+  await ensureAppointmentsTables(pool);
   const localAdminCreated = await bootstrapLocalAdmin(pool);
   if (localAdminCreated) console.info("[Identity] local platform admin bootstrapped");
   await ensureTenantFeatureFlags(pool);
@@ -38,3 +40,4 @@ export async function initializeDatabase(pool: Pool): Promise<void> {
   await ensureTenantRowLevelSecurity(pool);
   await ensureRuntimeRolePrivileges(pool);
 }
+

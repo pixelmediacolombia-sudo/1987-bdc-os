@@ -21,7 +21,8 @@
     "test:security": "npm run build && node -r module-alias/register --test dist/modules/webhooks/stop-ai-recovery.test.js dist/modules/control/burst-buffer.test.js dist/modules/control/semantic-repetition-validator.test.js dist/modules/control/burst-buffer.redis.integration.test.js dist/modules/control/human-suppression.test.js dist/modules/control/redis-queues.test.js dist/modules/control/outbound-message-registry.test.js dist/modules/webhooks/redis-webhook-queue.redis.integration.test.js dist/modules/memory/hydration-service.test.js dist/modules/decisions/policy-engine.test.js dist/modules/decisions/decision-log-repository.test.js dist/modules/decisions/policy-webhook.integration.test.js dist/presentation/http/redis-diagnostic.controller.test.js dist/presentation/http/internal-diagnostic-guard.test.js dist/features/meta/presentation/http/meta-webhook.routes.test.js",
     "test:redis-integration": "npm run build && node -r dotenv/config -r module-alias/register --test dist/modules/control/burst-buffer.redis.integration.test.js dist/modules/webhooks/redis-webhook-queue.redis.integration.test.js",
     "test:local:opportunities": "npm run build && node -r dotenv/config -r module-alias/register --test dist/features/opportunities/presentation/http/opportunities.local.e2e.test.js",
-    "test:local:crm-replies": "npm run build && node -r dotenv/config -r module-alias/register --test dist/features/contacts/presentation/http/conversation-replies.local.e2e.test.js"
+    "test:local:crm-replies": "npm run build && node -r dotenv/config -r module-alias/register --test dist/features/contacts/presentation/http/conversation-replies.local.e2e.test.js",
+    "test:local:appointments": "npm run build && node -r dotenv/config -r module-alias/register --test dist/features/appointments/presentation/http/appointments.local.e2e.test.js"
   },
   "keywords": [],
   "author": "",

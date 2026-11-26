@@ -120,7 +120,7 @@ export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRou
         `INSERT INTO public.tenants
            (dealer_id, dealer_name, timezone, policy_version, status,
             sofia_enabled, qualification_flow_enabled, qualification_signal_enabled)
-         VALUES ($1, $2, 'America/Bogota', 'pending_dealer_setup', 'active', false, false, false)
+         VALUES ($1, $2, 'America/New_York', 'pending_dealer_setup', 'active', false, false, false)
          RETURNING dealer_id::text AS id`,
         [dealerId, dealerName],
       );
@@ -241,3 +241,4 @@ export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRou
   });
   return router;
 }
+

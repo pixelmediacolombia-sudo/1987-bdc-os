@@ -32,6 +32,19 @@ CREATE POLICY opportunities_isolation ON public.opportunities FOR ALL TO PUBLIC
   USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
   WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
 
+ALTER TABLE public.appointment_availability ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.appointment_availability FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS appointment_availability_isolation ON public.appointment_availability;
+CREATE POLICY appointment_availability_isolation ON public.appointment_availability FOR ALL TO PUBLIC
+  USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
+  WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
+
+ALTER TABLE public.appointments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.appointments FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS appointments_isolation ON public.appointments;
+CREATE POLICY appointments_isolation ON public.appointments FOR ALL TO PUBLIC
+  USING (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid))
+  WITH CHECK (tenant_id = (NULLIF(current_setting('app.tenant_id', true), '')::uuid));
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS messages_isolation ON public.messages;
@@ -104,3 +117,4 @@ CREATE POLICY user_tenant_memberships_write_scope ON public.user_tenant_membersh
 export async function ensureTenantRowLevelSecurity(pool: Pool): Promise<void> {
   await pool.query(TENANT_RLS_SQL);
 }
+

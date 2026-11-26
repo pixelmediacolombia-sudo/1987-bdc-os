@@ -72,7 +72,7 @@ export function invitationUrl(publicAppUrl: string, token: string): string {
   return url.toString();
 }
 
-type AuditCategory = "dealers" | "users" | "invitations" | "settings" | "security" | "contacts" | "opportunities";
+type AuditCategory = "dealers" | "users" | "invitations" | "settings" | "security" | "contacts" | "opportunities" | "appointments";
 type AuditInput = {
   actor: IdentityUser;
   dealerId?: string | null;
@@ -171,3 +171,4 @@ export async function activeSession(pool: Pool, request: Request): Promise<Ident
   );
   return result.rows[0];
 }
+
