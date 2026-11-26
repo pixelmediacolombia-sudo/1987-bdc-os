@@ -77,3 +77,19 @@ test("rejects a future schema version until a migrator is defined", () => {
   assert.ok(validateAutomationWorkflowDefinition(definition).some((issue) => issue.code === "unsupported_version"));
   assert.throws(() => migrateAutomationWorkflowDefinition(definition), /migración no disponible/);
 });
+
+test("accepts durable wait nodes only with a bounded integer duration", () => {
+  const definition = validDefinition();
+  const trigger = definition.nodes.find((node) => node.type === "trigger.event")!;
+  const condition = definition.nodes.find((node) => node.type === "condition.if")!;
+  const yesEnd = definition.nodes.find((node) => node.type === "flow.end" && node.config.outcome === "complete")!;
+  const waitId = randomUUID();
+  definition.nodes.push({ id: waitId, type: "flow.wait", position: { x: 500, y: 20 }, config: { durationSeconds: 60 } });
+  const yesEdge = definition.edges.find((edge) => edge.source === condition.id && edge.sourcePort === "true")!;
+  yesEdge.target = waitId;
+  definition.edges.push({ id: randomUUID(), source: waitId, sourcePort: "next", target: yesEnd.id, targetPort: "in" });
+  assert.deepEqual(validateAutomationWorkflowDefinition(definition), []);
+  const invalid = { ...definition, nodes: definition.nodes.map((node) => node.id === waitId ? { ...node, config: { durationSeconds: 0 } } : node) };
+  assert.ok(validateAutomationWorkflowDefinition(invalid).some((issue) => issue.code === "invalid_node" && issue.nodeId === waitId));
+  void trigger;
+});

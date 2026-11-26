@@ -9,6 +9,7 @@ import { ensureTenantRowLevelSecurity } from "@/features/identity/infrastructure
 import { createIdentityRouter } from "@/features/identity/presentation/http/identity.routes";
 import { ensureAutomationWorkflows } from "@/modules/automations/infrastructure/persistence/postgres/automation-workflows.migration";
 import { ensureAutomationEventOutbox } from "@/modules/automations/infrastructure/persistence/postgres/automation-event-outbox.migration";
+import { ensureAutomationEngine } from "@/modules/automations/infrastructure/persistence/postgres/automation-engine.migration";
 import { ensureRuntimeRolePrivileges } from "@/infrastructure/database/runtime-role.migration";
 
 const enabled = process.env.AUTOMATION_WORKFLOWS_E2E === "1" && Boolean(process.env.DATABASE_URL);
@@ -17,7 +18,7 @@ test("local automation workflow drafts persist revisions and remain dealer-scope
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl });
   const apiPool = new Pool({ connectionString: process.env.RUNTIME_DATABASE_URL ?? process.env.DATABASE_URL, ssl, ...(process.env.RUNTIME_DATABASE_URL ? {} : { options: "-c role=bdc" }) });
   const migrationPool = new Pool({ connectionString: process.env.DATABASE_MIGRATION_URL ?? process.env.DATABASE_URL, ssl });
-  await ensureAdminAuditTable(migrationPool); await ensureAutomationEventOutbox(migrationPool); await ensureAutomationWorkflows(migrationPool); await ensureTenantRowLevelSecurity(migrationPool); await ensureRuntimeRolePrivileges(migrationPool); await migrationPool.end();
+  await ensureAdminAuditTable(migrationPool); await ensureAutomationEventOutbox(migrationPool); await ensureAutomationWorkflows(migrationPool); await ensureAutomationEngine(migrationPool); await ensureTenantRowLevelSecurity(migrationPool); await ensureRuntimeRolePrivileges(migrationPool); await migrationPool.end();
   const fixture = await pool.connect();
   const tenantIds = [randomUUID(), randomUUID()]; const userIds: string[] = [];
   const tokens = tenantIds.map(() => randomBytes(32).toString("base64url")); const hashes = tokens.map((token) => createHash("sha256").update(token).digest("hex"));
@@ -46,6 +47,36 @@ test("local automation workflow drafts persist revisions and remain dealer-scope
     const list = await request(port, tokens[0]!, `/auth/automation/workflows?dealerId=${tenantIds[0]}`); assert.equal(list.status, 200);
     const listBody = await list.json() as { workflows: Array<{ id: string; draftRevision: number; publishedRevision: number | null }> };
     assert.deepEqual(listBody.workflows.map((item) => [item.id, item.draftRevision, item.publishedRevision]), [[created.workflow.id, 2, null]]);
+
+    const triggerId = randomUUID(); const endId = randomUUID(); const eventId = randomUUID(); const runId = randomUUID();
+    const snapshot = { schemaVersion: 1, name: "Run controls E2E", nodes: [
+      { id: triggerId, type: "trigger.event", position: { x: 0, y: 0 }, config: { eventType: "message.received" } },
+      { id: endId, type: "flow.end", position: { x: 300, y: 0 }, config: { outcome: "complete" } },
+    ], edges: [{ id: randomUUID(), source: triggerId, sourcePort: "next", target: endId, targetPort: "in" }] };
+    await fixture.query("BEGIN"); await fixture.query("SET LOCAL ROLE bdc"); await fixture.query("SELECT set_config('app.tenant_id',$1,true)", [tenantIds[0]]);
+    await fixture.query(
+      `INSERT INTO public.automation_event_outbox (id,tenant_id,event_type,origin,actor_type,entity_type,entity_id,payload)
+       VALUES ($1::uuid,$2::uuid,'message.received','system','contact','message',$3::uuid,'{}'::jsonb)`, [eventId, tenantIds[0], randomUUID()],
+    );
+    await fixture.query(
+      `INSERT INTO public.automation_runs (id,tenant_id,workflow_id,event_id,generation,workflow_revision,event_type,event_snapshot,workflow_snapshot,current_node_id,status,attempts)
+       VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,1,1,'message.received',$5::jsonb,$6::jsonb,$7::uuid,'dead_letter',5)`,
+      [runId, tenantIds[0], created.workflow.id, eventId, JSON.stringify({ schemaVersion: 1, eventId, tenantId: tenantIds[0], type: "message.received", occurredAt: new Date().toISOString(), origin: "system", actor: { type: "contact" }, entity: { type: "message", id: randomUUID() }, payload: {} }), JSON.stringify(snapshot), triggerId],
+    );
+    await fixture.query("COMMIT");
+
+    const runsResponse = await request(port, tokens[0]!, `/auth/automation/workflows/${created.workflow.id}/runs?dealerId=${tenantIds[0]}`); assert.equal(runsResponse.status, 200);
+    const runsBody = await runsResponse.json() as { runs: Array<{ id: string; status: string }> }; assert.equal(runsBody.runs[0]?.status, "dead_letter");
+    const crossTenantRuns = await request(port, tokens[1]!, `/auth/automation/workflows/${created.workflow.id}/runs?dealerId=${tenantIds[0]}`); assert.equal(crossTenantRuns.status, 403);
+    const retry = await request(port, tokens[0]!, `/auth/automation/runs/${runId}/retry`, { method: "POST", body: JSON.stringify({ dealerId: tenantIds[0] }) }); assert.equal(retry.status, 200);
+    assert.equal(((await retry.json()) as { run: { status: string } }).run.status, "queued");
+    const requestKey = randomUUID();
+    const replay = await request(port, tokens[0]!, `/auth/automation/runs/${runId}/replay`, { method: "POST", body: JSON.stringify({ dealerId: tenantIds[0], requestKey }) }); assert.equal(replay.status, 201);
+    const replayBody = await replay.json() as { run: { id: string; generation: number; status: string } }; assert.equal(replayBody.run.generation, 2); assert.equal(replayBody.run.status, "queued");
+    const replayDuplicate = await request(port, tokens[0]!, `/auth/automation/runs/${runId}/replay`, { method: "POST", body: JSON.stringify({ dealerId: tenantIds[0], requestKey }) }); assert.equal(replayDuplicate.status, 201);
+    assert.equal(((await replayDuplicate.json()) as { run: { id: string } }).run.id, replayBody.run.id);
+    const cancel = await request(port, tokens[0]!, `/auth/automation/runs/${replayBody.run.id}/cancel`, { method: "POST", body: JSON.stringify({ dealerId: tenantIds[0] }) }); assert.equal(cancel.status, 200);
+    assert.equal(((await cancel.json()) as { run: { status: string } }).run.status, "cancelled");
   } finally {
     if (server) { server.closeAllConnections(); await new Promise<void>((resolve) => server!.close(() => resolve())); }
     await fixture.query("DELETE FROM public.app_sessions WHERE token_hash = ANY($1::text[])", [hashes]).catch(() => undefined);

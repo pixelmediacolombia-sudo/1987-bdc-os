@@ -17,6 +17,7 @@ import { ensureOpportunitiesTable } from "@/features/opportunities/infrastructur
 import { ensureAppointmentsTables } from "@/features/appointments/infrastructure/persistence/postgres/appointments.migration";
 import { ensureAutomationEventOutbox } from "@/modules/automations/infrastructure/persistence/postgres/automation-event-outbox.migration";
 import { ensureAutomationWorkflows } from "@/modules/automations/infrastructure/persistence/postgres/automation-workflows.migration";
+import { ensureAutomationEngine } from "@/modules/automations/infrastructure/persistence/postgres/automation-engine.migration";
 
 async function main(): Promise<void> {
   const config = loadAppConfig();
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
     await ensureAppointmentsTables(pool);
     await ensureAutomationEventOutbox(pool);
     await ensureAutomationWorkflows(pool);
+    await ensureAutomationEngine(pool);
     await ensureTenantFeatureFlags(pool);
     await ensureMemoryTables(pool);
     await ensureDecisionLogsTable(pool);

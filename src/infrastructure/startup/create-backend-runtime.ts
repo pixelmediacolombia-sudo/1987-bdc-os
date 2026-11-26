@@ -45,6 +45,7 @@ import { MetaOutboundMessageProvider } from "@/features/meta/infrastructure/meta
 import { PostgresMetaMessagingConnectionRepository } from "@/features/meta/infrastructure/persistence/postgres/postgres-meta-messaging-connection.repository";
 import { MetaOAuthClient } from "@/features/meta/application/oauth/meta-oauth.client";
 import { MetaOAuthController } from "@/features/meta/presentation/http/meta-oauth.controller";
+import { AutomationEngineWorker } from "@/modules/automations/application/automation-engine.worker";
 
 export async function createBackendRuntime(config: AppConfig, pool: Pool, redis: IoredisClient): Promise<{
   app: ReturnType<typeof createHttpApp>;
@@ -223,6 +224,13 @@ export async function createBackendRuntime(config: AppConfig, pool: Pool, redis:
     metaWebhook: { controller: metaWebhookController, appSecret: config.metaAppSecret },
     metaOAuth: metaOAuthController,
   });
+  const automationEngine = config.automationEngineEnabled ? new AutomationEngineWorker(pool, config.automationEnginePollMs) : undefined;
+  if (automationEngine) {
+    await automationEngine.start();
+    console.info(`[Automations] durable engine enabled poll_ms=${config.automationEnginePollMs}`);
+  } else {
+    console.info("[Automations] durable engine disabled reason=AUTOMATION_ENGINE_ENABLED_false");
+  }
   return {
     app,
     shutdown: async () => {
@@ -230,6 +238,7 @@ export async function createBackendRuntime(config: AppConfig, pool: Pool, redis:
         webhookQueue.stop(),
         burstBuffer.stop(),
         qualificationSignalWorker?.stop(),
+        automationEngine?.stop(),
         pool.end(),
         redis.close(),
       ]);

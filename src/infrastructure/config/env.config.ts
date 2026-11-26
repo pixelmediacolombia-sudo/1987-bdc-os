@@ -34,6 +34,8 @@ export type AppConfig = {
   conversationalDraftingModel: string;
   conversationalModelTimeoutMs: number;
   mediaUnderstandingEnabled: boolean;
+  automationEngineEnabled: boolean;
+  automationEnginePollMs: number;
   whisperCliPath?: string;
   whisperModelPath?: string;
   ffmpegCliPath?: string;
@@ -122,6 +124,8 @@ export function loadAppConfig(): AppConfig {
     conversationalDraftingModel: process.env.CONVERSATIONAL_DRAFTING_MODEL?.trim() || "gpt-5.6-luna",
     conversationalModelTimeoutMs: positiveNumberEnv("CONVERSATIONAL_MODEL_TIMEOUT_MS", 20_000),
     mediaUnderstandingEnabled: booleanEnv("MEDIA_UNDERSTANDING_ENABLED", false),
+    automationEngineEnabled: booleanEnv("AUTOMATION_ENGINE_ENABLED", false),
+    automationEnginePollMs: positiveNumberEnv("AUTOMATION_ENGINE_POLL_MS", 1000),
     whisperCliPath: process.env.WHISPER_CLI_PATH?.trim() || undefined,
     whisperModelPath: process.env.WHISPER_MODEL_PATH?.trim() || undefined,
     ffmpegCliPath: process.env.FFMPEG_CLI_PATH?.trim() || undefined,
