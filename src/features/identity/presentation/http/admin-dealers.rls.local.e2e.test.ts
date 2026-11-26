@@ -40,6 +40,7 @@ test("local Docker Admin directory and tenant data respect forced RLS", {
   let server: ReturnType<typeof app.listen> | undefined;
   const app = express();
   app.use(express.json());
+  let previousGrantsCaptured = false;
   const previousGrants = {
     schema: false,
     appUsers: false,
@@ -129,6 +130,7 @@ test("local Docker Admin directory and tenant data respect forced RLS", {
         (await client.query<{ allowed: boolean }>("SELECT has_table_privilege('bdc', 'public.dealer_invitations', $1) AS allowed", [privilege])).rows[0]?.allowed ?? false;
     }
 
+    previousGrantsCaptured = true;
     await client.query("GRANT USAGE ON SCHEMA public TO bdc");
     await client.query("GRANT SELECT ON public.app_users TO bdc");
     await client.query("GRANT SELECT, INSERT, UPDATE, DELETE ON public.contacts TO bdc");
@@ -436,21 +438,23 @@ test("local Docker Admin directory and tenant data respect forced RLS", {
       }
     }
     await apiPool.end();
-    if (!previousGrants.appUsers) await client.query("REVOKE SELECT ON public.app_users FROM bdc").catch(() => undefined);
-    for (const privilege of ["select", "insert", "update", "delete"] as const) {
-      if (!previousGrants.contacts[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.contacts FROM bdc`).catch(() => undefined);
-      if (!previousGrants.conversations[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.conversations FROM bdc`).catch(() => undefined);
-      if (!previousGrants.messages[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.messages FROM bdc`).catch(() => undefined);
+    if (previousGrantsCaptured) {
+      if (!previousGrants.appUsers) await client.query("REVOKE SELECT ON public.app_users FROM bdc").catch(() => undefined);
+      for (const privilege of ["select", "insert", "update", "delete"] as const) {
+        if (!previousGrants.contacts[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.contacts FROM bdc`).catch(() => undefined);
+        if (!previousGrants.conversations[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.conversations FROM bdc`).catch(() => undefined);
+        if (!previousGrants.messages[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.messages FROM bdc`).catch(() => undefined);
+      }
+      for (const privilege of ["select", "insert", "delete"] as const) {
+        if (!previousGrants.appSessions[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.app_sessions FROM bdc`).catch(() => undefined);
+        if (!previousGrants.tenants[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.tenants FROM bdc`).catch(() => undefined);
+      }
+      for (const privilege of ["select", "insert", "update", "delete"] as const) {
+        if (!previousGrants.memberships[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.user_tenant_memberships FROM bdc`).catch(() => undefined);
+        if (!previousGrants.invitations[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.dealer_invitations FROM bdc`).catch(() => undefined);
+      }
+      if (!previousGrants.schema) await client.query("REVOKE USAGE ON SCHEMA public FROM bdc").catch(() => undefined);
     }
-    for (const privilege of ["select", "insert", "delete"] as const) {
-      if (!previousGrants.appSessions[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.app_sessions FROM bdc`).catch(() => undefined);
-      if (!previousGrants.tenants[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.tenants FROM bdc`).catch(() => undefined);
-    }
-    for (const privilege of ["select", "insert", "update", "delete"] as const) {
-      if (!previousGrants.memberships[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.user_tenant_memberships FROM bdc`).catch(() => undefined);
-      if (!previousGrants.invitations[privilege]) await client.query(`REVOKE ${privilege.toUpperCase()} ON public.dealer_invitations FROM bdc`).catch(() => undefined);
-    }
-    if (!previousGrants.schema) await client.query("REVOKE USAGE ON SCHEMA public FROM bdc").catch(() => undefined);
     client.release();
     await pool.end();
   }
