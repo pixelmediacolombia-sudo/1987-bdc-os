@@ -6,22 +6,19 @@ import { UUID, type Tenant, type ContactRow, type ContactInput, dealerUser, with
 
 
 
-export function createContactDirectoryController(pool: Pool): {
-    getContactsDealers: RequestHandler;
-    getContacts: RequestHandler;
-    createContacts: RequestHandler;
-} {
-  return {
-    getContactsDealers: async (request: Request, response: Response) => {
+export class ContactDirectoryController {
+  constructor(private readonly pool: Pool) {}
+
+  getContactsDealers: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response);
+      const user = await dealerUser(this.pool, request, response);
       if (!user) return;
-      const memberships = await withUser(pool, user.id, (client) => client.query<{ tenant_id: string }>(
+      const memberships = await withUser(this.pool, user.id, (client) => client.query<{ tenant_id: string }>(
         "SELECT tenant_id::text FROM public.user_tenant_memberships WHERE user_id = $1 ORDER BY tenant_id", [user.id],
       ));
       const dealers: Tenant[] = [];
       for (const { tenant_id: id } of memberships.rows) {
-        const dealer = await withTenant(pool, id, async (client) => {
+        const dealer = await withTenant(this.pool, id, async (client) => {
           const result = await client.query<Tenant>(
             "SELECT dealer_id::text AS id, dealer_name AS name FROM public.tenants WHERE dealer_id = $1::uuid AND status = 'active'", [id],
           );
@@ -31,14 +28,15 @@ export function createContactDirectoryController(pool: Pool): {
       }
       response.status(200).json({ dealers });
     } catch { response.status(500).json({ error: "No pudimos cargar los dealers asociados." }); }
-  },
-    getContacts: async (request: Request, response: Response) => {
+  };
+
+  getContacts: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response);
+      const user = await dealerUser(this.pool, request, response);
       if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       if (!UUID.test(dealerId)) { response.status(400).json({ error: "Selecciona un dealer válido." }); return; }
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       const search = typeof request.query.search === "string" ? request.query.search.trim().slice(0, 120) : "";
       const channel = typeof request.query.channel === "string" ? request.query.channel.trim().toLowerCase() : "";
       const consent = typeof request.query.consentState === "string" ? request.query.consentState.trim().toLowerCase() : "";
@@ -48,7 +46,7 @@ export function createContactDirectoryController(pool: Pool): {
       const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 25;
       const offset = Number.isInteger(rawOffset) ? Math.max(rawOffset, 0) : 0;
       const sort = request.query.sort === "name" ? "name" : "recent";
-      const data = await withTenant(pool, dealerId, async (client) => {
+      const data = await withTenant(this.pool, dealerId, async (client) => {
         const where = `c.tenant_id = $1::uuid
           AND ($2 = '' OR c.display_name ILIKE '%' || $2 || '%' OR c.phone ILIKE '%' || $2 || '%' OR c.email ILIKE '%' || $2 || '%' OR c.provider_contact_id ILIKE '%' || $2 || '%')
           AND ($3 = '' OR EXISTS (SELECT 1 FROM public.conversations AS fc WHERE fc.tenant_id = c.tenant_id AND fc.contact_id = c.id
@@ -73,20 +71,21 @@ export function createContactDirectoryController(pool: Pool): {
       });
       response.status(200).json({ ...data, limit, offset });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar los contactos." }); }
-  },
-    createContacts: async (request: Request, response: Response) => {
+  };
+
+  createContacts: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response);
+      const user = await dealerUser(this.pool, request, response);
       if (!user) return;
       const dealerId = typeof request.body?.dealerId === "string" ? request.body.dealerId : "";
       if (!UUID.test(dealerId)) { response.status(400).json({ error: "Selecciona un dealer válido." }); return; }
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       const parsed = parseContactInput(request.body);
       if (!parsed.value || parsed.error) { response.status(400).json({ error: parsed.error ?? "Revisa los datos del contacto." }); return; }
       const contactInput = parsed.value;
       if (!contactInput.displayName?.trim()) { response.status(400).json({ error: "Escribe el nombre del contacto." }); return; }
       if (!hasReachableAddress(contactInput)) { response.status(400).json({ error: "Añade un teléfono o correo para identificar el contacto." }); return; }
-      const created = await withTenant(pool, dealerId, async (client) => {
+      const created = await withTenant(this.pool, dealerId, async (client) => {
         await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         await lockContactIdentity(client, dealerId, contactInput);
         const duplicate = await duplicateContact(client, dealerId, contactInput);
@@ -110,6 +109,5 @@ export function createContactDirectoryController(pool: Pool): {
       if ((error as { code?: string })?.code === "23505") { response.status(409).json({ error: "Ya existe un contacto con esos datos." }); return; }
       if (!response.headersSent) response.status(500).json({ error: "No pudimos crear el contacto." });
     }
-  },
   };
 }

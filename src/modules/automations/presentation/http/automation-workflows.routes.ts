@@ -1,10 +1,10 @@
 import express from "express";
 import type { Pool } from "pg";
-import { createAutomationWorkflowsController } from "./controllers/automation-workflows.controller";
+import { AutomationWorkflowsController } from "./controllers/automation-workflows.controller";
 
 export function createAutomationWorkflowsRouter(pool: Pool): express.Router {
   const router = express.Router();
-  const controller = createAutomationWorkflowsController(pool);
+  const controller = new AutomationWorkflowsController(pool);
   router.get("/automation/workflows", controller.getAutomationWorkflows);
 
   router.post("/automation/workflows", controller.createAutomationWorkflows);
@@ -12,6 +12,8 @@ export function createAutomationWorkflowsRouter(pool: Pool): express.Router {
   router.get("/automation/workflows/:workflowId", controller.getAutomationWorkflowsByWorkflowId);
 
   router.put("/automation/workflows/:workflowId/draft", controller.replaceAutomationWorkflowsByWorkflowIdDraft);
+
+  router.post("/automation/workflows/:workflowId/publish", controller.publishAutomationWorkflowsByWorkflowId);
 
   router.get("/automation/workflows/:workflowId/runs", controller.getAutomationWorkflowsByWorkflowIdRuns);
 

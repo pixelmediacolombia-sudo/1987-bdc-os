@@ -1,10 +1,10 @@
 import express from "express";
 import type { Pool } from "pg";
-import { createOpportunitiesController } from "./controllers/opportunities.controller";
+import { OpportunitiesController } from "./controllers/opportunities.controller";
 
 export function createOpportunitiesRouter(pool: Pool): express.Router {
   const router = express.Router();
-  const controller = createOpportunitiesController(pool);
+  const controller = new OpportunitiesController(pool);
   router.get("/dashboard", controller.getDashboard);
   router.get("/opportunities/stages", controller.getOpportunitiesStages);
   router.put("/opportunities/stages", controller.replaceOpportunitiesStages);

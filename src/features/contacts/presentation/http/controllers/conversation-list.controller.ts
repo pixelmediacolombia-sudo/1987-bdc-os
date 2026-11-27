@@ -5,18 +5,16 @@ import { UUID, type InboxConversationRow, dealerUser, withTenant, isMember } fro
 
 
 
-export function createConversationListController(pool: Pool): {
-    getConversations: RequestHandler;
-    getConversationsAssignees: RequestHandler;
-} {
-  return {
-    getConversations: async (request: Request, response: Response) => {
+export class ConversationListController {
+  constructor(private readonly pool: Pool) {}
+
+  getConversations: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response);
+      const user = await dealerUser(this.pool, request, response);
       if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       if (!UUID.test(dealerId)) { response.status(400).json({ error: "Selecciona un dealer válido." }); return; }
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       const search = typeof request.query.search === "string" ? request.query.search.trim().slice(0, 120) : "";
       const channel = typeof request.query.channel === "string" ? request.query.channel.trim().toLowerCase() : "";
       const unreadOnly = request.query.unreadOnly === "true";
@@ -26,7 +24,7 @@ export function createConversationListController(pool: Pool): {
       const rawLimit = Number(request.query.limit ?? 50), rawOffset = Number(request.query.offset ?? 0);
       const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
       const offset = Number.isInteger(rawOffset) ? Math.max(rawOffset, 0) : 0;
-      const result = await withTenant(pool, dealerId, async (client) => {
+      const result = await withTenant(this.pool, dealerId, async (client) => {
         const filter = `cv.tenant_id = $1::uuid
           AND ($2 = '' OR c.display_name ILIKE '%' || $2 || '%' OR c.phone ILIKE '%' || $2 || '%'
             OR c.email ILIKE '%' || $2 || '%' OR lm.content ILIKE '%' || $2 || '%')
@@ -65,15 +63,16 @@ export function createConversationListController(pool: Pool): {
       });
       response.status(200).json(result);
     } catch { response.status(500).json({ error: "No pudimos cargar las conversaciones." }); }
-  },
-    getConversationsAssignees: async (request: Request, response: Response) => {
+  };
+
+  getConversationsAssignees: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response);
+      const user = await dealerUser(this.pool, request, response);
       if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       if (!UUID.test(dealerId)) { response.status(400).json({ error: "El dealer no es válido." }); return; }
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
-      const assignees = await withTenant(pool, dealerId, async (client) => {
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      const assignees = await withTenant(this.pool, dealerId, async (client) => {
         const result = await client.query(
           `SELECT u.id::text AS id, u.display_name AS "displayName"
              FROM public.user_tenant_memberships AS m
@@ -85,6 +84,5 @@ export function createConversationListController(pool: Pool): {
       });
       response.status(200).json({ assignees });
     } catch { response.status(500).json({ error: "No pudimos cargar los asesores del dealer." }); }
-  },
   };
 }

@@ -5,25 +5,23 @@ import { UUID, type ContactRow, type ContactInput, type ContactActivity, dealerU
 
 
 
-export function createContactDetailController(pool: Pool): {
-    updateContactsByContactId: RequestHandler;
-    getContactsByContactId: RequestHandler;
-} {
-  return {
-    updateContactsByContactId: async (request: Request, response: Response) => {
+export class ContactDetailController {
+  constructor(private readonly pool: Pool) {}
+
+  updateContactsByContactId: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response);
+      const user = await dealerUser(this.pool, request, response);
       if (!user) return;
       const dealerId = typeof request.body?.dealerId === "string" ? request.body.dealerId : typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const contactId = typeof request.params.contactId === "string" ? request.params.contactId : "";
       if (!UUID.test(dealerId) || !UUID.test(contactId)) { response.status(400).json({ error: "El dealer o contacto no es válido." }); return; }
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       const parsed = parseContactInput(request.body);
       if (!parsed.value || parsed.error) { response.status(400).json({ error: parsed.error ?? "Revisa los datos del contacto." }); return; }
       const input = parsed.value;
       const fields = Object.keys(input) as Array<keyof ContactInput>;
       if (!fields.length) { response.status(400).json({ error: "No hay cambios para guardar." }); return; }
-      const update = await withTenant(pool, dealerId, async (client) => {
+      const update = await withTenant(this.pool, dealerId, async (client) => {
         await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         const currentResult = await client.query<ContactRow>(
           `SELECT ${CONTACT_COLUMNS} FROM public.contacts AS c WHERE c.id = $1::uuid AND c.tenant_id = $2::uuid FOR UPDATE`, [contactId, dealerId],
@@ -59,16 +57,17 @@ export function createContactDetailController(pool: Pool): {
       if ((error as { code?: string })?.code === "23505") { response.status(409).json({ error: "Otro contacto ya usa esos datos." }); return; }
       if (!response.headersSent) response.status(500).json({ error: "No pudimos actualizar el contacto." });
     }
-  },
-    getContactsByContactId: async (request: Request, response: Response) => {
+  };
+
+  getContactsByContactId: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response);
+      const user = await dealerUser(this.pool, request, response);
       if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const contactId = typeof request.params.contactId === "string" ? request.params.contactId : "";
       if (!UUID.test(dealerId) || !UUID.test(contactId)) { response.status(400).json({ error: "El dealer o contacto no es válido." }); return; }
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
-      const contact = await withTenant(pool, dealerId, async (client) => {
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      const contact = await withTenant(this.pool, dealerId, async (client) => {
         const result = await client.query(
           `SELECT ${CONTACT_COLUMNS} FROM public.contacts AS c WHERE c.id = $1::uuid AND c.tenant_id = $2::uuid`, [contactId, dealerId],
         );
@@ -111,6 +110,5 @@ export function createContactDetailController(pool: Pool): {
       if (!contact) { response.status(404).json({ error: "No encontramos ese contacto en este dealer." }); return; }
       response.status(200).json({ contact });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar el detalle del contacto." }); }
-  },
   };
 }

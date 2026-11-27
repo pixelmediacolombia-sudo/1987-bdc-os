@@ -6,40 +6,38 @@ import { loadAdminDealerDirectory, requireAdmin, type IdentityRouteOptions, type
 
 
 
-export function createAdminDealerController(pool: Pool, options: IdentityRouteOptions): {
-    getAdminDealers: RequestHandler;
-    getAdminDealersByDealerIdMetaConnect: RequestHandler;
-    getAdminDealersByDealerIdConfiguration: RequestHandler;
-} {
-  return {
-    getAdminDealers: async (request: Request, response: Response) => {
+export class AdminDealerController {
+  constructor(private readonly pool: Pool, private readonly options: IdentityRouteOptions) {}
+
+  getAdminDealers: RequestHandler = async (request: Request, response: Response) => {
     try {
-      if (!await requireAdmin(pool, request, response)) return;
-      const dealers = await loadAdminDealerDirectory(pool);
+      if (!await requireAdmin(this.pool, request, response)) return;
+      const dealers = await loadAdminDealerDirectory(this.pool);
       dealers.sort((left, right) => (left.name ?? "").localeCompare(right.name ?? "", "en"));
       response.status(200).json({ dealers });
     } catch {
       response.status(500).json({ error: "No pudimos cargar los dealers." });
     }
-  },
-    getAdminDealersByDealerIdMetaConnect: async (request: Request, response: Response) => {
+  };
+
+  getAdminDealersByDealerIdMetaConnect: RequestHandler = async (request: Request, response: Response) => {
     const dealerId = request.params.dealerId;
     if (typeof dealerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dealerId)) {
       response.status(400).json({ error: "El identificador del dealer no es válido." });
       return;
     }
     let admin: IdentityUser | undefined;
-    try { admin = await requireAdmin(pool, request, response); } catch {
+    try { admin = await requireAdmin(this.pool, request, response); } catch {
       response.status(500).json({ error: "No pudimos verificar la sesión." });
       return;
     }
     if (!admin) return;
-    if (!options.metaOAuthStart) {
+    if (!this.options.metaOAuthStart) {
       response.status(503).json({ error: "La conexión Meta todavía no está configurada." });
       return;
     }
     try {
-      const client = await pool.connect();
+      const client = await this.pool.connect();
       let dealerExists = false;
       try {
         await client.query("BEGIN");
@@ -52,20 +50,21 @@ export function createAdminDealerController(pool: Pool, options: IdentityRouteOp
         throw error;
       } finally { client.release(); }
       if (!dealerExists) { response.status(404).json({ error: "No encontramos ese dealer." }); return; }
-      response.redirect(302, options.metaOAuthStart(dealerId));
+      response.redirect(302, this.options.metaOAuthStart(dealerId));
     } catch {
       response.status(503).json({ error: "No pudimos iniciar la conexión con Meta." });
     }
-  },
-    getAdminDealersByDealerIdConfiguration: async (request: Request, response: Response) => {
+  };
+
+  getAdminDealersByDealerIdConfiguration: RequestHandler = async (request: Request, response: Response) => {
     const dealerId = request.params.dealerId;
     if (typeof dealerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dealerId)) {
       response.status(400).json({ error: "El identificador del dealer no es válido." });
       return;
     }
     try {
-      if (!await requireAdmin(pool, request, response)) return;
-      const client = await pool.connect();
+      if (!await requireAdmin(this.pool, request, response)) return;
+      const client = await this.pool.connect();
       let dealer: {
         id: string; name: string | null; status: string; timezone: string | null; policy_version: string | null;
         financial_policy: Record<string, unknown> | null; sofia_enabled: boolean;
@@ -100,7 +99,7 @@ export function createAdminDealerController(pool: Pool, options: IdentityRouteOp
       } finally { client.release(); }
       if (!dealer) { response.status(404).json({ error: "No encontramos ese dealer." }); return; }
 
-      const envMeta = findMetaCapiEnvConfig(dealer.id, options.metaCapiDealers ?? []);
+      const envMeta = findMetaCapiEnvConfig(dealer.id, this.options.metaCapiDealers ?? []);
       const metaHasDealerCredential = dealer.has_meta_access_token;
       const metaCredentialSource = metaHasDealerCredential ? "dealer" : envMeta ? "environment" : "none";
       const financialPolicy = dealer.financial_policy && typeof dealer.financial_policy === "object" ? dealer.financial_policy : {};
@@ -119,7 +118,7 @@ export function createAdminDealerController(pool: Pool, options: IdentityRouteOp
             enabled: dealer.meta_capi_enabled, status: !dealer.meta_capi_enabled ? "disabled" : metaCredentialSource === "none" ? "incomplete" : "configured",
             credentialSource: metaCredentialSource, hasCredential: metaCredentialSource !== "none",
             datasetId: dealer.meta_dataset_id ?? envMeta?.datasetId ?? null,
-            eventName: dealer.meta_event_name ?? options.metaCapiEventName ?? "LeadSubmitted",
+            eventName: dealer.meta_event_name ?? this.options.metaCapiEventName ?? "LeadSubmitted",
             testEventCodeConfigured: dealer.has_meta_test_event_code,
             lastEventStatus: lastCapiEvent?.status ?? null, lastEventAt: lastCapiEvent?.created_at ?? null,
           },
@@ -128,6 +127,5 @@ export function createAdminDealerController(pool: Pool, options: IdentityRouteOp
     } catch {
       if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar la configuración del dealer." });
     }
-  },
   };
 }

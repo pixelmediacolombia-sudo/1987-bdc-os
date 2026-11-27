@@ -33,20 +33,17 @@ async function withPlatformAdmin<T>(pool: Pool, action: (client: PoolClient) => 
 
 
 
-export function createAdminOverviewController(pool: Pool, options: IdentityRouteOptions): {
-    getAdminSystemHealth: RequestHandler;
-    getAdminUsers: RequestHandler;
-    getAdminAudit: RequestHandler;
-} {
-  return {
-    getAdminSystemHealth: async (request: Request, response: Response) => {
+export class AdminOverviewController {
+  constructor(private readonly pool: Pool, private readonly options: IdentityRouteOptions) {}
+
+  getAdminSystemHealth: RequestHandler = async (request: Request, response: Response) => {
     try {
-      if (!await requireAdmin(pool, request, response)) return;
-      await pool.query("SELECT 1");
+      if (!await requireAdmin(this.pool, request, response)) return;
+      await this.pool.query("SELECT 1");
 
       let redisStatus: "healthy" | "unavailable" = "unavailable";
       try {
-        redisStatus = await options.redisPing?.() === "PONG" ? "healthy" : "unavailable";
+        redisStatus = await this.options.redisPing?.() === "PONG" ? "healthy" : "unavailable";
       } catch {
         redisStatus = "unavailable";
       }
@@ -66,10 +63,11 @@ export function createAdminOverviewController(pool: Pool, options: IdentityRoute
         response.status(503).json({ error: "No pudimos consultar el estado global del sistema." });
       }
     }
-  },
-    getAdminUsers: async (request: Request, response: Response) => {
+  };
+
+  getAdminUsers: RequestHandler = async (request: Request, response: Response) => {
     try {
-      if (!await requireAdmin(pool, request, response)) return;
+      if (!await requireAdmin(this.pool, request, response)) return;
       const search = typeof request.query.search === "string" ? request.query.search.trim() : "";
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const status = typeof request.query.status === "string" ? request.query.status : "";
@@ -86,7 +84,7 @@ export function createAdminOverviewController(pool: Pool, options: IdentityRoute
         return;
       }
 
-      const dealerDirectory = await loadAdminDealerDirectory(pool);
+      const dealerDirectory = await loadAdminDealerDirectory(this.pool);
       const dealerNames = new Map(dealerDirectory.map((dealer) => [dealer.id, dealer.name] as const));
       const clauses: string[] = [];
       const values: unknown[] = [];
@@ -121,7 +119,7 @@ export function createAdminOverviewController(pool: Pool, options: IdentityRoute
           UNION ALL
           SELECT * FROM invitation_entries
         )`;
-      const directoryPage = await withPlatformAdmin(pool, async (client) => {
+      const directoryPage = await withPlatformAdmin(this.pool, async (client) => {
         const count = await client.query<{ total: string }>(`WITH ${directoryCte} SELECT COUNT(*)::text AS total FROM directory ${where}`, values);
         const entries = await client.query<AdminUserDirectoryEntry>(
           `WITH ${directoryCte}
@@ -142,10 +140,11 @@ export function createAdminOverviewController(pool: Pool, options: IdentityRoute
     } catch {
       response.status(500).json({ error: "No pudimos cargar los usuarios de la plataforma." });
     }
-  },
-    getAdminAudit: async (request: Request, response: Response) => {
+  };
+
+  getAdminAudit: RequestHandler = async (request: Request, response: Response) => {
     try {
-      if (!await requireAdmin(pool, request, response)) return;
+      if (!await requireAdmin(this.pool, request, response)) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const actor = typeof request.query.actor === "string" ? request.query.actor.trim() : "";
       const category = typeof request.query.category === "string" ? request.query.category : "";
@@ -173,9 +172,9 @@ export function createAdminOverviewController(pool: Pool, options: IdentityRoute
       if (to) add((i) => `created_at < ($${i}::date + interval '1 day')`, to);
       if (search) add((i) => `concat_ws(' ', actor_name, actor_email, dealer_name, action, summary, reference_id) ILIKE $${i}`, `%${search}%`);
       const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-      const count = await pool.query<{ total: string }>(`SELECT COUNT(*)::text AS total FROM public.admin_audit_events ${where}`, values);
+      const count = await this.pool.query<{ total: string }>(`SELECT COUNT(*)::text AS total FROM public.admin_audit_events ${where}`, values);
       const pageValues = [...values, limitValue, offsetValue];
-      const events = await pool.query(
+      const events = await this.pool.query(
         `SELECT id::text, actor_email, actor_name, target_tenant_id::text AS dealer_id, dealer_name,
                 category, action, outcome, summary, reference_id, created_at
            FROM public.admin_audit_events ${where}
@@ -187,6 +186,5 @@ export function createAdminOverviewController(pool: Pool, options: IdentityRoute
     } catch {
       response.status(500).json({ error: "No pudimos cargar la auditoría administrativa." });
     }
-  },
   };
 }

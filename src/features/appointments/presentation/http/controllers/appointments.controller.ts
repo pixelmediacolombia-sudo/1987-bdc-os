@@ -44,36 +44,32 @@ function sendError(response: Response, error: unknown, fallback: string): void {
 
 
 
-export function createAppointmentsController(pool: Pool): {
-    getCalendarAvailability: RequestHandler;
-    replaceCalendarAvailability: RequestHandler;
-    getAppointments: RequestHandler;
-    createAppointments: RequestHandler;
-    updateAppointmentsByAppointmentId: RequestHandler;
-} {
-  return {
-    getCalendarAvailability: async (request, response) => {
+export class AppointmentsController {
+  constructor(private readonly pool: Pool) {}
+
+  getCalendarAvailability: RequestHandler = async (request, response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
-      const result = await withTenant(pool, dealerId, async (client) => {
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      const result = await withTenant(this.pool, dealerId, async (client) => {
         await ensureHours(client, dealerId);
         const hours = await client.query(`SELECT weekday,is_available AS "isAvailable",opens_at::text AS "opensAt",closes_at::text AS "closesAt" FROM public.appointment_availability WHERE tenant_id=$1::uuid ORDER BY weekday`, [dealerId]);
         return { availability: hours.rows, timeZone: await timezoneFor(client, dealerId) };
       });
       response.json(result);
     } catch (error) { sendError(response, error, "No pudimos cargar los horarios."); }
-  },
-    replaceCalendarAvailability: async (request, response) => {
+  };
+
+  replaceCalendarAvailability: RequestHandler = async (request, response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const rows = (request.body as { availability?: unknown })?.availability;
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       const valid = Array.isArray(rows) && rows.length === 7 && rows.every((row) => row && typeof row === "object" && Number.isInteger((row as Availability).weekday) && typeof (row as Availability).isAvailable === "boolean" && (!(row as Availability).isAvailable || (/^\d{2}:\d{2}$/.test(String((row as Availability).opensAt)) && /^\d{2}:\d{2}$/.test(String((row as Availability).closesAt)) && String((row as Availability).opensAt) < String((row as Availability).closesAt))) && Number((row as Availability).weekday) >= 0 && Number((row as Availability).weekday) <= 6) && new Set(rows.map((row) => (row as Availability).weekday)).size === 7;
       if (!valid) { response.status(400).json({ error: "Configura un horario válido para cada día." }); return; }
-      const availability = await withTenant(pool, dealerId, async (client) => {
+      const availability = await withTenant(this.pool, dealerId, async (client) => {
         await client.query("DELETE FROM public.appointment_availability WHERE tenant_id=$1::uuid", [dealerId]);
         for (const row of rows as Availability[]) await client.query("INSERT INTO public.appointment_availability (tenant_id,weekday,is_available,opens_at,closes_at) VALUES ($1::uuid,$2,$3,$4::time,$5::time)", [dealerId, row.weekday, row.isAvailable, row.isAvailable ? row.opensAt : null, row.isAvailable ? row.closesAt : null]);
         await appendAppointmentAudit(client, user, dealerId, request, "appointment.availability_updated", "Se actualizó la disponibilidad del dealer.");
@@ -81,25 +77,27 @@ export function createAppointmentsController(pool: Pool): {
       });
       response.json({ availability });
     } catch (error) { sendError(response, error, "No pudimos guardar los horarios."); }
-  },
-    getAppointments: async (request, response) => {
+  };
+
+  getAppointments: RequestHandler = async (request, response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const from = typeof request.query.from === "string" ? new Date(request.query.from) : null;
       const to = typeof request.query.to === "string" ? new Date(request.query.to) : null;
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       if (!from || !to || !Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || to <= from) { response.status(400).json({ error: "Indica un rango de fechas válido." }); return; }
-      const result = await withTenant(pool, dealerId, async (client) => {
+      const result = await withTenant(this.pool, dealerId, async (client) => {
         const rows = await client.query<Appointment>(`SELECT ${COLUMNS} FROM public.appointments a LEFT JOIN public.app_users u ON u.id=a.assigned_user_id WHERE a.tenant_id=$1::uuid AND a.starts_at<$3 AND a.ends_at>$2 ORDER BY a.starts_at`, [dealerId, from.toISOString(), to.toISOString()]);
         return { appointments: rows.rows, timeZone: await timezoneFor(client, dealerId) };
       });
       response.json(result);
     } catch (error) { sendError(response, error, "No pudimos cargar las citas."); }
-  },
-    createAppointments: async (request, response) => {
+  };
+
+  createAppointments: RequestHandler = async (request, response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = request.body as Record<string, unknown>;
       const dealerId = typeof body.dealerId === "string" ? body.dealerId : "";
       const title = typeof body.title === "string" ? body.title.trim() : "";
@@ -107,9 +105,9 @@ export function createAppointmentsController(pool: Pool): {
       const opportunityId = typeof body.opportunityId === "string" ? body.opportunityId : null;
       const assigneeId = body.assignedUserId === null || body.assignedUserId === "" ? null : typeof body.assignedUserId === "string" ? body.assignedUserId : user.id;
       const reminderMinutes = body.reminderMinutes === null ? null : Number(body.reminderMinutes ?? 15);
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       if (title.length < 2 || title.length > 120 || (!contactId && !opportunityId) || (assigneeId !== null && !UUID.test(assigneeId)) || !(reminderMinutes === null || [0, 15, 30, 60].includes(reminderMinutes))) { response.status(400).json({ error: "Revisa el título, vínculo, responsable y recordatorio de la cita." }); return; }
-      const appointment = await withTenant(pool, dealerId, async (client) => {
+      const appointment = await withTenant(this.pool, dealerId, async (client) => {
         await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [dealerId]);
         const timeZone = await timezoneFor(client, dealerId);
@@ -128,17 +126,18 @@ export function createAppointmentsController(pool: Pool): {
       });
       response.status(201).json({ appointment });
     } catch (error) { sendError(response, error, "No pudimos guardar la cita."); }
-  },
-    updateAppointmentsByAppointmentId: async (request, response) => {
+  };
+
+  updateAppointmentsByAppointmentId: RequestHandler = async (request, response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const id = typeof request.params.appointmentId === "string" ? request.params.appointmentId : "";
       const body = request.body as Record<string, unknown>;
       const statuses = ["scheduled", "confirmed", "cancelled", "completed", "no_show"];
-      if (!UUID.test(id) || !await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a esta cita." }); return; }
+      if (!UUID.test(id) || !await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a esta cita." }); return; }
       if (body.status !== undefined && (typeof body.status !== "string" || !statuses.includes(body.status))) { response.status(400).json({ error: "El estado de la cita no es válido." }); return; }
-      const appointment = await withTenant(pool, dealerId, async (client) => {
+      const appointment = await withTenant(this.pool, dealerId, async (client) => {
         await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [dealerId]);
         const found = await client.query<Appointment>(`SELECT ${COLUMNS} FROM public.appointments a LEFT JOIN public.app_users u ON u.id=a.assigned_user_id WHERE a.id=$1::uuid AND a.tenant_id=$2::uuid FOR UPDATE OF a`, [id, dealerId]);
@@ -172,6 +171,5 @@ export function createAppointmentsController(pool: Pool): {
       if (!appointment) { response.status(404).json({ error: "No encontramos esa cita." }); return; }
       response.json({ appointment });
     } catch (error) { sendError(response, error, "No pudimos actualizar la cita."); }
-  },
   };
 }

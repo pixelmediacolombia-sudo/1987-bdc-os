@@ -7,13 +7,12 @@ import { UUID, dealerUser, withTenant, isMember, auditContact } from "../contact
 
 
 
-export function createConversationMessageController(pool: Pool, replySender?: ConversationReplySender): {
-    createConversationsByConversationIdMessages: RequestHandler;
-} {
-  return {
-    createConversationsByConversationIdMessages: async (request: Request, response: Response) => {
+export class ConversationMessageController {
+  constructor(private readonly pool: Pool, private readonly replySender?: ConversationReplySender) {}
+
+  createConversationsByConversationIdMessages: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response);
+      const user = await dealerUser(this.pool, request, response);
       if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const conversationId = typeof request.params.conversationId === "string" ? request.params.conversationId : "";
@@ -25,10 +24,10 @@ export function createConversationMessageController(pool: Pool, replySender?: Co
       if (!UUID.test(clientMessageId) || !content || content.length > 2000 || Object.keys(body ?? {}).some((key) => !["clientMessageId", "content"].includes(key))) {
         response.status(400).json({ error: "Escribe una respuesta válida de hasta 2000 caracteres." }); return;
       }
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
-      if (!replySender) { response.status(503).json({ error: "El envío de mensajes no está disponible en este momento." }); return; }
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      if (!this.replySender) { response.status(503).json({ error: "El envío de mensajes no está disponible en este momento." }); return; }
 
-      const reservation = await withTenant(pool, dealerId, async (client) => {
+      const reservation = await withTenant(this.pool, dealerId, async (client) => {
         await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         const conversation = await client.query<{ contactId: string; providerContactId: string; channel: string; state: string }>(
           `SELECT cv.contact_id::text AS "contactId", c.provider_contact_id AS "providerContactId", cv.channel, cv.state
@@ -82,12 +81,12 @@ export function createConversationMessageController(pool: Pool, replySender?: Co
 
       let delivered: { providerMessageId: string };
       try {
-        delivered = await replySender.send({ tenantId: dealerId, contactId: reservation.contactId, content, channel: reservation.providerChannel, clientMessageId });
+        delivered = await this.replySender.send({ tenantId: dealerId, contactId: reservation.contactId, content, channel: reservation.providerChannel, clientMessageId });
       } catch (error) {
         const knownRejection = error instanceof MetaGraphApiError && typeof error.status === "number" && error.status >= 400 && error.status < 500;
         const status = knownRejection ? "failed" : error instanceof MetaGraphApiError ? "uncertain" : "failed";
         const failureMessage = status === "uncertain" ? "No pudimos confirmar la entrega. Verifica la conversación antes de volver a intentar." : "No se pudo enviar el mensaje. Puedes intentarlo de nuevo.";
-        const failed = await withTenant(pool, dealerId, async (client) => {
+        const failed = await withTenant(this.pool, dealerId, async (client) => {
           const result = await client.query(
             `UPDATE public.messages SET status = $3
               WHERE id = $1::uuid AND tenant_id = $2::uuid
@@ -101,7 +100,7 @@ export function createConversationMessageController(pool: Pool, replySender?: Co
       }
 
       try {
-        const saved = await withTenant(pool, dealerId, async (client) => {
+        const saved = await withTenant(this.pool, dealerId, async (client) => {
           await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
           const result = await client.query(
             `UPDATE public.messages SET status = 'sent', external_id = $3
@@ -116,7 +115,7 @@ export function createConversationMessageController(pool: Pool, replySender?: Co
         response.status(201).json({ message: saved, replayed: false });
       } catch {
         const uncertain = { ...reservation.message, status: "uncertain", senderName: user.display_name };
-        await withTenant(pool, dealerId, async (client) => {
+        await withTenant(this.pool, dealerId, async (client) => {
           await client.query(
             `UPDATE public.messages SET status = 'uncertain', external_id = $3
               WHERE id = $1::uuid AND tenant_id = $2::uuid`,
@@ -128,6 +127,5 @@ export function createConversationMessageController(pool: Pool, replySender?: Co
     } catch {
       if (!response.headersSent) response.status(500).json({ error: "No pudimos procesar la respuesta." });
     }
-  },
   };
 }

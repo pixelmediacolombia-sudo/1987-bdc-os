@@ -5,18 +5,17 @@ import { UUID, dealerUser, withTenant, isMember, auditContact } from "../contact
 
 
 
-export function createConversationWorkflowController(pool: Pool): {
-    updateConversationsByConversationId: RequestHandler;
-} {
-  return {
-    updateConversationsByConversationId: async (request: Request, response: Response) => {
+export class ConversationWorkflowController {
+  constructor(private readonly pool: Pool) {}
+
+  updateConversationsByConversationId: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response);
+      const user = await dealerUser(this.pool, request, response);
       if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const conversationId = typeof request.params.conversationId === "string" ? request.params.conversationId : "";
       if (!UUID.test(dealerId) || !UUID.test(conversationId)) { response.status(400).json({ error: "El dealer o la conversación no es válida." }); return; }
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       if (!request.body || typeof request.body !== "object" || Array.isArray(request.body)) { response.status(400).json({ error: "Indica la asignación o el estado de lectura." }); return; }
       const body = request.body as Record<string, unknown>;
       const hasAssignee = Object.hasOwn(body, "assignedUserId");
@@ -26,7 +25,7 @@ export function createConversationWorkflowController(pool: Pool): {
         || (hasRead && typeof body.isRead !== "boolean")) {
         response.status(400).json({ error: "La actualización de conversación no es válida." }); return;
       }
-      const result = await withTenant(pool, dealerId, async (client) => {
+      const result = await withTenant(this.pool, dealerId, async (client) => {
         await client.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
         if (hasAssignee && body.assignedUserId) {
           const member = await client.query(
@@ -54,6 +53,5 @@ export function createConversationWorkflowController(pool: Pool): {
       if (!result) { response.status(404).json({ error: "No encontramos la conversación en este dealer." }); return; }
       response.status(200).json(result);
     } catch { response.status(500).json({ error: "No pudimos actualizar la conversación." }); }
-  },
   };
 }

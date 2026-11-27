@@ -7,27 +7,26 @@ import { appendAudit, auditReference, invitationUrl, requireAdmin, tokenDigest, 
 
 
 
-export function createAdminDealerMutationController(pool: Pool, options: IdentityRouteOptions): {
-    deleteAdminDealersByDealerId: RequestHandler;
-    updateAdminDealersByDealerIdName: RequestHandler;
-    createAdminDealers: RequestHandler;
-    createAdminDealersByDealerIdInvitations: RequestHandler;
-} {
-  const publicAppUrl = options.publicAppUrl ?? (options.production ? undefined : "http://localhost:3000");
-  return {
-    deleteAdminDealersByDealerId: async (request: Request, response: Response) => {
+export class AdminDealerMutationController {
+  private readonly publicAppUrl: string | undefined;
+
+  constructor(private readonly pool: Pool, private readonly options: IdentityRouteOptions) {
+    this.publicAppUrl = options.publicAppUrl ?? (options.production ? undefined : "http://localhost:3000");
+  }
+
+  deleteAdminDealersByDealerId: RequestHandler = async (request: Request, response: Response) => {
     const dealerId = request.params.dealerId;
     if (typeof dealerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dealerId)) {
       response.status(400).json({ error: "El identificador del dealer no es válido." });
       return;
     }
     let admin: IdentityUser | undefined;
-    try { admin = await requireAdmin(pool, request, response); } catch {
+    try { admin = await requireAdmin(this.pool, request, response); } catch {
       response.status(500).json({ error: "No pudimos verificar la sesión." });
       return;
     }
     if (!admin) return;
-    const client = await pool.connect();
+    const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [dealerId]);
@@ -48,8 +47,9 @@ export function createAdminDealerMutationController(pool: Pool, options: Identit
       await client.query("ROLLBACK").catch(() => undefined);
       response.status(500).json({ error: "No pudimos eliminar el dealer." });
     } finally { client.release(); }
-  },
-    updateAdminDealersByDealerIdName: async (request: Request, response: Response) => {
+  };
+
+  updateAdminDealersByDealerIdName: RequestHandler = async (request: Request, response: Response) => {
     const dealerId = request.params.dealerId;
     if (typeof dealerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dealerId)) {
       response.status(400).json({ error: "El identificador del dealer no es válido." });
@@ -61,12 +61,12 @@ export function createAdminDealerMutationController(pool: Pool, options: Identit
       return;
     }
     let admin: IdentityUser | undefined;
-    try { admin = await requireAdmin(pool, request, response); } catch {
+    try { admin = await requireAdmin(this.pool, request, response); } catch {
       response.status(500).json({ error: "No pudimos verificar la sesión." });
       return;
     }
     if (!admin) return;
-    const client = await pool.connect();
+    const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [dealerId]);
@@ -89,8 +89,9 @@ export function createAdminDealerMutationController(pool: Pool, options: Identit
       await client.query("ROLLBACK").catch(() => undefined);
       response.status(500).json({ error: "No pudimos guardar el nombre del dealer." });
     } finally { client.release(); }
-  },
-    createAdminDealers: async (request: Request, response: Response) => {
+  };
+
+  createAdminDealers: RequestHandler = async (request: Request, response: Response) => {
     const dealerName = typeof request.body?.dealerName === "string" ? request.body.dealerName.trim() : "";
     const ownerName = typeof request.body?.ownerName === "string" ? request.body.ownerName.trim() : "";
     const email = typeof request.body?.ownerEmail === "string" ? request.body.ownerEmail.trim().toLowerCase() : "";
@@ -99,18 +100,18 @@ export function createAdminDealerMutationController(pool: Pool, options: Identit
       return;
     }
 
-    const admin = await requireAdmin(pool, request, response).catch(() => undefined);
+    const admin = await requireAdmin(this.pool, request, response).catch(() => undefined);
     if (!admin) {
       if (!response.headersSent) response.status(500).json({ error: "No pudimos verificar la sesión." });
       return;
     }
-    if (!publicAppUrl) {
+    if (!this.publicAppUrl) {
       response.status(503).json({ error: "Configura BDC_APP_URL antes de emitir invitaciones." });
       return;
     }
 
     const dealerId = randomUUID();
-    const client = await pool.connect();
+    const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [dealerId]);
@@ -142,11 +143,11 @@ export function createAdminDealerMutationController(pool: Pool, options: Identit
       await appendAudit(client, { actor: admin, dealerId, dealerName, category: "dealers", action: "dealer.created",
         summary: `Dealer creado y se registró la invitación para ${email}.`, referenceId: auditReference(request) });
       await client.query("COMMIT");
-      const url = invitationUrl(publicAppUrl, rawToken);
+      const url = invitationUrl(this.publicAppUrl, rawToken);
       let delivery: "sent" | "manual" | "failed" = "manual";
-      if (options.invitationMailer) {
+      if (this.options.invitationMailer) {
         try {
-          await options.invitationMailer.send({ to: email, displayName: ownerName, dealerName, invitationUrl: url, expiresInHours: INVITATION_TTL_HOURS });
+          await this.options.invitationMailer.send({ to: email, displayName: ownerName, dealerName, invitationUrl: url, expiresInHours: INVITATION_TTL_HOURS });
           delivery = "sent";
         } catch {
           delivery = "failed";
@@ -162,8 +163,9 @@ export function createAdminDealerMutationController(pool: Pool, options: Identit
     } finally {
       client.release();
     }
-  },
-    createAdminDealersByDealerIdInvitations: async (request: Request, response: Response) => {
+  };
+
+  createAdminDealersByDealerIdInvitations: RequestHandler = async (request: Request, response: Response) => {
     const email = typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
     const displayName = typeof request.body?.displayName === "string" ? request.body.displayName.trim() : "";
     if (!validEmail(email) || !displayName || displayName.length > 160) {
@@ -172,18 +174,18 @@ export function createAdminDealerMutationController(pool: Pool, options: Identit
     }
     let admin: IdentityUser | undefined;
     try {
-      admin = await requireAdmin(pool, request, response);
+      admin = await requireAdmin(this.pool, request, response);
     } catch {
       response.status(500).json({ error: "No pudimos verificar la sesión." });
       return;
     }
     if (!admin) return;
-    if (!publicAppUrl) {
+    if (!this.publicAppUrl) {
       response.status(503).json({ error: "Configura BDC_APP_URL antes de emitir invitaciones." });
       return;
     }
 
-    const client = await pool.connect();
+    const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [request.params.dealerId]);
@@ -227,11 +229,11 @@ export function createAdminDealerMutationController(pool: Pool, options: Identit
       await appendAudit(client, { actor: admin, dealerId: tenant.rows[0].id, dealerName,
         category: "invitations", action: "invitation.created", summary: `Invitación emitida para ${email}.`, referenceId: auditReference(request) });
       await client.query("COMMIT");
-      const url = invitationUrl(publicAppUrl, rawToken);
+      const url = invitationUrl(this.publicAppUrl, rawToken);
       let delivery: "sent" | "manual" | "failed" = "manual";
-      if (options.invitationMailer) {
+      if (this.options.invitationMailer) {
         try {
-          await options.invitationMailer.send({ to: email, displayName, dealerName, invitationUrl: url, expiresInHours: INVITATION_TTL_HOURS });
+          await this.options.invitationMailer.send({ to: email, displayName, dealerName, invitationUrl: url, expiresInHours: INVITATION_TTL_HOURS });
           delivery = "sent";
         } catch {
           delivery = "failed";
@@ -244,6 +246,5 @@ export function createAdminDealerMutationController(pool: Pool, options: Identit
     } finally {
       client.release();
     }
-  },
   };
 }

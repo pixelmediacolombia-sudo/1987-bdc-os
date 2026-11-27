@@ -7,13 +7,10 @@ import { activeSession, cookieValue, failedAttempts, failureKey, recordFailure, 
 
 
 
-export function createSessionController(pool: Pool, options: IdentityRouteOptions): {
-    createLogin: RequestHandler;
-    getSession: RequestHandler;
-    createLogout: RequestHandler;
-} {
-  return {
-    createLogin: async (request: Request, response: Response) => {
+export class SessionController {
+  constructor(private readonly pool: Pool, private readonly options: IdentityRouteOptions) {}
+
+  createLogin: RequestHandler = async (request: Request, response: Response) => {
     const email = typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
     const password = typeof request.body?.password === "string" ? request.body.password : "";
     if (!email || !password || email.length > 254 || password.length > 1024) {
@@ -26,7 +23,7 @@ export function createSessionController(pool: Pool, options: IdentityRouteOption
     }
 
     try {
-      const result = await pool.query<IdentityUser & { password_hash: string | null; status: string }>(
+      const result = await this.pool.query<IdentityUser & { password_hash: string | null; status: string }>(
         `SELECT id::text, email, display_name, account_type, password_hash, status
            FROM public.app_users
           WHERE lower(email) = $1
@@ -45,12 +42,12 @@ export function createSessionController(pool: Pool, options: IdentityRouteOption
 
       failedAttempts.delete(failureKey(request, email));
       const token = randomBytes(32).toString("base64url");
-      await pool.query(
+      await this.pool.query(
         `INSERT INTO public.app_sessions (user_id, token_hash, expires_at)
          VALUES ($1, $2, now() + ($3 * interval '1 second'))`,
         [user.id, tokenDigest(token), SESSION_TTL_SECONDS],
       );
-      response.setHeader("Set-Cookie", sessionCookie(token, options.production));
+      response.setHeader("Set-Cookie", sessionCookie(token, this.options.production));
       response.status(200).json({
         authenticated: true,
         user: { id: user.id, email: user.email, displayName: user.display_name, accountType: user.account_type },
@@ -58,12 +55,13 @@ export function createSessionController(pool: Pool, options: IdentityRouteOption
     } catch {
       response.status(500).json({ error: "No pudimos iniciar sesión. Inténtalo de nuevo." });
     }
-  },
-    getSession: async (request: Request, response: Response) => {
+  };
+
+  getSession: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await activeSession(pool, request);
+      const user = await activeSession(this.pool, request);
       if (!user) {
-        response.setHeader("Set-Cookie", sessionCookie(undefined, options.production));
+        response.setHeader("Set-Cookie", sessionCookie(undefined, this.options.production));
         response.status(401).json({ authenticated: false });
         return;
       }
@@ -74,21 +72,21 @@ export function createSessionController(pool: Pool, options: IdentityRouteOption
     } catch {
       response.status(500).json({ error: "No pudimos verificar la sesión." });
     }
-  },
-    createLogout: async (request: Request, response: Response) => {
+  };
+
+  createLogout: RequestHandler = async (request: Request, response: Response) => {
     const token = cookieValue(request);
     try {
       if (token && token.length <= 256) {
-        await pool.query(
+        await this.pool.query(
           "UPDATE public.app_sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL",
           [tokenDigest(token)],
         );
       }
-      response.setHeader("Set-Cookie", sessionCookie(undefined, options.production));
+      response.setHeader("Set-Cookie", sessionCookie(undefined, this.options.production));
       response.status(200).json({ authenticated: false });
     } catch {
       response.status(500).json({ error: "No pudimos cerrar la sesión." });
     }
-  },
   };
 }

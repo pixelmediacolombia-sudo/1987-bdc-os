@@ -30,68 +30,63 @@ function serialize(row: WorkflowRow) {
   };
 }
 
-export function createAutomationWorkflowsController(pool: Pool): {
-    getAutomationWorkflows: RequestHandler;
-    createAutomationWorkflows: RequestHandler;
-    getAutomationWorkflowsByWorkflowId: RequestHandler;
-    replaceAutomationWorkflowsByWorkflowIdDraft: RequestHandler;
-    getAutomationWorkflowsByWorkflowIdRuns: RequestHandler;
-    createAutomationRunsByRunIdCancel: RequestHandler;
-    createAutomationRunsByRunIdRetry: RequestHandler;
-    createAutomationRunsByRunIdReplay: RequestHandler;
-} {
-  return {
-    getAutomationWorkflows: async (request: Request, response: Response) => {
+export class AutomationWorkflowsController {
+  constructor(private readonly pool: Pool) {}
+
+  getAutomationWorkflows: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
-      const workflows = await withTenant(pool, dealerId, async (client) => (await client.query(
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      const workflows = await withTenant(this.pool, dealerId, async (client) => (await client.query(
         `SELECT id::text AS id, name, draft_revision AS "draftRevision", published_revision AS "publishedRevision", updated_at AS "updatedAt"
            FROM public.automation_workflows WHERE tenant_id=$1::uuid ORDER BY updated_at DESC,id DESC`, [dealerId],
       )).rows);
       response.json({ workflows });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar las automatizaciones." }); }
-  },
-    createAutomationWorkflows: async (request: Request, response: Response) => {
+  };
+
+  createAutomationWorkflows: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = asRecord(request.body) ?? {};
       const dealerId = typeof body.dealerId === "string" ? body.dealerId : "";
       const name = typeof body.name === "string" ? body.name.trim() : "";
-      if (!await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
+      if (!await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este dealer." }); return; }
       if (!name || name.length > 120) { response.status(400).json({ error: "El nombre debe tener entre 1 y 120 caracteres." }); return; }
       const definition = { schemaVersion: AUTOMATION_WORKFLOW_SCHEMA_VERSION, name, nodes: [], edges: [] };
-      const row = await withTenant(pool, dealerId, async (client) => (await client.query<WorkflowRow>(
+      const row = await withTenant(this.pool, dealerId, async (client) => (await client.query<WorkflowRow>(
         `INSERT INTO public.automation_workflows (tenant_id,name,draft_definition,created_by_user_id,updated_by_user_id)
          VALUES ($1::uuid,$2,$3::jsonb,$4::uuid,$4::uuid) RETURNING ${COLUMNS}`,
         [dealerId, name, JSON.stringify(definition), user.id],
       )).rows[0]);
       response.status(201).json({ workflow: serialize(row!), validationIssues: validateAutomationWorkflowDefinition(definition) });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos crear el borrador." }); }
-  },
-    getAutomationWorkflowsByWorkflowId: async (request: Request, response: Response) => {
+  };
+
+  getAutomationWorkflowsByWorkflowId: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const workflowId = typeof request.params.workflowId === "string" ? request.params.workflowId : "";
-      if (!UUID.test(workflowId) || !await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a esta automatización." }); return; }
-      const row = await withTenant(pool, dealerId, async (client) => (await client.query<WorkflowRow>(
+      if (!UUID.test(workflowId) || !await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a esta automatización." }); return; }
+      const row = await withTenant(this.pool, dealerId, async (client) => (await client.query<WorkflowRow>(
         `SELECT ${COLUMNS} FROM public.automation_workflows WHERE tenant_id=$1::uuid AND id=$2::uuid`, [dealerId, workflowId],
       )).rows[0]);
       if (!row) { response.status(404).json({ error: "No encontramos este workflow." }); return; }
       response.json({ workflow: serialize(row), validationIssues: validateAutomationWorkflowDefinition(row.draft_definition) });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar el workflow." }); }
-  },
-    replaceAutomationWorkflowsByWorkflowIdDraft: async (request: Request, response: Response) => {
+  };
+
+  replaceAutomationWorkflowsByWorkflowIdDraft: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = asRecord(request.body) ?? {};
       const dealerId = typeof body.dealerId === "string" ? body.dealerId : typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const workflowId = typeof request.params.workflowId === "string" ? request.params.workflowId : "";
       const expectedRevision = body.expectedRevision;
       const definition = asRecord(body.definition);
-      if (!UUID.test(workflowId) || !await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este workflow." }); return; }
+      if (!UUID.test(workflowId) || !await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a este workflow." }); return; }
       if (!Number.isInteger(expectedRevision) || Number(expectedRevision) < 1 || !definition) {
         response.status(400).json({ error: "El borrador y su revisión actual son obligatorios." }); return;
       }
@@ -104,7 +99,7 @@ export function createAutomationWorkflowsController(pool: Pool): {
       }
       const serialized = JSON.stringify(definitionWithName);
       if (serialized.length > 256_000) { response.status(413).json({ error: "El borrador excede el tamaño permitido." }); return; }
-      const updated = await withTenant(pool, dealerId, async (client) => (await client.query<WorkflowRow>(
+      const updated = await withTenant(this.pool, dealerId, async (client) => (await client.query<WorkflowRow>(
         `UPDATE public.automation_workflows SET name=$3,draft_definition=$4::jsonb,draft_revision=draft_revision+1,
             updated_by_user_id=$5::uuid,updated_at=now()
           WHERE tenant_id=$1::uuid AND id=$2::uuid AND draft_revision=$6
@@ -112,23 +107,65 @@ export function createAutomationWorkflowsController(pool: Pool): {
         [dealerId, workflowId, name, serialized, user.id, expectedRevision],
       )).rows[0]);
       if (!updated) {
-        const exists = await withTenant(pool, dealerId, async (client) => (await client.query(
+        const exists = await withTenant(this.pool, dealerId, async (client) => (await client.query(
           "SELECT 1 FROM public.automation_workflows WHERE tenant_id=$1::uuid AND id=$2::uuid", [dealerId, workflowId],
         )).rowCount === 1);
         response.status(exists ? 409 : 404).json({ error: exists ? "El borrador cambió en otra sesión. Recárgalo antes de guardar." : "No encontramos este workflow." }); return;
       }
       response.json({ workflow: serialize(updated), validationIssues: issues });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos guardar el borrador." }); }
-  },
-    getAutomationWorkflowsByWorkflowIdRuns: async (request: Request, response: Response) => {
+  };
+
+  publishAutomationWorkflowsByWorkflowId: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
+      const body = asRecord(request.body) ?? {};
+      const dealerId = typeof body.dealerId === "string" ? body.dealerId : "";
+      const workflowId = typeof request.params.workflowId === "string" ? request.params.workflowId : "";
+      const expectedRevision = body.expectedRevision;
+      if (!UUID.test(workflowId) || !Number.isInteger(expectedRevision) || Number(expectedRevision) < 1 || !await isMember(this.pool, user.id, dealerId)) {
+        response.status(403).json({ error: "No tienes acceso a este workflow o la revisión no es válida." }); return;
+      }
+      const result = await withTenant(this.pool, dealerId, async (client) => {
+        const current = await client.query<WorkflowRow>(
+          `SELECT ${COLUMNS} FROM public.automation_workflows WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`, [dealerId, workflowId],
+        );
+        const row = current.rows[0];
+        if (!row) return { kind: "missing" as const };
+        if (row.draft_revision !== Number(expectedRevision)) return { kind: "conflict" as const };
+        const issues = validateAutomationWorkflowDefinition(row.draft_definition);
+        if (issues.length) return { kind: "invalid" as const, issues };
+        const definition = asRecord(row.draft_definition);
+        const nodes = definition && Array.isArray(definition.nodes) ? definition.nodes.map(asRecord) : [];
+        const effects = nodes.filter((node) => node && !["trigger.event", "condition.if", "flow.wait", "flow.end"].includes(String(node.type)));
+        if (!effects.some((node) => node?.type === "opportunity.update_stage") || effects.some((node) => node?.type !== "opportunity.update_stage")) {
+          return { kind: "unsupported" as const };
+        }
+        const published = await client.query<WorkflowRow>(
+          `UPDATE public.automation_workflows SET published_definition=draft_definition,published_revision=draft_revision,
+                  updated_by_user_id=$3::uuid,updated_at=now()
+            WHERE tenant_id=$1::uuid AND id=$2::uuid AND draft_revision=$4 RETURNING ${COLUMNS}`,
+          [dealerId, workflowId, user.id, expectedRevision],
+        );
+        return { kind: "published" as const, row: published.rows[0]! };
+      });
+      if (result.kind === "missing") { response.status(404).json({ error: "No encontramos este workflow." }); return; }
+      if (result.kind === "conflict") { response.status(409).json({ error: "El borrador cambió. Recárgalo antes de publicar." }); return; }
+      if (result.kind === "invalid") { response.status(400).json({ error: "Corrige los errores del workflow antes de publicar.", validationIssues: result.issues }); return; }
+      if (result.kind === "unsupported") { response.status(400).json({ error: "Solo se pueden publicar workflows con acciones de etapa de oportunidad ya implementadas." }); return; }
+      response.json({ workflow: serialize(result.row), validationIssues: [] });
+    } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos publicar el workflow." }); }
+  };
+
+  getAutomationWorkflowsByWorkflowIdRuns: RequestHandler = async (request: Request, response: Response) => {
+    try {
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
       const workflowId = typeof request.params.workflowId === "string" ? request.params.workflowId : "";
-      if (!UUID.test(workflowId) || !await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a estas ejecuciones." }); return; }
+      if (!UUID.test(workflowId) || !await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a estas ejecuciones." }); return; }
       const parsedLimit = Number(request.query.limit ?? 50);
       const limit = Number.isInteger(parsedLimit) ? Math.max(1, Math.min(parsedLimit, 100)) : 50;
-      const runs = await withTenant(pool, dealerId, async (client) => (await client.query(
+      const runs = await withTenant(this.pool, dealerId, async (client) => (await client.query(
         `SELECT r.id::text AS id,r.status,r.generation,r.event_type AS "eventType",r.workflow_revision AS "workflowRevision",
                 r.current_node_id::text AS "currentNodeId",r.attempts,r.available_at AS "availableAt",r.last_error AS "lastError",
                 r.created_at AS "createdAt",r.started_at AS "startedAt",r.finished_at AS "finishedAt",
@@ -141,15 +178,16 @@ export function createAutomationWorkflowsController(pool: Pool): {
       )).rows);
       response.json({ runs });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar las ejecuciones." }); }
-  },
-    createAutomationRunsByRunIdCancel: async (request: Request, response: Response) => {
+  };
+
+  createAutomationRunsByRunIdCancel: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = asRecord(request.body) ?? {};
       const dealerId = typeof body.dealerId === "string" ? body.dealerId : "";
       const runId = typeof request.params.runId === "string" ? request.params.runId : "";
-      if (!UUID.test(runId) || !await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a esta ejecución." }); return; }
-      const run = await withTenant(pool, dealerId, async (client) => {
+      if (!UUID.test(runId) || !await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a esta ejecución." }); return; }
+      const run = await withTenant(this.pool, dealerId, async (client) => {
         const changed = await client.query(
           `UPDATE public.automation_runs SET status='cancelled',lock_token=NULL,locked_at=NULL,last_error=NULL,finished_at=now(),updated_at=now()
             WHERE tenant_id=$1::uuid AND id=$2::uuid AND status IN ('queued','running','waiting') RETURNING id::text AS id,status`, [dealerId, runId],
@@ -164,15 +202,16 @@ export function createAutomationWorkflowsController(pool: Pool): {
       if (run.status !== "cancelled") { response.status(409).json({ error: "Solo se pueden cancelar ejecuciones en cola, espera o procesamiento.", status: run.status }); return; }
       response.json({ run });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cancelar la ejecución." }); }
-  },
-    createAutomationRunsByRunIdRetry: async (request: Request, response: Response) => {
+  };
+
+  createAutomationRunsByRunIdRetry: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = asRecord(request.body) ?? {};
       const dealerId = typeof body.dealerId === "string" ? body.dealerId : "";
       const runId = typeof request.params.runId === "string" ? request.params.runId : "";
-      if (!UUID.test(runId) || !await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a esta ejecución." }); return; }
-      const run = await withTenant(pool, dealerId, async (client) => (await client.query(
+      if (!UUID.test(runId) || !await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "No tienes acceso a esta ejecución." }); return; }
+      const run = await withTenant(this.pool, dealerId, async (client) => (await client.query(
         `UPDATE public.automation_runs SET status='queued',attempts=0,available_at=now(),lock_token=NULL,locked_at=NULL,last_error=NULL,
              finished_at=NULL,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid AND status IN ('failed','dead_letter')
           RETURNING id::text AS id,status,generation`, [dealerId, runId],
@@ -181,16 +220,17 @@ export function createAutomationWorkflowsController(pool: Pool): {
       if (run.status !== "queued") { response.status(409).json({ error: "Solo se pueden reintentar ejecuciones fallidas o en dead-letter.", status: run.status }); return; }
       response.json({ run });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos reintentar la ejecución." }); }
-  },
-    createAutomationRunsByRunIdReplay: async (request: Request, response: Response) => {
+  };
+
+  createAutomationRunsByRunIdReplay: RequestHandler = async (request: Request, response: Response) => {
     try {
-      const user = await dealerUser(pool, request, response); if (!user) return;
+      const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = asRecord(request.body) ?? {};
       const dealerId = typeof body.dealerId === "string" ? body.dealerId : "";
       const runId = typeof request.params.runId === "string" ? request.params.runId : "";
       const requestKey = typeof body.requestKey === "string" ? body.requestKey : "";
-      if (!UUID.test(runId) || !UUID.test(requestKey) || !await isMember(pool, user.id, dealerId)) { response.status(403).json({ error: "La ejecución, clave de replay o dealer no son válidos." }); return; }
-      const replay = await withTenant(pool, dealerId, async (client) => {
+      if (!UUID.test(runId) || !UUID.test(requestKey) || !await isMember(this.pool, user.id, dealerId)) { response.status(403).json({ error: "La ejecución, clave de replay o dealer no son válidos." }); return; }
+      const replay = await withTenant(this.pool, dealerId, async (client) => {
         const source = (await client.query<WorkflowRow & { tenant_id: string; workflow_id: string; event_id: string; generation: number; workflow_revision: number; event_type: string; event_snapshot: unknown; workflow_snapshot: unknown }>(
           `SELECT r.*,w.name FROM public.automation_runs r JOIN public.automation_workflows w ON w.tenant_id=r.tenant_id AND w.id=r.workflow_id
             WHERE r.tenant_id=$1::uuid AND r.id=$2::uuid FOR UPDATE OF r`, [dealerId, runId],
@@ -213,6 +253,5 @@ export function createAutomationWorkflowsController(pool: Pool): {
       if (!replay) { response.status(404).json({ error: "No encontramos la ejecución de origen." }); return; }
       response.status(201).json({ run: replay });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos reproducir la ejecución." }); }
-  },
   };
 }
