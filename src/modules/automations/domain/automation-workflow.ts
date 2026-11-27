@@ -1,7 +1,7 @@
 import { AUTOMATION_EVENT_TYPES, type AutomationEventType } from "./automation-event";
 
 export const AUTOMATION_WORKFLOW_SCHEMA_VERSION = 1 as const;
-export const AUTOMATION_WORKFLOW_NODE_TYPES = ["trigger.event", "condition.if", "flow.wait", "flow.end"] as const;
+export const AUTOMATION_WORKFLOW_NODE_TYPES = ["trigger.event", "condition.if", "flow.wait", "opportunity.update_stage", "flow.end"] as const;
 export type AutomationWorkflowNodeType = (typeof AUTOMATION_WORKFLOW_NODE_TYPES)[number];
 export type AutomationWorkflowConditionField =
   | "event.type"
@@ -17,6 +17,7 @@ export type AutomationWorkflowNode =
   | { id: string; type: "trigger.event"; position: { x: number; y: number }; config: { eventType: AutomationEventType } }
   | { id: string; type: "condition.if"; position: { x: number; y: number }; config: { field: AutomationWorkflowConditionField; operator: AutomationWorkflowOperator; value?: string } }
   | { id: string; type: "flow.wait"; position: { x: number; y: number }; config: { durationSeconds: number } }
+  | { id: string; type: "opportunity.update_stage"; position: { x: number; y: number }; config: { stage: "new" | "working" | "closing" | "won" | "lost" } }
   | { id: string; type: "flow.end"; position: { x: number; y: number }; config: { outcome: "complete" | "stop" } };
 
 export type AutomationWorkflowEdge = {
@@ -191,11 +192,15 @@ function isNodeConfigValid(value: Record<string, unknown>): boolean {
     return exactKeys(value, ["id", "type", "position", "config"]) && exactKeys(value.config, ["durationSeconds"])
       && Number.isInteger(value.config.durationSeconds) && Number(value.config.durationSeconds) >= 1 && Number(value.config.durationSeconds) <= 31_536_000;
   }
+  if (value.type === "opportunity.update_stage") {
+    return exactKeys(value, ["id", "type", "position", "config"]) && exactKeys(value.config, ["stage"])
+      && ["new", "working", "closing", "won", "lost"].includes(String(value.config.stage));
+  }
   return false;
 }
 
 function isValidSourcePort(node: AutomationWorkflowNode, port: unknown): boolean {
-  return node.type === "condition.if" ? port === "true" || port === "false" : (node.type === "trigger.event" || node.type === "flow.wait") && port === "next";
+  return node.type === "condition.if" ? port === "true" || port === "false" : node.type !== "flow.end" && port === "next";
 }
 
 function walk(id: string, outgoing: Map<string, AutomationWorkflowEdge[]>, visited: Set<string>): Set<string> {

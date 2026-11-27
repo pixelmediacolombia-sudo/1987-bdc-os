@@ -93,3 +93,18 @@ test("accepts durable wait nodes only with a bounded integer duration", () => {
   assert.ok(validateAutomationWorkflowDefinition(invalid).some((issue) => issue.code === "invalid_node" && issue.nodeId === waitId));
   void trigger;
 });
+
+test("accepts opportunity stage actions and rejects unsupported stages", () => {
+  const definition = validDefinition();
+  const condition = definition.nodes.find((node) => node.type === "condition.if")!;
+  const yesEnd = definition.nodes.find((node) => node.type === "flow.end" && node.config.outcome === "complete")!;
+  const actionId = randomUUID();
+  definition.nodes.push({ id: actionId, type: "opportunity.update_stage", position: { x: 500, y: 30 }, config: { stage: "working" } });
+  const yesEdge = definition.edges.find((edge) => edge.source === condition.id && edge.sourcePort === "true")!;
+  yesEdge.target = actionId;
+  definition.edges.push({ id: randomUUID(), source: actionId, sourcePort: "next", target: yesEnd.id, targetPort: "in" });
+  assert.deepEqual(validateAutomationWorkflowDefinition(definition), []);
+
+  const invalid = { ...definition, nodes: definition.nodes.map((node) => node.id === actionId ? { ...node, config: { stage: "unknown" } } : node) };
+  assert.ok(validateAutomationWorkflowDefinition(invalid).some((issue) => issue.code === "invalid_node" && issue.nodeId === actionId));
+});

@@ -130,8 +130,10 @@ export class AutomationEngineWorker {
         const issues = validateAutomationWorkflowDefinition(definition);
         if (issues.length) throw new Error("La definición guardada de esta ejecución no es válida.");
         const node = findAutomationNode(definition, run.current_node_id);
-        const result = executeControlNode(event, definition, node);
-        const stepInput = { eventId: event.eventId, eventType: event.type, nodeId: node.id };
+        const result = node.type === "opportunity.update_stage"
+          ? await executeOpportunityStageNode(client, run.tenant_id, run.id, event, definition, node)
+          : executeControlNode(event, definition, node);
+        const stepInput = { eventId: event.eventId, eventType: event.type, nodeId: node.id, ...(node.type === "opportunity.update_stage" ? { stage: node.config.stage } : {}) };
         await client.query(
           `INSERT INTO public.automation_run_steps (tenant_id,run_id,node_id,node_type,status,attempts,input_snapshot,output_snapshot,started_at,finished_at)
            VALUES ($1::uuid,$2::uuid,$3::uuid,$4,'succeeded',1,$5::jsonb,$6::jsonb,now(),now())
@@ -205,7 +207,7 @@ function workflowDefinition(value: unknown): AutomationWorkflowDefinition {
   return value as AutomationWorkflowDefinition;
 }
 
-function executeControlNode(event: AutomationEvent, definition: AutomationWorkflowDefinition, node: AutomationWorkflowNode): { nextNodeId?: string; finished: boolean; waitSeconds?: number; output: Record<string, unknown> } {
+function executeControlNode(event: AutomationEvent, definition: AutomationWorkflowDefinition, node: Exclude<AutomationWorkflowNode, { type: "opportunity.update_stage" }>): { nextNodeId?: string; finished: boolean; waitSeconds?: number; output: Record<string, unknown> } {
   if (node.type === "trigger.event") {
     if (node.config.eventType !== event.type) throw new Error("El trigger no coincide con el evento de entrada.");
     return { nextNodeId: findAutomationNextNode(definition, node.id, "next"), finished: false, output: { acceptedEventId: event.eventId } };
@@ -217,6 +219,49 @@ function executeControlNode(event: AutomationEvent, definition: AutomationWorkfl
   }
   if (node.type === "flow.wait") return { nextNodeId: findAutomationNextNode(definition, node.id, "next"), finished: false, waitSeconds: node.config.durationSeconds, output: { waitSeconds: node.config.durationSeconds } };
   return { finished: true, output: { outcome: node.config.outcome } };
+}
+
+async function executeOpportunityStageNode(
+  client: PoolClient,
+  tenantId: string,
+  runId: string,
+  event: AutomationEvent,
+  definition: AutomationWorkflowDefinition,
+  node: Extract<AutomationWorkflowNode, { type: "opportunity.update_stage" }>,
+): Promise<{ nextNodeId?: string; finished: false; waitSeconds?: undefined; output: Record<string, unknown> }> {
+  if (event.entity.type !== "opportunity") throw new Error("El nodo requiere un evento de oportunidad.");
+  const current = await client.query<{ title: string; stage: string }>(
+    "SELECT title,stage FROM public.opportunities WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE",
+    [tenantId, event.entity.id],
+  );
+  const opportunity = current.rows[0];
+  if (!opportunity) throw new Error("No encontramos la oportunidad dentro del dealer del workflow.");
+
+  const changed = opportunity.stage !== node.config.stage;
+  if (changed) {
+    await client.query("SELECT set_config('app.automation_origin','system',true)");
+    await client.query(
+      "UPDATE public.opportunities SET stage=$3,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid",
+      [tenantId, event.entity.id, node.config.stage],
+    );
+    const dealer = await client.query<{ dealer_name: string }>(
+      "SELECT dealer_name FROM public.tenants WHERE dealer_id=$1::uuid",
+      [tenantId],
+    );
+    await client.query(
+      `INSERT INTO public.admin_audit_events
+         (actor_user_id,actor_email,actor_name,target_tenant_id,dealer_name,category,action,outcome,summary,reference_id,entity_id)
+       VALUES (NULL,'automation@system.local','Automatización BDC OS',$1::uuid,$2,'opportunities',
+               'opportunity.stage_changed_by_automation','success',$3,$4,$5)`,
+      [tenantId, dealer.rows[0]?.dealer_name ?? null, `La automatización cambió ${opportunity.title} a ${node.config.stage}.`, `automation:${runId}:${node.id}`, event.entity.id],
+    );
+  }
+
+  return {
+    nextNodeId: findAutomationNextNode(definition, node.id, "next"),
+    finished: false,
+    output: { opportunityId: event.entity.id, previousStage: opportunity.stage, stage: node.config.stage, changed },
+  };
 }
 
 function safeError(error: unknown): string {

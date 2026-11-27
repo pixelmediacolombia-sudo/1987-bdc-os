@@ -9,6 +9,7 @@ import { ensureRuntimeRolePrivileges } from "@/infrastructure/database/runtime-r
 import { ensureAutomationEventOutbox } from "@/modules/automations/infrastructure/persistence/postgres/automation-event-outbox.migration";
 import { ensureAutomationWorkflows } from "@/modules/automations/infrastructure/persistence/postgres/automation-workflows.migration";
 import { ensureAutomationEngine } from "@/modules/automations/infrastructure/persistence/postgres/automation-engine.migration";
+import { ensureOpportunitiesTable } from "@/features/opportunities/infrastructure/persistence/postgres/opportunities.migration";
 
 const enabled = process.env.AUTOMATION_ENGINE_E2E === "1" && Boolean(process.env.DATABASE_URL);
 test("automation engine executes saved graph, deduplicates runs and scopes worker claims", { skip: !enabled }, async () => {
@@ -16,7 +17,7 @@ test("automation engine executes saved graph, deduplicates runs and scopes worke
   const fixturePool = new Pool({ connectionString: process.env.DATABASE_URL, ssl });
   const runtimePool = new Pool({ connectionString: process.env.RUNTIME_DATABASE_URL ?? process.env.DATABASE_URL, ssl, ...(process.env.RUNTIME_DATABASE_URL ? {} : { options: "-c role=bdc" }) });
   const migrationPool = new Pool({ connectionString: process.env.DATABASE_MIGRATION_URL ?? process.env.DATABASE_URL, ssl });
-  await ensureAdminAuditTable(migrationPool); await ensureAutomationEventOutbox(migrationPool); await ensureAutomationWorkflows(migrationPool);
+  await ensureAdminAuditTable(migrationPool); await ensureAutomationEventOutbox(migrationPool); await ensureAutomationWorkflows(migrationPool); await ensureOpportunitiesTable(migrationPool);
   await ensureAutomationEngine(migrationPool); await ensureTenantRowLevelSecurity(migrationPool); await ensureRuntimeRolePrivileges(migrationPool); await migrationPool.end();
 
   const fixture = await fixturePool.connect();
@@ -24,6 +25,8 @@ test("automation engine executes saved graph, deduplicates runs and scopes worke
   const workflowIds = [randomUUID(), randomUUID()]; const triggerIds = [randomUUID(), randomUUID()];
   const conditionIds = [randomUUID(), randomUUID()]; const waitIds = [randomUUID(), randomUUID()]; const trueEndIds = [randomUUID(), randomUUID()]; const falseEndIds = [randomUUID(), randomUUID()];
   const eventId = randomUUID(); const messageId = randomUUID(); const conversationId = randomUUID(); const contactId = randomUUID();
+  const stageWorkflowId = randomUUID(); const stageTriggerId = randomUUID(); const stageActionId = randomUUID(); const stageEndId = randomUUID();
+  const stageEventId = randomUUID(); const opportunityId = randomUUID(); const stageRunIds = [randomUUID(), randomUUID()];
   const connectionIds = Array.from({ length: 8 }, () => randomUUID());
   const definition = (index: number) => ({ schemaVersion: 1, name: `Engine E2E ${index + 1}`, nodes: [
     { id: triggerIds[index], type: "trigger.event", position: { x: 0, y: 0 }, config: { eventType: "message.received" } },
@@ -65,6 +68,35 @@ test("automation engine executes saved graph, deduplicates runs and scopes worke
       await fixture.query("COMMIT");
     }
 
+    const stageDefinition = { schemaVersion: 1, name: "Stage action E2E", nodes: [
+      { id: stageTriggerId, type: "trigger.event", position: { x: 0, y: 0 }, config: { eventType: "opportunity.stage_changed" } },
+      { id: stageActionId, type: "opportunity.update_stage", position: { x: 300, y: 0 }, config: { stage: "won" } },
+      { id: stageEndId, type: "flow.end", position: { x: 600, y: 0 }, config: { outcome: "complete" } },
+    ], edges: [
+      { id: randomUUID(), source: stageTriggerId, sourcePort: "next", target: stageActionId, targetPort: "in" },
+      { id: randomUUID(), source: stageActionId, sourcePort: "next", target: stageEndId, targetPort: "in" },
+    ] };
+    await fixture.query("BEGIN"); await fixture.query("SET LOCAL ROLE bdc"); await fixture.query("SELECT set_config('app.tenant_id',$1,true)", [tenantIds[0]]);
+    await fixture.query("INSERT INTO public.opportunities (id,tenant_id,title,contact_name,amount_cents,stage) VALUES ($1::uuid,$2::uuid,'CRM-05-F stage E2E','Synthetic QA',100000,'new')", [opportunityId, tenantIds[0]]);
+    await fixture.query(
+      `INSERT INTO public.automation_workflows (id,tenant_id,name,draft_definition,draft_revision,published_definition,published_revision)
+       VALUES ($1::uuid,$2::uuid,$3,$4::jsonb,1,$4::jsonb,1)`,
+      [stageWorkflowId, tenantIds[0], stageDefinition.name, JSON.stringify(stageDefinition)],
+    );
+    const stageEvent = { schemaVersion: 1, eventId: stageEventId, tenantId: tenantIds[0], type: "opportunity.stage_changed", occurredAt: new Date().toISOString(), origin: "crm", actor: { type: "user" }, entity: { type: "opportunity", id: opportunityId }, payload: { previousStage: "new", stage: "working" } };
+    await fixture.query(
+      `INSERT INTO public.automation_event_outbox (id,tenant_id,event_type,origin,actor_type,entity_type,entity_id,payload)
+       VALUES ($1::uuid,$2::uuid,'opportunity.stage_changed','crm','user','opportunity',$3::uuid,$4::jsonb)`,
+      [stageEventId, tenantIds[0], opportunityId, JSON.stringify(stageEvent.payload)],
+    );
+    await fixture.query(
+      `INSERT INTO public.automation_runs (id,tenant_id,workflow_id,event_id,generation,workflow_revision,event_type,event_snapshot,workflow_snapshot,current_node_id)
+       VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,1,1,'opportunity.stage_changed',$5::jsonb,$6::jsonb,$7::uuid),
+             ($8::uuid,$2::uuid,$3::uuid,$4::uuid,2,1,'opportunity.stage_changed',$5::jsonb,$6::jsonb,$7::uuid)`,
+      [stageRunIds[0], tenantIds[0], stageWorkflowId, stageEventId, JSON.stringify(stageEvent), JSON.stringify(stageDefinition), stageTriggerId, stageRunIds[1]],
+    );
+    await fixture.query("COMMIT");
+
     await fixture.query("BEGIN"); await fixture.query("SET LOCAL ROLE bdc"); await fixture.query("SELECT set_config('app.tenant_id',$1,true)", [tenantIds[0]]);
     await fixture.query(
       `INSERT INTO public.automation_runs (tenant_id,workflow_id,event_id,generation,workflow_revision,event_type,event_snapshot,workflow_snapshot,current_node_id,attempts)
@@ -90,12 +122,16 @@ test("automation engine executes saved graph, deduplicates runs and scopes worke
     workers.push(restartedWorker, concurrentWorker); await Promise.all([restartedWorker.start(), concurrentWorker.start()]);
     const deadline = Date.now() + 10_000;
     let states: Array<{ generation: number; status: string }> = [];
+    let stageStates: Array<{ status: string }> = [];
     while (Date.now() < deadline) {
       const result = await withTenant(runtimePool, tenantIds[0]!, async (client) => (await client.query<{ generation: number; status: string }>(
         "SELECT generation,status FROM public.automation_runs WHERE tenant_id=$1::uuid AND workflow_id=$2::uuid ORDER BY generation", [tenantIds[0], workflowIds[0]],
       )).rows);
       states = result;
-      if (states.some((row) => row.generation === 1 && row.status === "succeeded") && states.some((row) => row.generation === 2 && row.status === "dead_letter")) break;
+      stageStates = await withTenant(runtimePool, tenantIds[0]!, async (client) => (await client.query<{ status: string }>(
+        "SELECT status FROM public.automation_runs WHERE tenant_id=$1::uuid AND id=ANY($2::uuid[])", [tenantIds[0], stageRunIds],
+      )).rows);
+      if (states.some((row) => row.generation === 1 && row.status === "succeeded") && states.some((row) => row.generation === 2 && row.status === "dead_letter") && stageStates.length === 2 && stageStates.every((row) => row.status === "succeeded")) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     await Promise.all(workers.map((worker) => worker.stop()));
@@ -116,8 +152,21 @@ test("automation engine executes saved graph, deduplicates runs and scopes worke
     assert.equal(results.steps.find((step) => step.node_id === conditionIds[0])?.output_snapshot?.selectedPort, "true");
     assert.deepEqual(results.event, { status: "completed", attempts: 1 }); assert.equal(results.runs.length, 2);
 
+    const stageResults = await withTenant(runtimePool, tenantIds[0]!, async (client) => ({
+      opportunity: (await client.query<{ stage: string }>("SELECT stage FROM public.opportunities WHERE tenant_id=$1::uuid AND id=$2::uuid", [tenantIds[0], opportunityId])).rows[0],
+      runs: (await client.query<{ status: string }>("SELECT status FROM public.automation_runs WHERE tenant_id=$1::uuid AND id=ANY($2::uuid[]) ORDER BY id", [tenantIds[0], stageRunIds])).rows,
+      stepOutputs: (await client.query<{ output_snapshot: Record<string, unknown> }>("SELECT output_snapshot FROM public.automation_run_steps WHERE tenant_id=$1::uuid AND run_id=ANY($2::uuid[]) AND node_id=$3::uuid ORDER BY run_id", [tenantIds[0], stageRunIds, stageActionId])).rows,
+      auditCount: (await client.query<{ count: string }>("SELECT count(*)::text AS count FROM public.admin_audit_events WHERE target_tenant_id=$1::uuid AND reference_id LIKE $2", [tenantIds[0], `automation:%:${stageActionId}`])).rows[0]?.count,
+    }));
+    assert.equal(stageResults.opportunity?.stage, "won");
+    assert.equal(stageResults.runs.length, 2); assert.ok(stageResults.runs.every((run) => run.status === "succeeded"));
+    assert.deepEqual(stageResults.stepOutputs.map((step) => step.output_snapshot.changed).sort(), [false, true]);
+    assert.equal(stageResults.auditCount, "1", "the stage update and audit must remain idempotent when replayed");
+
     const tenantBView = await withTenant(runtimePool, tenantIds[1]!, async (client) => (await client.query("SELECT id FROM public.automation_runs WHERE tenant_id=$1::uuid", [tenantIds[0]])).rowCount);
     assert.equal(tenantBView, 0);
+    const tenantBOpportunityView = await withTenant(runtimePool, tenantIds[1]!, async (client) => (await client.query("SELECT id FROM public.opportunities WHERE tenant_id=$1::uuid AND id=$2::uuid", [tenantIds[0], opportunityId])).rowCount);
+    assert.equal(tenantBOpportunityView, 0);
     await assert.rejects(withTenant(runtimePool, tenantIds[1]!, async (client) => client.query("SELECT * FROM public.claim_automation_events($1::uuid,1,120)", [tenantIds[0]])), { code: "42501" });
   } finally {
     await Promise.all(workers.map((worker) => worker.stop()));
