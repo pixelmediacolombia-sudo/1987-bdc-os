@@ -9,16 +9,25 @@ import { PostgresOutboundMessageRegistry } from "@/modules/control/infrastructur
 test("local PostgreSQL recovers a provider-accepted delivery after restart without resending", {
   skip: !process.env.LOCAL_WHATSAPP_DATABASE_URL,
 }, async () => {
-  const tenantId = "00000000-0000-0000-0000-000000000901";
+  const tenantId = randomUUID();
   const contactId = `local-recovery-${randomUUID()}`;
   const providerMessageId = `provider-${randomUUID()}`;
   const correlationId = `local-correlation-${randomUUID()}`;
   const semanticHash = randomUUID();
   const firstPool = new Pool({ connectionString: process.env.LOCAL_WHATSAPP_DATABASE_URL });
   let attemptId: string | undefined;
+  let tenantCreated = false;
   let providerSends = 0;
   let providerLookups = 0;
   try {
+    await firstPool.query(
+      `INSERT INTO public.tenants
+         (dealer_id, dealer_name, timezone, policy_version, status, sofia_enabled,
+          qualification_flow_enabled, qualification_signal_enabled)
+       VALUES ($1, 'Outbound recovery local E2E', 'America/Bogota', 'local-e2e', 'active', false, false, false)`,
+      [tenantId],
+    );
+    tenantCreated = true;
     const durableRegistry = new PostgresOutboundMessageRegistry(firstPool);
     const registryWithAssociationOutage = {
       ...durableRegistry,
@@ -127,20 +136,27 @@ test("local PostgreSQL recovers a provider-accepted delivery after restart witho
       await restartedPool.end();
     }
   } finally {
-    if (attemptId) {
-      const cleanup = await firstPool.connect();
+    try {
+      if (attemptId) {
+        const cleanup = await firstPool.connect();
+        try {
+          await cleanup.query("BEGIN");
+          await cleanup.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+          await cleanup.query("DELETE FROM public.outbound_message_registry WHERE tenant_id=$1 AND attempt_id=$2", [tenantId, attemptId]);
+          await cleanup.query("COMMIT");
+        } catch (error) {
+          await cleanup.query("ROLLBACK").catch(() => undefined);
+          throw error;
+        } finally {
+          cleanup.release();
+        }
+      }
+    } finally {
       try {
-        await cleanup.query("BEGIN");
-        await cleanup.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
-        await cleanup.query("DELETE FROM public.outbound_message_registry WHERE tenant_id=$1 AND attempt_id=$2", [tenantId, attemptId]);
-        await cleanup.query("COMMIT");
-      } catch (error) {
-        await cleanup.query("ROLLBACK").catch(() => undefined);
-        throw error;
+        if (tenantCreated) await firstPool.query("DELETE FROM public.tenants WHERE dealer_id=$1", [tenantId]);
       } finally {
-        cleanup.release();
+        await firstPool.end();
       }
     }
-    await firstPool.end();
   }
 });

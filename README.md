@@ -11,7 +11,10 @@ El código sigue una organización **feature-first**. Las integraciones Meta e i
 - `application`: casos de uso y puertos/interfaces.
 - `domain`: entidades y tipos del dominio, sin dependencias de Express, PostgreSQL o Axios.
 - `infrastructure`: clientes Meta, PostgreSQL, migraciones y cifrado AES-256-GCM.
-- `presentation`: servicios de orquestación HTTP, controladores y rutas.
+- `presentation/http/*.routes.ts`: declara los paths y verbos y conecta cada endpoint con su controller.
+- `presentation/http/controllers`: adapta Request/Response, valida el contrato HTTP y delega el trabajo a la capa de aplicación.
+
+Las reglas y casos de uso viven en `application/*.service.ts`; el acceso SQL y el contexto RLS viven en `infrastructure/persistence`. Mantén los archivos de rutas delgados y evita colocar lógica de negocio o consultas SQL dentro de ellos.
 
 La composición de dependencias vive en `src/main.ts`; las capas internas no conocen los adaptadores externos. Los servicios de presentación solo adaptan entradas/salidas HTTP: la lógica de negocio permanece en `application` y `domain`.
 
