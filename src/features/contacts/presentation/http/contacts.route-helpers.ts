@@ -13,6 +13,7 @@ export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 export type Tenant = { id: string; name: string | null };
 export type ContactRow = {
   id: string; dealerId: string; providerContactId: string; displayName: string | null; source: "meta" | "manual";
+  tags: string[];
   phone: string | null; email: string | null; preferredLanguage: string; consentState: string;
   createdAt: Date | string; updatedAt: Date | string; conversationCount: number;
   lastActivity: Date | string | null; channels: string[];
@@ -67,7 +68,7 @@ export async function auditContact(client: PoolClient, actor: IdentityUser, deal
 }
 
 export const CONTACT_COLUMNS = `c.id::text AS id, c.tenant_id::text AS "dealerId", c.provider_contact_id AS "providerContactId",
-  c.display_name AS "displayName", CASE WHEN c.provider_contact_id LIKE 'manual:%' THEN 'manual' ELSE 'meta' END AS source,
+  c.display_name AS "displayName", COALESCE(c.tags, ARRAY[]::text[]) AS tags, CASE WHEN c.provider_contact_id LIKE 'manual:%' THEN 'manual' ELSE 'meta' END AS source,
   c.phone, c.email, c.preferred_language AS "preferredLanguage", c.consent_state AS "consentState",
   c.created_at AS "createdAt", c.updated_at AS "updatedAt"`;
 

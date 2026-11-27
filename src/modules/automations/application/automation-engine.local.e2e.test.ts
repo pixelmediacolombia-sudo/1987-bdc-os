@@ -25,6 +25,7 @@ test("automation engine executes saved graph, deduplicates runs and scopes worke
   const workflowIds = [randomUUID(), randomUUID()]; const triggerIds = [randomUUID(), randomUUID()];
   const conditionIds = [randomUUID(), randomUUID()]; const waitIds = [randomUUID(), randomUUID()]; const trueEndIds = [randomUUID(), randomUUID()]; const falseEndIds = [randomUUID(), randomUUID()];
   const eventId = randomUUID(); const messageId = randomUUID(); const conversationId = randomUUID(); const contactId = randomUUID();
+  const switchWorkflowId = randomUUID(); const switchTriggerId = randomUUID(); const switchNodeId = randomUUID(); const switchCaseIds = [randomUUID(), randomUUID()]; const switchEndIds = [randomUUID(), randomUUID(), randomUUID()];
   const stageWorkflowId = randomUUID(); const stageTriggerId = randomUUID(); const stageActionId = randomUUID(); const stageEndId = randomUUID();
   const stageEventId = randomUUID(); const opportunityId = randomUUID(); const stageRunIds = [randomUUID(), randomUUID()];
   const connectionIds = Array.from({ length: 8 }, () => randomUUID());
@@ -59,6 +60,21 @@ test("automation engine executes saved graph, deduplicates runs and scopes worke
         [workflowIds[index], tenantId, graph.name, JSON.stringify(graph), userIds[index]],
       );
       if (index === 0) {
+        const switchDefinition = { schemaVersion: 1, name: "Engine Switch E2E", nodes: [
+          { id: switchTriggerId, type: "trigger.event", position: { x: 0, y: 0 }, config: { eventType: "message.received" } },
+          { id: switchNodeId, type: "condition.switch", position: { x: 300, y: 0 }, config: { field: "message.channel", cases: [{ id: switchCaseIds[0], value: "whatsapp" }, { id: switchCaseIds[1], value: "messenger" }] } },
+          ...switchEndIds.map((id, endIndex) => ({ id, type: "flow.end", position: { x: 600, y: endIndex * 100 }, config: { outcome: endIndex === 2 ? "stop" : "complete" } })),
+        ], edges: [
+          { id: randomUUID(), source: switchTriggerId, sourcePort: "next", target: switchNodeId, targetPort: "in" },
+          { id: randomUUID(), source: switchNodeId, sourcePort: `case:${switchCaseIds[0]}`, target: switchEndIds[0], targetPort: "in" },
+          { id: randomUUID(), source: switchNodeId, sourcePort: `case:${switchCaseIds[1]}`, target: switchEndIds[1], targetPort: "in" },
+          { id: randomUUID(), source: switchNodeId, sourcePort: "default", target: switchEndIds[2], targetPort: "in" },
+        ] };
+        await fixture.query(
+          `INSERT INTO public.automation_workflows (id,tenant_id,name,draft_definition,draft_revision,published_definition,published_revision,created_by_user_id,updated_by_user_id)
+           VALUES ($1::uuid,$2::uuid,$3,$4::jsonb,1,$4::jsonb,1,$5::uuid,$5::uuid)`,
+          [switchWorkflowId, tenantId, switchDefinition.name, JSON.stringify(switchDefinition), userIds[index]],
+        );
         await fixture.query(
           `INSERT INTO public.automation_event_outbox (id,tenant_id,schema_version,event_type,origin,actor_type,entity_type,entity_id,payload)
            VALUES ($1::uuid,$2::uuid,1,'message.received','system','contact','message',$3::uuid,$4::jsonb)`,
@@ -123,6 +139,7 @@ test("automation engine executes saved graph, deduplicates runs and scopes worke
     const deadline = Date.now() + 10_000;
     let states: Array<{ generation: number; status: string }> = [];
     let stageStates: Array<{ status: string }> = [];
+    let switchStates: Array<{ status: string }> = [];
     while (Date.now() < deadline) {
       const result = await withTenant(runtimePool, tenantIds[0]!, async (client) => (await client.query<{ generation: number; status: string }>(
         "SELECT generation,status FROM public.automation_runs WHERE tenant_id=$1::uuid AND workflow_id=$2::uuid ORDER BY generation", [tenantIds[0], workflowIds[0]],
@@ -131,7 +148,10 @@ test("automation engine executes saved graph, deduplicates runs and scopes worke
       stageStates = await withTenant(runtimePool, tenantIds[0]!, async (client) => (await client.query<{ status: string }>(
         "SELECT status FROM public.automation_runs WHERE tenant_id=$1::uuid AND id=ANY($2::uuid[])", [tenantIds[0], stageRunIds],
       )).rows);
-      if (states.some((row) => row.generation === 1 && row.status === "succeeded") && states.some((row) => row.generation === 2 && row.status === "dead_letter") && stageStates.length === 2 && stageStates.every((row) => row.status === "succeeded")) break;
+      switchStates = await withTenant(runtimePool, tenantIds[0]!, async (client) => (await client.query<{ status: string }>(
+        "SELECT status FROM public.automation_runs WHERE tenant_id=$1::uuid AND workflow_id=$2::uuid", [tenantIds[0], switchWorkflowId],
+      )).rows);
+      if (states.some((row) => row.generation === 1 && row.status === "succeeded") && states.some((row) => row.generation === 2 && row.status === "dead_letter") && stageStates.length === 2 && stageStates.every((row) => row.status === "succeeded") && switchStates.length === 1 && switchStates[0]?.status === "succeeded") break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     await Promise.all(workers.map((worker) => worker.stop()));
@@ -151,6 +171,13 @@ test("automation engine executes saved graph, deduplicates runs and scopes worke
     assert.equal(results.steps.length, 4); assert.ok(results.steps.every((step) => step.status === "succeeded"));
     assert.equal(results.steps.find((step) => step.node_id === conditionIds[0])?.output_snapshot?.selectedPort, "true");
     assert.deepEqual(results.event, { status: "completed", attempts: 1 }); assert.equal(results.runs.length, 2);
+
+    const switchResult = await withTenant(runtimePool, tenantIds[0]!, async (client) => ({
+      run: (await client.query<{ status: string }>("SELECT status FROM public.automation_runs WHERE tenant_id=$1::uuid AND workflow_id=$2::uuid", [tenantIds[0], switchWorkflowId])).rows[0],
+      step: (await client.query<{ output_snapshot: Record<string, unknown> }>("SELECT s.output_snapshot FROM public.automation_run_steps s JOIN public.automation_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id WHERE s.tenant_id=$1::uuid AND r.workflow_id=$2::uuid AND s.node_id=$3::uuid", [tenantIds[0], switchWorkflowId, switchNodeId])).rows[0],
+    }));
+    assert.equal(switchResult.run?.status, "succeeded");
+    assert.deepEqual(switchResult.step?.output_snapshot, { value: "Messenger", selectedPort: `case:${switchCaseIds[1]}` });
 
     const stageResults = await withTenant(runtimePool, tenantIds[0]!, async (client) => ({
       opportunity: (await client.query<{ stage: string }>("SELECT stage FROM public.opportunities WHERE tenant_id=$1::uuid AND id=$2::uuid", [tenantIds[0], opportunityId])).rows[0],

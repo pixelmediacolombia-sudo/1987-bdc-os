@@ -137,8 +137,18 @@ export class AutomationWorkflowsController {
         const definition = asRecord(row.draft_definition);
         const nodes = definition && Array.isArray(definition.nodes) ? definition.nodes.map(asRecord) : [];
         const effects = nodes.filter((node) => node && !["trigger.event", "condition.if", "flow.wait", "flow.end"].includes(String(node.type)));
-        if (!effects.some((node) => node?.type === "opportunity.update_stage") || effects.some((node) => node?.type !== "opportunity.update_stage")) {
+        const supportedActions = new Set(["opportunity.update_stage", "opportunity.assign", "appointment.update_status", "contact.manage_tag", "contact.update_field", "conversation.assign"]);
+        if (!effects.some((node) => node && supportedActions.has(String(node.type))) || effects.some((node) => !node || !supportedActions.has(String(node.type)))) {
           return { kind: "unsupported" as const };
+        }
+        for (const node of effects) {
+          if ((node?.type !== "conversation.assign" && node?.type !== "opportunity.assign") || typeof node.config !== "object" || node.config === null || !("assignedUserId" in node.config) || node.config.assignedUserId === null) continue;
+          const assignee = await client.query(
+            `SELECT 1 FROM public.user_tenant_memberships AS m JOIN public.app_users AS u ON u.id=m.user_id
+              WHERE m.tenant_id=$1::uuid AND m.user_id=$2::uuid AND u.account_type='user' AND u.status='active'`,
+            [dealerId, node.config.assignedUserId],
+          );
+          if (assignee.rowCount !== 1) return { kind: "invalidAssignee" as const };
         }
         const published = await client.query<WorkflowRow>(
           `UPDATE public.automation_workflows SET published_definition=draft_definition,published_revision=draft_revision,
@@ -151,7 +161,8 @@ export class AutomationWorkflowsController {
       if (result.kind === "missing") { response.status(404).json({ error: "No encontramos este workflow." }); return; }
       if (result.kind === "conflict") { response.status(409).json({ error: "El borrador cambió. Recárgalo antes de publicar." }); return; }
       if (result.kind === "invalid") { response.status(400).json({ error: "Corrige los errores del workflow antes de publicar.", validationIssues: result.issues }); return; }
-      if (result.kind === "unsupported") { response.status(400).json({ error: "Solo se pueden publicar workflows con acciones de etapa de oportunidad ya implementadas." }); return; }
+      if (result.kind === "unsupported") { response.status(400).json({ error: "Solo se pueden publicar workflows con acciones CRM ya implementadas." }); return; }
+      if (result.kind === "invalidAssignee") { response.status(400).json({ error: "El asesor seleccionado debe pertenecer al dealer y estar activo." }); return; }
       response.json({ workflow: serialize(result.row), validationIssues: [] });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos publicar el workflow." }); }
   }

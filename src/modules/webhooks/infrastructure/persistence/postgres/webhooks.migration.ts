@@ -204,6 +204,7 @@ export async function ensureWebhookTables(pool: Pool): Promise<void> {
   await pool.query("BEGIN");
   try {
     await pool.query(CREATE_WEBHOOKS_TABLE_SQL);
+    await pool.query("ALTER TABLE public.contacts ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}'::text[]");
     await pool.query("COMMIT");
   } catch (error) {
     await pool.query("ROLLBACK");

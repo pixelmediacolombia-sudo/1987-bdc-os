@@ -1,7 +1,7 @@
 import { AUTOMATION_EVENT_TYPES, type AutomationEventType } from "./automation-event";
 
 export const AUTOMATION_WORKFLOW_SCHEMA_VERSION = 1 as const;
-export const AUTOMATION_WORKFLOW_NODE_TYPES = ["trigger.event", "condition.if", "flow.wait", "opportunity.update_stage", "flow.end"] as const;
+export const AUTOMATION_WORKFLOW_NODE_TYPES = ["trigger.event", "condition.if", "condition.switch", "flow.wait", "opportunity.update_stage", "opportunity.assign", "appointment.update_status", "contact.manage_tag", "contact.update_field", "conversation.assign", "flow.end"] as const;
 export type AutomationWorkflowNodeType = (typeof AUTOMATION_WORKFLOW_NODE_TYPES)[number];
 export type AutomationWorkflowConditionField =
   | "event.type"
@@ -16,14 +16,20 @@ export type AutomationWorkflowOperator = "equals" | "not_equals" | "contains" | 
 export type AutomationWorkflowNode =
   | { id: string; type: "trigger.event"; position: { x: number; y: number }; config: { eventType: AutomationEventType } }
   | { id: string; type: "condition.if"; position: { x: number; y: number }; config: { field: AutomationWorkflowConditionField; operator: AutomationWorkflowOperator; value?: string } }
+  | { id: string; type: "condition.switch"; position: { x: number; y: number }; config: { field: AutomationWorkflowConditionField; cases: Array<{ id: string; value: string }> } }
   | { id: string; type: "flow.wait"; position: { x: number; y: number }; config: { durationSeconds: number } }
   | { id: string; type: "opportunity.update_stage"; position: { x: number; y: number }; config: { stage: "new" | "working" | "closing" | "won" | "lost" } }
+  | { id: string; type: "opportunity.assign"; position: { x: number; y: number }; config: { assignedUserId: string | null } }
+  | { id: string; type: "appointment.update_status"; position: { x: number; y: number }; config: { status: "scheduled" | "confirmed" | "cancelled" | "completed" | "no_show" } }
+  | { id: string; type: "contact.manage_tag"; position: { x: number; y: number }; config: { action: "add" | "remove"; tag: string } }
+  | { id: string; type: "contact.update_field"; position: { x: number; y: number }; config: { field: "displayName" | "preferredLanguage"; value: string } }
+  | { id: string; type: "conversation.assign"; position: { x: number; y: number }; config: { assignedUserId: string | null } }
   | { id: string; type: "flow.end"; position: { x: number; y: number }; config: { outcome: "complete" | "stop" } };
 
 export type AutomationWorkflowEdge = {
   id: string;
   source: string;
-  sourcePort: "next" | "true" | "false";
+  sourcePort: "next" | "true" | "false" | "default" | `case:${string}`;
   target: string;
   targetPort: "in";
 };
@@ -143,6 +149,38 @@ export function validateAutomationWorkflowDefinition(value: unknown): Automation
         }
       }
     }
+    if (node.type === "condition.switch") {
+      for (const port of [...node.config.cases.map((item) => `case:${item.id}`), "default"]) {
+        if (outs.filter((edge) => edge.sourcePort === port).length !== 1) {
+          issues.push({ code: "missing_branch", message: `Conecta la salida ${port === "default" ? "Por defecto" : node.config.cases.find((item) => port === `case:${item.id}`)?.value ?? "del caso"}.`, nodeId: node.id });
+        }
+      }
+    }
+  }
+
+  const contactActions = [...byId.values()].filter((node) => node.type === "contact.manage_tag" || node.type === "contact.update_field");
+  if (contactActions.length) {
+    const trigger = triggers[0];
+    if (!trigger || !["contact.created", "contact.updated"].includes(trigger.config.eventType)) {
+      for (const node of contactActions) issues.push({ code: "invalid_node", message: "Las acciones de contacto requieren un trigger de contacto.", nodeId: node.id });
+    }
+  }
+
+  const conversationActions = [...byId.values()].filter((node) => node.type === "conversation.assign");
+  if (conversationActions.length) {
+    const trigger = triggers[0];
+    if (!trigger || !["conversation.assigned", "conversation.status_changed"].includes(trigger.config.eventType)) {
+      for (const node of conversationActions) issues.push({ code: "invalid_node", message: "La asignación requiere un trigger de conversación.", nodeId: node.id });
+    }
+  }
+  const opportunityActions = [...byId.values()].filter((node) => node.type === "opportunity.assign");
+  const trigger = triggers[0];
+  if (opportunityActions.length && (!trigger || !["opportunity.created", "opportunity.stage_changed", "opportunity.assigned", "opportunity.archived", "opportunity.restored", "opportunity.next_action_changed"].includes(trigger.config.eventType))) {
+    for (const node of opportunityActions) issues.push({ code: "invalid_node", message: "La asignación requiere un trigger de oportunidad.", nodeId: node.id });
+  }
+  const appointmentActions = [...byId.values()].filter((node) => node.type === "appointment.update_status");
+  if (appointmentActions.length && (!trigger || !["appointment.created", "appointment.updated", "appointment.status_changed", "appointment.rescheduled"].includes(trigger.config.eventType))) {
+    for (const node of appointmentActions) issues.push({ code: "invalid_node", message: "El cambio de estado requiere un trigger de cita.", nodeId: node.id });
   }
 
   if (triggers.length === 1 && byId.size > 0) {
@@ -184,6 +222,21 @@ function isNodeConfigValid(value: Record<string, unknown>): boolean {
       ((["is_empty", "is_not_empty"].includes(config.operator) && config.value === undefined) ||
         (!["is_empty", "is_not_empty"].includes(config.operator) && typeof config.value === "string" && config.value.length <= 200));
   }
+  if (value.type === "condition.switch") {
+    const config = value.config;
+    if (!exactKeys(value, ["id", "type", "position", "config"]) || !exactKeys(config, ["field", "cases"])
+      || typeof config.field !== "string" || !CONDITION_FIELDS.includes(config.field as AutomationWorkflowConditionField)
+      || !Array.isArray(config.cases) || config.cases.length < 2 || config.cases.length > 5) return false;
+    const caseValues = new Set<string>();
+    return config.cases.every((item) => {
+      if (!isRecord(item) || !exactKeys(item, ["id", "value"]) || typeof item.id !== "string" || !UUID.test(item.id)
+        || typeof item.value !== "string" || !item.value.trim() || item.value.trim().length > 200) return false;
+      const normalized = item.value.trim().toLocaleLowerCase("en-US");
+      if (caseValues.has(normalized)) return false;
+      caseValues.add(normalized);
+      return true;
+    });
+  }
   if (value.type === "flow.end") {
     return exactKeys(value, ["id", "type", "position", "config"]) && exactKeys(value.config, ["outcome"])
       && (value.config.outcome === "complete" || value.config.outcome === "stop");
@@ -196,11 +249,38 @@ function isNodeConfigValid(value: Record<string, unknown>): boolean {
     return exactKeys(value, ["id", "type", "position", "config"]) && exactKeys(value.config, ["stage"])
       && ["new", "working", "closing", "won", "lost"].includes(String(value.config.stage));
   }
+  if (value.type === "opportunity.assign") {
+    return exactKeys(value, ["id", "type", "position", "config"]) && exactKeys(value.config, ["assignedUserId"])
+      && (value.config.assignedUserId === null || (typeof value.config.assignedUserId === "string" && UUID.test(value.config.assignedUserId)));
+  }
+  if (value.type === "appointment.update_status") {
+    return exactKeys(value, ["id", "type", "position", "config"]) && exactKeys(value.config, ["status"])
+      && ["scheduled", "confirmed", "cancelled", "completed", "no_show"].includes(String(value.config.status));
+  }
+  if (value.type === "contact.manage_tag") {
+    return exactKeys(value, ["id", "type", "position", "config"]) && exactKeys(value.config, ["action", "tag"])
+      && (value.config.action === "add" || value.config.action === "remove")
+      && typeof value.config.tag === "string" && value.config.tag.trim().length > 0 && value.config.tag.trim().length <= 64;
+  }
+  if (value.type === "contact.update_field") {
+    const field = value.config.field;
+    const valueText = value.config.value;
+    const maxLength = field === "displayName" ? 120 : field === "preferredLanguage" ? 16 : 0;
+    return exactKeys(value, ["id", "type", "position", "config"]) && exactKeys(value.config, ["field", "value"])
+      && maxLength > 0 && typeof valueText === "string" && valueText.trim().length > 0 && valueText.trim().length <= maxLength
+      && (field !== "preferredLanguage" || /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(valueText.trim()));
+  }
+  if (value.type === "conversation.assign") {
+    return exactKeys(value, ["id", "type", "position", "config"]) && exactKeys(value.config, ["assignedUserId"])
+      && (value.config.assignedUserId === null || (typeof value.config.assignedUserId === "string" && UUID.test(value.config.assignedUserId)));
+  }
   return false;
 }
 
 function isValidSourcePort(node: AutomationWorkflowNode, port: unknown): boolean {
-  return node.type === "condition.if" ? port === "true" || port === "false" : node.type !== "flow.end" && port === "next";
+  if (node.type === "condition.if") return port === "true" || port === "false";
+  if (node.type === "condition.switch") return port === "default" || (typeof port === "string" && node.config.cases.some((item) => port === `case:${item.id}`));
+  return node.type !== "flow.end" && port === "next";
 }
 
 function walk(id: string, outgoing: Map<string, AutomationWorkflowEdge[]>, visited: Set<string>): Set<string> {

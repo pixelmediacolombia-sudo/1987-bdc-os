@@ -9,10 +9,17 @@ export function findAutomationNode(definition: AutomationWorkflowDefinition, nod
   return node;
 }
 
-export function findAutomationNextNode(definition: AutomationWorkflowDefinition, nodeId: string, port: "next" | "true" | "false"): string {
+export function findAutomationNextNode(definition: AutomationWorkflowDefinition, nodeId: string, port: AutomationWorkflowDefinition["edges"][number]["sourcePort"]): string {
   const edge = definition.edges.find((candidate) => candidate.source === nodeId && candidate.sourcePort === port);
   if (!edge) throw new Error("El workflow no tiene conectada la salida seleccionada.");
   return edge.target;
+}
+
+export function evaluateAutomationSwitch(event: AutomationEvent, node: Extract<AutomationWorkflowNode, { type: "condition.switch" }>): { port: `case:${string}` | "default"; value: string | null } {
+  const value = readConditionValue(event, node.config.field);
+  const normalized = value?.trim().toLocaleLowerCase("en-US") ?? null;
+  const match = normalized === null ? undefined : node.config.cases.find((item) => item.value.trim().toLocaleLowerCase("en-US") === normalized);
+  return { port: match ? `case:${match.id}` : "default", value };
 }
 
 export function evaluateAutomationCondition(event: AutomationEvent, node: Extract<AutomationWorkflowNode, { type: "condition.if" }>): AutomationConditionResult {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculateAutomationBackoff, evaluateAutomationCondition, findAutomationNextNode } from "./automation-engine";
+import { calculateAutomationBackoff, evaluateAutomationCondition, evaluateAutomationSwitch, findAutomationNextNode } from "./automation-engine";
 import type { AutomationEvent } from "./automation-event";
 import type { AutomationWorkflowDefinition } from "./automation-workflow";
 
@@ -28,6 +28,21 @@ test("evaluates IF against allowlisted event fields with case-insensitive matchi
   assert.deepEqual(evaluateAutomationCondition(event, condition), { matched: true, value: "Messenger" });
   const differentEvent: AutomationEvent = { ...event, type: "contact.created", entity: { type: "contact", id: event.entity.id }, payload: { source: "manual" } };
   assert.equal(evaluateAutomationCondition(differentEvent, condition).matched, false);
+});
+
+test("routes Switch to the first case match or its default branch", () => {
+  const node = {
+    id: "00000000-0000-4000-8000-000000000007", type: "condition.switch" as const,
+    position: { x: 1, y: 1 }, config: { field: "message.channel" as const, cases: [
+      { id: "00000000-0000-4000-8000-000000000010", value: "sms" },
+      { id: "00000000-0000-4000-8000-000000000011", value: "messenger" },
+    ] },
+  };
+  assert.deepEqual(evaluateAutomationSwitch(event, node), { port: "case:00000000-0000-4000-8000-000000000011", value: "Messenger" });
+  const noMatch: AutomationEvent = { ...event, payload: { ...event.payload, channel: "email" } };
+  assert.deepEqual(evaluateAutomationSwitch(noMatch, node), { port: "default", value: "email" });
+  const missingValue: AutomationEvent = { ...event, type: "contact.created", entity: { type: "contact", id: event.entity.id }, payload: { source: "manual" } };
+  assert.deepEqual(evaluateAutomationSwitch(missingValue, node), { port: "default", value: null });
 });
 
 test("selects a connected branch and applies capped exponential retry backoff", () => {

@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from "pg";
-import { calculateAutomationBackoff, evaluateAutomationCondition, findAutomationNextNode, findAutomationNode, automationRunStartNode } from "@/modules/automations/domain/automation-engine";
+import { calculateAutomationBackoff, evaluateAutomationCondition, evaluateAutomationSwitch, findAutomationNextNode, findAutomationNode, automationRunStartNode } from "@/modules/automations/domain/automation-engine";
 import { parseAutomationEvent, type AutomationEvent } from "@/modules/automations/domain/automation-event";
 import { validateAutomationWorkflowDefinition, type AutomationWorkflowDefinition, type AutomationWorkflowNode } from "@/modules/automations/domain/automation-workflow";
 
@@ -132,8 +132,18 @@ export class AutomationEngineWorker {
         const node = findAutomationNode(definition, run.current_node_id);
         const result = node.type === "opportunity.update_stage"
           ? await executeOpportunityStageNode(client, run.tenant_id, run.id, event, definition, node)
-          : executeControlNode(event, definition, node);
-        const stepInput = { eventId: event.eventId, eventType: event.type, nodeId: node.id, ...(node.type === "opportunity.update_stage" ? { stage: node.config.stage } : {}) };
+          : node.type === "contact.manage_tag"
+            ? await executeContactTagNode(client, run.tenant_id, run.id, event, definition, node)
+            : node.type === "contact.update_field"
+              ? await executeContactFieldNode(client, run.tenant_id, run.id, event, definition, node)
+              : node.type === "opportunity.assign"
+                ? await executeOpportunityAssignmentNode(client, run.tenant_id, run.id, event, definition, node)
+                : node.type === "appointment.update_status"
+                  ? await executeAppointmentStatusNode(client, run.tenant_id, run.id, event, definition, node)
+                : node.type === "conversation.assign"
+                ? await executeConversationAssignmentNode(client, run.tenant_id, run.id, event, definition, node)
+              : executeControlNode(event, definition, node);
+        const stepInput = { eventId: event.eventId, eventType: event.type, nodeId: node.id, ...(node.type === "opportunity.update_stage" ? { stage: node.config.stage } : {}), ...(node.type === "appointment.update_status" ? { status: node.config.status } : {}), ...(node.type === "contact.manage_tag" ? node.config : {}), ...(node.type === "contact.update_field" ? { field: node.config.field } : {}), ...(node.type === "conversation.assign" || node.type === "opportunity.assign" ? { assignedUserId: node.config.assignedUserId } : {}) };
         await client.query(
           `INSERT INTO public.automation_run_steps (tenant_id,run_id,node_id,node_type,status,attempts,input_snapshot,output_snapshot,started_at,finished_at)
            VALUES ($1::uuid,$2::uuid,$3::uuid,$4,'succeeded',1,$5::jsonb,$6::jsonb,now(),now())
@@ -207,7 +217,7 @@ function workflowDefinition(value: unknown): AutomationWorkflowDefinition {
   return value as AutomationWorkflowDefinition;
 }
 
-function executeControlNode(event: AutomationEvent, definition: AutomationWorkflowDefinition, node: Exclude<AutomationWorkflowNode, { type: "opportunity.update_stage" }>): { nextNodeId?: string; finished: boolean; waitSeconds?: number; output: Record<string, unknown> } {
+function executeControlNode(event: AutomationEvent, definition: AutomationWorkflowDefinition, node: Exclude<AutomationWorkflowNode, { type: "opportunity.update_stage" | "opportunity.assign" | "appointment.update_status" | "contact.manage_tag" | "contact.update_field" | "conversation.assign" }>): { nextNodeId?: string; finished: boolean; waitSeconds?: number; output: Record<string, unknown> } {
   if (node.type === "trigger.event") {
     if (node.config.eventType !== event.type) throw new Error("El trigger no coincide con el evento de entrada.");
     return { nextNodeId: findAutomationNextNode(definition, node.id, "next"), finished: false, output: { acceptedEventId: event.eventId } };
@@ -217,8 +227,92 @@ function executeControlNode(event: AutomationEvent, definition: AutomationWorkfl
     const port = condition.matched ? "true" : "false";
     return { nextNodeId: findAutomationNextNode(definition, node.id, port), finished: false, output: { matched: condition.matched, value: condition.value, selectedPort: port } };
   }
+  if (node.type === "condition.switch") {
+    const selection = evaluateAutomationSwitch(event, node);
+    return { nextNodeId: findAutomationNextNode(definition, node.id, selection.port), finished: false, output: { value: selection.value, selectedPort: selection.port } };
+  }
   if (node.type === "flow.wait") return { nextNodeId: findAutomationNextNode(definition, node.id, "next"), finished: false, waitSeconds: node.config.durationSeconds, output: { waitSeconds: node.config.durationSeconds } };
   return { finished: true, output: { outcome: node.config.outcome } };
+}
+
+async function executeContactTagNode(
+  client: PoolClient,
+  tenantId: string,
+  runId: string,
+  event: AutomationEvent,
+  definition: AutomationWorkflowDefinition,
+  node: Extract<AutomationWorkflowNode, { type: "contact.manage_tag" }>,
+): Promise<{ nextNodeId?: string; finished: false; waitSeconds?: undefined; output: Record<string, unknown> }> {
+  if (event.entity.type !== "contact") throw new Error("El nodo requiere un evento de contacto.");
+  const tag = node.config.tag.trim().toLocaleLowerCase("es");
+  const current = await client.query<{ tags: string[] }>(
+    "SELECT tags FROM public.contacts WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE",
+    [tenantId, event.entity.id],
+  );
+  if (!current.rows[0]) throw new Error("No encontramos el contacto dentro del dealer del workflow.");
+  const tags = current.rows[0].tags ?? [];
+  const hasTag = tags.some((existing) => existing.toLocaleLowerCase("es") === tag);
+  const changed = node.config.action === "add" ? !hasTag : hasTag;
+  const nextTags = changed
+    ? node.config.action === "add" ? [...tags, tag] : tags.filter((existing) => existing.toLocaleLowerCase("es") !== tag)
+    : tags;
+  if (changed) {
+    await client.query("SELECT set_config('app.automation_origin','system',true)");
+    await client.query("UPDATE public.contacts SET tags=$3::text[],updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid", [tenantId, event.entity.id, nextTags]);
+    const dealer = await client.query<{ dealer_name: string }>("SELECT dealer_name FROM public.tenants WHERE dealer_id=$1::uuid", [tenantId]);
+    await client.query(
+      `INSERT INTO public.admin_audit_events
+         (actor_user_id,actor_email,actor_name,target_tenant_id,dealer_name,category,action,outcome,summary,reference_id,entity_id)
+       VALUES (NULL,'automation@system.local','Automatización BDC OS',$1::uuid,$2,'contacts',$3,'success',$4,$5,$6)`,
+      [tenantId, dealer.rows[0]?.dealer_name ?? null, node.config.action === "add" ? "contact.tag_added_by_automation" : "contact.tag_removed_by_automation", `La automatización ${node.config.action === "add" ? "añadió" : "quitó"} la etiqueta ${tag}.`, `automation:${runId}:${node.id}`, event.entity.id],
+    );
+  }
+  return {
+    nextNodeId: findAutomationNextNode(definition, node.id, "next"),
+    finished: false,
+    output: { contactId: event.entity.id, action: node.config.action, tag, changed, tags: nextTags },
+  };
+}
+
+async function executeContactFieldNode(
+  client: PoolClient,
+  tenantId: string,
+  runId: string,
+  event: AutomationEvent,
+  definition: AutomationWorkflowDefinition,
+  node: Extract<AutomationWorkflowNode, { type: "contact.update_field" }>,
+): Promise<{ nextNodeId?: string; finished: false; waitSeconds?: undefined; output: Record<string, unknown> }> {
+  if (event.entity.type !== "contact") throw new Error("El nodo requiere un evento de contacto.");
+  const value = node.config.value.trim();
+  const normalizedValue = node.config.field === "preferredLanguage" ? value.toLowerCase() : value;
+  const selected = await client.query<{ displayName: string | null; preferredLanguage: string }>(
+    "SELECT display_name AS \"displayName\", preferred_language AS \"preferredLanguage\" FROM public.contacts WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE",
+    [tenantId, event.entity.id],
+  );
+  const contact = selected.rows[0];
+  if (!contact) throw new Error("No encontramos el contacto dentro del dealer del workflow.");
+  const previousValue = node.config.field === "displayName" ? contact.displayName : contact.preferredLanguage;
+  const changed = previousValue !== normalizedValue;
+  if (changed) {
+    await client.query("SELECT set_config('app.automation_origin','system',true)");
+    if (node.config.field === "displayName") {
+      await client.query("UPDATE public.contacts SET display_name=$3,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid AND display_name IS DISTINCT FROM $3", [tenantId, event.entity.id, normalizedValue]);
+    } else {
+      await client.query("UPDATE public.contacts SET preferred_language=$3,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid AND preferred_language IS DISTINCT FROM $3", [tenantId, event.entity.id, normalizedValue]);
+    }
+    const dealer = await client.query<{ dealer_name: string }>("SELECT dealer_name FROM public.tenants WHERE dealer_id=$1::uuid", [tenantId]);
+    await client.query(
+      `INSERT INTO public.admin_audit_events
+         (actor_user_id,actor_email,actor_name,target_tenant_id,dealer_name,category,action,outcome,summary,reference_id,entity_id)
+       VALUES (NULL,'automation@system.local','Automatización BDC OS',$1::uuid,$2,'contacts','contact.field_updated_by_automation','success',$3,$4,$5)`,
+      [tenantId, dealer.rows[0]?.dealer_name ?? null, `La automatización actualizó el campo ${node.config.field} del contacto.`, `automation:${runId}:${node.id}`, event.entity.id],
+    );
+  }
+  return {
+    nextNodeId: findAutomationNextNode(definition, node.id, "next"),
+    finished: false,
+    output: { contactId: event.entity.id, field: node.config.field, changed },
+  };
 }
 
 async function executeOpportunityStageNode(
@@ -261,6 +355,133 @@ async function executeOpportunityStageNode(
     nextNodeId: findAutomationNextNode(definition, node.id, "next"),
     finished: false,
     output: { opportunityId: event.entity.id, previousStage: opportunity.stage, stage: node.config.stage, changed },
+  };
+}
+
+async function executeAppointmentStatusNode(
+  client: PoolClient,
+  tenantId: string,
+  runId: string,
+  event: AutomationEvent,
+  definition: AutomationWorkflowDefinition,
+  node: Extract<AutomationWorkflowNode, { type: "appointment.update_status" }>,
+): Promise<{ nextNodeId?: string; finished: false; waitSeconds?: undefined; output: Record<string, unknown> }> {
+  if (event.entity.type !== "appointment") throw new Error("El nodo requiere un evento de cita.");
+  const appointment = await client.query<{ status: string; title: string }>(
+    "SELECT status,title FROM public.appointments WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE",
+    [tenantId, event.entity.id],
+  );
+  const current = appointment.rows[0];
+  if (!current) throw new Error("No encontramos la cita dentro del dealer del workflow.");
+  const changed = current.status !== node.config.status;
+  if (changed) {
+    await client.query("SELECT set_config('app.automation_origin','system',true)");
+    await client.query(
+      "UPDATE public.appointments SET status=$3,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid AND status IS DISTINCT FROM $3",
+      [tenantId, event.entity.id, node.config.status],
+    );
+    const dealer = await client.query<{ dealer_name: string }>("SELECT dealer_name FROM public.tenants WHERE dealer_id=$1::uuid", [tenantId]);
+    await client.query(
+      `INSERT INTO public.admin_audit_events
+         (actor_user_id,actor_email,actor_name,target_tenant_id,dealer_name,category,action,outcome,summary,reference_id,entity_id)
+       VALUES (NULL,'automation@system.local','Automatización BDC OS',$1::uuid,$2,'appointments','appointment.status_updated_by_automation','success',$3,$4,$5)`,
+      [tenantId, dealer.rows[0]?.dealer_name ?? null, `La automatización cambió la cita ${current.title} a ${node.config.status}.`, `automation:${runId}:${node.id}`, event.entity.id],
+    );
+  }
+  return {
+    nextNodeId: findAutomationNextNode(definition, node.id, "next"),
+    finished: false,
+    output: { appointmentId: event.entity.id, previousStatus: current.status, status: node.config.status, changed },
+  };
+}
+
+async function executeConversationAssignmentNode(
+  client: PoolClient,
+  tenantId: string,
+  runId: string,
+  event: AutomationEvent,
+  definition: AutomationWorkflowDefinition,
+  node: Extract<AutomationWorkflowNode, { type: "conversation.assign" }>,
+): Promise<{ nextNodeId?: string; finished: false; waitSeconds?: undefined; output: Record<string, unknown> }> {
+  if (event.entity.type !== "conversation") throw new Error("El nodo requiere un evento de conversación.");
+  const conversation = await client.query<{ assignedUserId: string | null }>(
+    "SELECT assigned_user_id::text AS \"assignedUserId\" FROM public.conversations WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE",
+    [tenantId, event.entity.id],
+  );
+  const current = conversation.rows[0];
+  if (!current) throw new Error("No encontramos la conversación dentro del dealer del workflow.");
+  if (node.config.assignedUserId) {
+    const member = await client.query(
+      `SELECT 1 FROM public.user_tenant_memberships AS m JOIN public.app_users AS u ON u.id=m.user_id
+        WHERE m.tenant_id=$1::uuid AND m.user_id=$2::uuid AND u.account_type='user' AND u.status='active'`,
+      [tenantId, node.config.assignedUserId],
+    );
+    if (member.rowCount !== 1) throw new Error("El asesor asignado no pertenece al dealer o está inactivo.");
+  }
+  const changed = current.assignedUserId !== node.config.assignedUserId;
+  if (changed) {
+    await client.query("SELECT set_config('app.automation_origin','system',true)");
+    await client.query(
+      "UPDATE public.conversations SET assigned_user_id=$3::uuid WHERE tenant_id=$1::uuid AND id=$2::uuid AND assigned_user_id IS DISTINCT FROM $3::uuid",
+      [tenantId, event.entity.id, node.config.assignedUserId],
+    );
+    const dealer = await client.query<{ dealer_name: string }>("SELECT dealer_name FROM public.tenants WHERE dealer_id=$1::uuid", [tenantId]);
+    await client.query(
+      `INSERT INTO public.admin_audit_events
+         (actor_user_id,actor_email,actor_name,target_tenant_id,dealer_name,category,action,outcome,summary,reference_id,entity_id)
+       VALUES (NULL,'automation@system.local','Automatización BDC OS',$1::uuid,$2,'contacts','conversation.assigned_by_automation','success',$3,$4,$5)`,
+      [tenantId, dealer.rows[0]?.dealer_name ?? null, node.config.assignedUserId ? "La automatización asignó la conversación a un asesor." : "La automatización quitó la asignación de la conversación.", `automation:${runId}:${node.id}`, event.entity.id],
+    );
+  }
+  return {
+    nextNodeId: findAutomationNextNode(definition, node.id, "next"),
+    finished: false,
+    output: { conversationId: event.entity.id, assignedUserId: node.config.assignedUserId, changed },
+  };
+}
+
+async function executeOpportunityAssignmentNode(
+  client: PoolClient,
+  tenantId: string,
+  runId: string,
+  event: AutomationEvent,
+  definition: AutomationWorkflowDefinition,
+  node: Extract<AutomationWorkflowNode, { type: "opportunity.assign" }>,
+): Promise<{ nextNodeId?: string; finished: false; waitSeconds?: undefined; output: Record<string, unknown> }> {
+  if (event.entity.type !== "opportunity") throw new Error("El nodo requiere un evento de oportunidad.");
+  const opportunity = await client.query<{ assignedUserId: string | null; title: string }>(
+    "SELECT assigned_user_id::text AS \"assignedUserId\",title FROM public.opportunities WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE",
+    [tenantId, event.entity.id],
+  );
+  const current = opportunity.rows[0];
+  if (!current) throw new Error("No encontramos la oportunidad dentro del dealer del workflow.");
+  if (node.config.assignedUserId) {
+    const member = await client.query(
+      `SELECT 1 FROM public.user_tenant_memberships AS m JOIN public.app_users AS u ON u.id=m.user_id
+        WHERE m.tenant_id=$1::uuid AND m.user_id=$2::uuid AND u.account_type='user' AND u.status='active'`,
+      [tenantId, node.config.assignedUserId],
+    );
+    if (member.rowCount !== 1) throw new Error("El asesor asignado no pertenece al dealer o está inactivo.");
+  }
+  const changed = current.assignedUserId !== node.config.assignedUserId;
+  if (changed) {
+    await client.query("SELECT set_config('app.automation_origin','system',true)");
+    await client.query(
+      "UPDATE public.opportunities SET assigned_user_id=$3::uuid,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid AND assigned_user_id IS DISTINCT FROM $3::uuid",
+      [tenantId, event.entity.id, node.config.assignedUserId],
+    );
+    const dealer = await client.query<{ dealer_name: string }>("SELECT dealer_name FROM public.tenants WHERE dealer_id=$1::uuid", [tenantId]);
+    await client.query(
+      `INSERT INTO public.admin_audit_events
+         (actor_user_id,actor_email,actor_name,target_tenant_id,dealer_name,category,action,outcome,summary,reference_id,entity_id)
+       VALUES (NULL,'automation@system.local','Automatización BDC OS',$1::uuid,$2,'opportunities','opportunity.assigned_by_automation','success',$3,$4,$5)`,
+      [tenantId, dealer.rows[0]?.dealer_name ?? null, node.config.assignedUserId ? `La automatización asignó la oportunidad ${current.title} a un asesor.` : `La automatización quitó la asignación de la oportunidad ${current.title}.`, `automation:${runId}:${node.id}`, event.entity.id],
+    );
+  }
+  return {
+    nextNodeId: findAutomationNextNode(definition, node.id, "next"),
+    finished: false,
+    output: { opportunityId: event.entity.id, assignedUserId: node.config.assignedUserId, changed },
   };
 }
 
