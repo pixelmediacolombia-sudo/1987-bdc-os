@@ -6,6 +6,6 @@ import { ConversationMessageController } from "./controllers/conversation-messag
 export function createConversationMessageRouter(pool: Pool, replySender?: ConversationReplySender): express.Router {
   const router = express.Router();
   const controller = new ConversationMessageController(pool, replySender);
-  router.post("/conversations/:conversationId/messages", controller.createConversationsByConversationIdMessages);
+  router.post("/conversations/:conversationId/messages", controller.createConversationsByConversationIdMessages.bind(controller));
   return router;
 }

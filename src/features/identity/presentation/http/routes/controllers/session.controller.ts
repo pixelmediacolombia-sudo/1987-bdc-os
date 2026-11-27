@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import type { RequestHandler } from "express";
 import express, { type Request, type Response } from "express";
 import type { Pool } from "pg";
 import { hashScryptPassword, verifyScryptPassword } from "@/features/identity/infrastructure/crypto/scrypt-password";
@@ -10,7 +9,7 @@ import { activeSession, cookieValue, failedAttempts, failureKey, recordFailure, 
 export class SessionController {
   constructor(private readonly pool: Pool, private readonly options: IdentityRouteOptions) {}
 
-  createLogin: RequestHandler = async (request: Request, response: Response) => {
+  async createLogin(request: Request, response: Response): Promise<void> {
     const email = typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
     const password = typeof request.body?.password === "string" ? request.body.password : "";
     if (!email || !password || email.length > 254 || password.length > 1024) {
@@ -55,9 +54,9 @@ export class SessionController {
     } catch {
       response.status(500).json({ error: "No pudimos iniciar sesión. Inténtalo de nuevo." });
     }
-  };
+  }
 
-  getSession: RequestHandler = async (request: Request, response: Response) => {
+  async getSession(request: Request, response: Response): Promise<void> {
     try {
       const user = await activeSession(this.pool, request);
       if (!user) {
@@ -72,9 +71,9 @@ export class SessionController {
     } catch {
       response.status(500).json({ error: "No pudimos verificar la sesión." });
     }
-  };
+  }
 
-  createLogout: RequestHandler = async (request: Request, response: Response) => {
+  async createLogout(request: Request, response: Response): Promise<void> {
     const token = cookieValue(request);
     try {
       if (token && token.length <= 256) {
@@ -88,5 +87,5 @@ export class SessionController {
     } catch {
       response.status(500).json({ error: "No pudimos cerrar la sesión." });
     }
-  };
+  }
 }

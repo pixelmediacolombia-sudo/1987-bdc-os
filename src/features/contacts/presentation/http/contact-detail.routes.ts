@@ -5,9 +5,9 @@ import { ContactDetailController } from "./controllers/contact-detail.controller
 export function createContactDetailRouter(pool: Pool): express.Router {
   const router = express.Router();
   const controller = new ContactDetailController(pool);
-  router.patch("/contacts/:contactId", controller.updateContactsByContactId);
+  router.patch("/contacts/:contactId", controller.updateContactsByContactId.bind(controller));
 
-  router.get("/contacts/:contactId", controller.getContactsByContactId);
+  router.get("/contacts/:contactId", controller.getContactsByContactId.bind(controller));
 
 
   return router;

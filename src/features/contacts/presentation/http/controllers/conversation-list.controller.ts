@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from "express";
-import type { RequestHandler } from "express";
 import type { Pool } from "pg";
 import { UUID, type InboxConversationRow, dealerUser, withTenant, isMember } from "../contacts.route-helpers";
 
@@ -8,7 +7,7 @@ import { UUID, type InboxConversationRow, dealerUser, withTenant, isMember } fro
 export class ConversationListController {
   constructor(private readonly pool: Pool) {}
 
-  getConversations: RequestHandler = async (request: Request, response: Response) => {
+  async getConversations(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response);
       if (!user) return;
@@ -63,9 +62,9 @@ export class ConversationListController {
       });
       response.status(200).json(result);
     } catch { response.status(500).json({ error: "No pudimos cargar las conversaciones." }); }
-  };
+  }
 
-  getConversationsAssignees: RequestHandler = async (request: Request, response: Response) => {
+  async getConversationsAssignees(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response);
       if (!user) return;
@@ -84,5 +83,5 @@ export class ConversationListController {
       });
       response.status(200).json({ assignees });
     } catch { response.status(500).json({ error: "No pudimos cargar los asesores del dealer." }); }
-  };
+  }
 }

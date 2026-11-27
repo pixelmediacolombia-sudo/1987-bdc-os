@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from "express";
-import type { RequestHandler } from "express";
 import type { Pool } from "pg";
 import { dealerUser, isMember, withTenant, UUID } from "@/features/contacts/presentation/http/contacts.route-helpers";
 import { AUTOMATION_WORKFLOW_SCHEMA_VERSION, validateAutomationWorkflowDefinition, type AutomationWorkflowDefinition } from "@/modules/automations/domain/automation-workflow";
@@ -33,7 +32,7 @@ function serialize(row: WorkflowRow) {
 export class AutomationWorkflowsController {
   constructor(private readonly pool: Pool) {}
 
-  getAutomationWorkflows: RequestHandler = async (request: Request, response: Response) => {
+  async getAutomationWorkflows(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
@@ -44,9 +43,9 @@ export class AutomationWorkflowsController {
       )).rows);
       response.json({ workflows });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar las automatizaciones." }); }
-  };
+  }
 
-  createAutomationWorkflows: RequestHandler = async (request: Request, response: Response) => {
+  async createAutomationWorkflows(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = asRecord(request.body) ?? {};
@@ -62,9 +61,9 @@ export class AutomationWorkflowsController {
       )).rows[0]);
       response.status(201).json({ workflow: serialize(row!), validationIssues: validateAutomationWorkflowDefinition(definition) });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos crear el borrador." }); }
-  };
+  }
 
-  getAutomationWorkflowsByWorkflowId: RequestHandler = async (request: Request, response: Response) => {
+  async getAutomationWorkflowsByWorkflowId(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
@@ -76,9 +75,9 @@ export class AutomationWorkflowsController {
       if (!row) { response.status(404).json({ error: "No encontramos este workflow." }); return; }
       response.json({ workflow: serialize(row), validationIssues: validateAutomationWorkflowDefinition(row.draft_definition) });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar el workflow." }); }
-  };
+  }
 
-  replaceAutomationWorkflowsByWorkflowIdDraft: RequestHandler = async (request: Request, response: Response) => {
+  async replaceAutomationWorkflowsByWorkflowIdDraft(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = asRecord(request.body) ?? {};
@@ -114,9 +113,9 @@ export class AutomationWorkflowsController {
       }
       response.json({ workflow: serialize(updated), validationIssues: issues });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos guardar el borrador." }); }
-  };
+  }
 
-  publishAutomationWorkflowsByWorkflowId: RequestHandler = async (request: Request, response: Response) => {
+  async publishAutomationWorkflowsByWorkflowId(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = asRecord(request.body) ?? {};
@@ -155,9 +154,9 @@ export class AutomationWorkflowsController {
       if (result.kind === "unsupported") { response.status(400).json({ error: "Solo se pueden publicar workflows con acciones de etapa de oportunidad ya implementadas." }); return; }
       response.json({ workflow: serialize(result.row), validationIssues: [] });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos publicar el workflow." }); }
-  };
+  }
 
-  getAutomationWorkflowsByWorkflowIdRuns: RequestHandler = async (request: Request, response: Response) => {
+  async getAutomationWorkflowsByWorkflowIdRuns(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
@@ -178,9 +177,9 @@ export class AutomationWorkflowsController {
       )).rows);
       response.json({ runs });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar las ejecuciones." }); }
-  };
+  }
 
-  createAutomationRunsByRunIdCancel: RequestHandler = async (request: Request, response: Response) => {
+  async createAutomationRunsByRunIdCancel(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = asRecord(request.body) ?? {};
@@ -202,9 +201,9 @@ export class AutomationWorkflowsController {
       if (run.status !== "cancelled") { response.status(409).json({ error: "Solo se pueden cancelar ejecuciones en cola, espera o procesamiento.", status: run.status }); return; }
       response.json({ run });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cancelar la ejecución." }); }
-  };
+  }
 
-  createAutomationRunsByRunIdRetry: RequestHandler = async (request: Request, response: Response) => {
+  async createAutomationRunsByRunIdRetry(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = asRecord(request.body) ?? {};
@@ -220,9 +219,9 @@ export class AutomationWorkflowsController {
       if (run.status !== "queued") { response.status(409).json({ error: "Solo se pueden reintentar ejecuciones fallidas o en dead-letter.", status: run.status }); return; }
       response.json({ run });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos reintentar la ejecución." }); }
-  };
+  }
 
-  createAutomationRunsByRunIdReplay: RequestHandler = async (request: Request, response: Response) => {
+  async createAutomationRunsByRunIdReplay(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = asRecord(request.body) ?? {};
@@ -253,5 +252,5 @@ export class AutomationWorkflowsController {
       if (!replay) { response.status(404).json({ error: "No encontramos la ejecución de origen." }); return; }
       response.status(201).json({ run: replay });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos reproducir la ejecución." }); }
-  };
+  }
 }

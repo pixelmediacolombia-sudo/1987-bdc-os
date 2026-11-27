@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from "express";
-import type { RequestHandler } from "express";
 import type { Pool, PoolClient } from "pg";
 import { loadAdminDealerDirectory, requireAdmin, type IdentityRouteOptions } from "../route-helpers";
 
@@ -36,7 +35,7 @@ async function withPlatformAdmin<T>(pool: Pool, action: (client: PoolClient) => 
 export class AdminOverviewController {
   constructor(private readonly pool: Pool, private readonly options: IdentityRouteOptions) {}
 
-  getAdminSystemHealth: RequestHandler = async (request: Request, response: Response) => {
+  async getAdminSystemHealth(request: Request, response: Response): Promise<void> {
     try {
       if (!await requireAdmin(this.pool, request, response)) return;
       await this.pool.query("SELECT 1");
@@ -63,9 +62,9 @@ export class AdminOverviewController {
         response.status(503).json({ error: "No pudimos consultar el estado global del sistema." });
       }
     }
-  };
+  }
 
-  getAdminUsers: RequestHandler = async (request: Request, response: Response) => {
+  async getAdminUsers(request: Request, response: Response): Promise<void> {
     try {
       if (!await requireAdmin(this.pool, request, response)) return;
       const search = typeof request.query.search === "string" ? request.query.search.trim() : "";
@@ -140,9 +139,9 @@ export class AdminOverviewController {
     } catch {
       response.status(500).json({ error: "No pudimos cargar los usuarios de la plataforma." });
     }
-  };
+  }
 
-  getAdminAudit: RequestHandler = async (request: Request, response: Response) => {
+  async getAdminAudit(request: Request, response: Response): Promise<void> {
     try {
       if (!await requireAdmin(this.pool, request, response)) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
@@ -186,5 +185,5 @@ export class AdminOverviewController {
     } catch {
       response.status(500).json({ error: "No pudimos cargar la auditoría administrativa." });
     }
-  };
+  }
 }

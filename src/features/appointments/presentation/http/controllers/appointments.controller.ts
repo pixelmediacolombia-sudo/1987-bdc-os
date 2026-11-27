@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from "express";
-import type { RequestHandler } from "express";
 import type { Pool, PoolClient } from "pg";
 import { activeSession, appendAudit, auditReference, type IdentityUser } from "@/features/identity/presentation/http/routes/route-helpers";
 import { isTenantMember as isMember } from "@/features/identity/application/tenant-membership.service";
@@ -47,7 +46,7 @@ function sendError(response: Response, error: unknown, fallback: string): void {
 export class AppointmentsController {
   constructor(private readonly pool: Pool) {}
 
-  getCalendarAvailability: RequestHandler = async (request, response) => {
+  async getCalendarAvailability(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
@@ -59,9 +58,9 @@ export class AppointmentsController {
       });
       response.json(result);
     } catch (error) { sendError(response, error, "No pudimos cargar los horarios."); }
-  };
+  }
 
-  replaceCalendarAvailability: RequestHandler = async (request, response) => {
+  async replaceCalendarAvailability(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
@@ -77,9 +76,9 @@ export class AppointmentsController {
       });
       response.json({ availability });
     } catch (error) { sendError(response, error, "No pudimos guardar los horarios."); }
-  };
+  }
 
-  getAppointments: RequestHandler = async (request, response) => {
+  async getAppointments(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
@@ -93,9 +92,9 @@ export class AppointmentsController {
       });
       response.json(result);
     } catch (error) { sendError(response, error, "No pudimos cargar las citas."); }
-  };
+  }
 
-  createAppointments: RequestHandler = async (request, response) => {
+  async createAppointments(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = request.body as Record<string, unknown>;
@@ -126,9 +125,9 @@ export class AppointmentsController {
       });
       response.status(201).json({ appointment });
     } catch (error) { sendError(response, error, "No pudimos guardar la cita."); }
-  };
+  }
 
-  updateAppointmentsByAppointmentId: RequestHandler = async (request, response) => {
+  async updateAppointmentsByAppointmentId(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
@@ -171,5 +170,5 @@ export class AppointmentsController {
       if (!appointment) { response.status(404).json({ error: "No encontramos esa cita." }); return; }
       response.json({ appointment });
     } catch (error) { sendError(response, error, "No pudimos actualizar la cita."); }
-  };
+  }
 }

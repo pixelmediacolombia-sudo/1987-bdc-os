@@ -6,12 +6,12 @@ import { AdminDealerMutationController } from "./controllers/admin-dealer-mutati
 export function createAdminDealerMutationRoutes(pool: Pool, options: IdentityRouteOptions): express.Router {
   const router = express.Router();
   const controller = new AdminDealerMutationController(pool, options);
-  router.delete("/admin/dealers/:dealerId", controller.deleteAdminDealersByDealerId);
+  router.delete("/admin/dealers/:dealerId", controller.deleteAdminDealersByDealerId.bind(controller));
 
-  router.patch("/admin/dealers/:dealerId/name", controller.updateAdminDealersByDealerIdName);
+  router.patch("/admin/dealers/:dealerId/name", controller.updateAdminDealersByDealerIdName.bind(controller));
 
-  router.post("/admin/dealers", controller.createAdminDealers);
+  router.post("/admin/dealers", controller.createAdminDealers.bind(controller));
 
-  router.post("/admin/dealers/:dealerId/invitations", controller.createAdminDealersByDealerIdInvitations);
+  router.post("/admin/dealers/:dealerId/invitations", controller.createAdminDealersByDealerIdInvitations.bind(controller));
   return router;
 }

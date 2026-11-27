@@ -5,6 +5,6 @@ import { ConversationWorkflowController } from "./controllers/conversation-workf
 export function createConversationWorkflowRouter(pool: Pool): express.Router {
   const router = express.Router();
   const controller = new ConversationWorkflowController(pool);
-  router.patch("/conversations/:conversationId", controller.updateConversationsByConversationId);
+  router.patch("/conversations/:conversationId", controller.updateConversationsByConversationId.bind(controller));
   return router;
 }

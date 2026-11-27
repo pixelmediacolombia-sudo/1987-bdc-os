@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from "express";
-import type { RequestHandler } from "express";
 import type { Pool } from "pg";
 import { findMetaCapiEnvConfig } from "@/modules/control/infrastructure/meta-capi.config";
 import { loadAdminDealerDirectory, requireAdmin, type IdentityRouteOptions, type IdentityUser } from "../route-helpers";
@@ -9,7 +8,7 @@ import { loadAdminDealerDirectory, requireAdmin, type IdentityRouteOptions, type
 export class AdminDealerController {
   constructor(private readonly pool: Pool, private readonly options: IdentityRouteOptions) {}
 
-  getAdminDealers: RequestHandler = async (request: Request, response: Response) => {
+  async getAdminDealers(request: Request, response: Response): Promise<void> {
     try {
       if (!await requireAdmin(this.pool, request, response)) return;
       const dealers = await loadAdminDealerDirectory(this.pool);
@@ -18,9 +17,9 @@ export class AdminDealerController {
     } catch {
       response.status(500).json({ error: "No pudimos cargar los dealers." });
     }
-  };
+  }
 
-  getAdminDealersByDealerIdMetaConnect: RequestHandler = async (request: Request, response: Response) => {
+  async getAdminDealersByDealerIdMetaConnect(request: Request, response: Response): Promise<void> {
     const dealerId = request.params.dealerId;
     if (typeof dealerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dealerId)) {
       response.status(400).json({ error: "El identificador del dealer no es válido." });
@@ -54,9 +53,9 @@ export class AdminDealerController {
     } catch {
       response.status(503).json({ error: "No pudimos iniciar la conexión con Meta." });
     }
-  };
+  }
 
-  getAdminDealersByDealerIdConfiguration: RequestHandler = async (request: Request, response: Response) => {
+  async getAdminDealersByDealerIdConfiguration(request: Request, response: Response): Promise<void> {
     const dealerId = request.params.dealerId;
     if (typeof dealerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dealerId)) {
       response.status(400).json({ error: "El identificador del dealer no es válido." });
@@ -127,5 +126,5 @@ export class AdminDealerController {
     } catch {
       if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar la configuración del dealer." });
     }
-  };
+  }
 }

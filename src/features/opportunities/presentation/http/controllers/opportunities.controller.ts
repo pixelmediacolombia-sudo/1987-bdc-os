@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from "express";
-import type { RequestHandler } from "express";
 import type { Pool } from "pg";
 import { activeSession, appendAudit, auditReference, type IdentityUser } from "@/features/identity/presentation/http/routes/route-helpers";
 import { isTenantMember as isMember } from "@/features/identity/application/tenant-membership.service";
@@ -23,7 +22,7 @@ const COLUMNS = `o.id::text AS id, o.tenant_id::text AS "dealerId", o.title, o.c
 export class OpportunitiesController {
   constructor(private readonly pool: Pool) {}
 
-  getDashboard: RequestHandler = async (request, response) => {
+  async getDashboard(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
@@ -36,13 +35,13 @@ export class OpportunitiesController {
       });
       response.json(dashboard);
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar el inicio del dealer." }); }
-  };
+  }
 
-  getOpportunitiesStages: RequestHandler = async (request,response) => { try { const user=await dealerUser(this.pool,request,response); if(!user)return; const dealerId=typeof request.query.dealerId==="string"?request.query.dealerId:""; if(!await isMember(this.pool,user.id,dealerId)){response.status(403).json({error:"No tienes acceso a este dealer."});return;} const stages=await withTenant(this.pool,dealerId,async client=>{await ensureOpportunityStages(client,dealerId);return (await client.query('SELECT stage_key AS "stageKey",label,position FROM public.opportunity_stages WHERE tenant_id=$1::uuid ORDER BY position',[dealerId])).rows;}); response.json({stages}); } catch { if(!response.headersSent)response.status(500).json({error:"No pudimos cargar las etapas."});} };
+  async getOpportunitiesStages(request: Request, response: Response): Promise<void> { try { const user=await dealerUser(this.pool,request,response); if(!user)return; const dealerId=typeof request.query.dealerId==="string"?request.query.dealerId:""; if(!await isMember(this.pool,user.id,dealerId)){response.status(403).json({error:"No tienes acceso a este dealer."});return;} const stages=await withTenant(this.pool,dealerId,async client=>{await ensureOpportunityStages(client,dealerId);return (await client.query('SELECT stage_key AS "stageKey",label,position FROM public.opportunity_stages WHERE tenant_id=$1::uuid ORDER BY position',[dealerId])).rows;}); response.json({stages}); } catch { if(!response.headersSent)response.status(500).json({error:"No pudimos cargar las etapas."});} }
 
-  replaceOpportunitiesStages: RequestHandler = async (request,response) => { try { const user=await dealerUser(this.pool,request,response); if(!user)return; const dealerId=typeof request.query.dealerId==="string"?request.query.dealerId:""; const stages=(request.body as {stages?:unknown})?.stages; if(!await isMember(this.pool,user.id,dealerId)){response.status(403).json({error:"No tienes acceso a este dealer."});return;} const keys=DEFAULT_OPPORTUNITY_STAGES.map(x=>x.stageKey); const valid=Array.isArray(stages)&&stages.length===5&&stages.every(x=>x&&typeof x==="object"&&keys.includes((x as any).stageKey)&&typeof (x as any).label==="string"&&(x as any).label.trim().length>0&&(x as any).label.trim().length<=60&&Number.isInteger((x as any).position)&&(x as any).position>=0&&(x as any).position<5)&&new Set(stages.map(x=>(x as any).stageKey)).size===5&&new Set(stages.map(x=>(x as any).position)).size===5; if(!valid){response.status(400).json({error:"Configura las cinco etapas con nombres y posiciones únicas."});return;} const saved=await withTenant(this.pool,dealerId,async client=>{await ensureOpportunityStages(client,dealerId); await client.query("DELETE FROM public.opportunity_stages WHERE tenant_id=$1::uuid",[dealerId]); for(const x of stages as Array<{stageKey:string;label:string;position:number}>) await client.query('INSERT INTO public.opportunity_stages (tenant_id,stage_key,label,position) VALUES ($1::uuid,$2,$3,$4)',[dealerId,x.stageKey,x.label.trim(),x.position]); const tenant=await client.query<{dealer_name:string}>('SELECT dealer_name FROM public.tenants WHERE dealer_id=$1::uuid',[dealerId]); await appendAudit(client,{actor:user,dealerId,dealerName:tenant.rows[0]?.dealer_name,category:"opportunities",action:"opportunity.stages_configured",summary:"Se actualizaron las etapas del pipeline.",referenceId:auditReference(request)}); return (await client.query('SELECT stage_key AS "stageKey",label,position FROM public.opportunity_stages WHERE tenant_id=$1::uuid ORDER BY position',[dealerId])).rows;}); response.json({stages:saved}); } catch { if(!response.headersSent)response.status(500).json({error:"No pudimos guardar las etapas."});} };
+  async replaceOpportunitiesStages(request: Request, response: Response): Promise<void> { try { const user=await dealerUser(this.pool,request,response); if(!user)return; const dealerId=typeof request.query.dealerId==="string"?request.query.dealerId:""; const stages=(request.body as {stages?:unknown})?.stages; if(!await isMember(this.pool,user.id,dealerId)){response.status(403).json({error:"No tienes acceso a este dealer."});return;} const keys=DEFAULT_OPPORTUNITY_STAGES.map(x=>x.stageKey); const valid=Array.isArray(stages)&&stages.length===5&&stages.every(x=>x&&typeof x==="object"&&keys.includes((x as any).stageKey)&&typeof (x as any).label==="string"&&(x as any).label.trim().length>0&&(x as any).label.trim().length<=60&&Number.isInteger((x as any).position)&&(x as any).position>=0&&(x as any).position<5)&&new Set(stages.map(x=>(x as any).stageKey)).size===5&&new Set(stages.map(x=>(x as any).position)).size===5; if(!valid){response.status(400).json({error:"Configura las cinco etapas con nombres y posiciones únicas."});return;} const saved=await withTenant(this.pool,dealerId,async client=>{await ensureOpportunityStages(client,dealerId); await client.query("DELETE FROM public.opportunity_stages WHERE tenant_id=$1::uuid",[dealerId]); for(const x of stages as Array<{stageKey:string;label:string;position:number}>) await client.query('INSERT INTO public.opportunity_stages (tenant_id,stage_key,label,position) VALUES ($1::uuid,$2,$3,$4)',[dealerId,x.stageKey,x.label.trim(),x.position]); const tenant=await client.query<{dealer_name:string}>('SELECT dealer_name FROM public.tenants WHERE dealer_id=$1::uuid',[dealerId]); await appendAudit(client,{actor:user,dealerId,dealerName:tenant.rows[0]?.dealer_name,category:"opportunities",action:"opportunity.stages_configured",summary:"Se actualizaron las etapas del pipeline.",referenceId:auditReference(request)}); return (await client.query('SELECT stage_key AS "stageKey",label,position FROM public.opportunity_stages WHERE tenant_id=$1::uuid ORDER BY position',[dealerId])).rows;}); response.json({stages:saved}); } catch { if(!response.headersSent)response.status(500).json({error:"No pudimos guardar las etapas."});} }
 
-  getOpportunities: RequestHandler = async (request, response) => {
+  async getOpportunities(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
@@ -50,9 +49,9 @@ export class OpportunitiesController {
       const rows = await withTenant(this.pool, dealerId, async (client) => { await ensureOpportunityStages(client,dealerId); return client.query<Opportunity>(`SELECT ${COLUMNS} FROM public.opportunities o LEFT JOIN public.app_users u ON u.id=o.assigned_user_id WHERE o.tenant_id=$1::uuid AND ($2::boolean OR o.archived_at IS NULL) ORDER BY o.updated_at DESC`, [dealerId,request.query.includeArchived==="true"]); });
       response.json({ opportunities: rows.rows });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar las oportunidades." }); }
-  };
+  }
 
-  createOpportunities: RequestHandler = async (request, response) => {
+  async createOpportunities(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = request.body as Record<string, unknown>;
@@ -81,9 +80,9 @@ export class OpportunitiesController {
       });
       response.status(201).json({ opportunity: saved });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos guardar la oportunidad." }); }
-  };
+  }
 
-  getOpportunitiesByOpportunityIdActivity: RequestHandler = async (request, response) => {
+  async getOpportunitiesByOpportunityIdActivity(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const dealerId = typeof request.query.dealerId === "string" ? request.query.dealerId : "";
@@ -98,9 +97,9 @@ export class OpportunitiesController {
       if (!activity) { response.status(404).json({ error: "No encontramos esa oportunidad." }); return; }
       response.json({ activity });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar el historial de la oportunidad." }); }
-  };
+  }
 
-  updateOpportunitiesByOpportunityId: RequestHandler = async (request: Request, response: Response) => {
+  async updateOpportunitiesByOpportunityId(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response); if (!user) return;
       const body = request.body as Record<string, unknown>;
@@ -129,5 +128,5 @@ export class OpportunitiesController {
       if (!saved) { response.status(404).json({ error: "No encontramos esa oportunidad." }); return; }
       response.json({ opportunity: saved });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos actualizar la oportunidad." }); }
-  };
+  }
 }

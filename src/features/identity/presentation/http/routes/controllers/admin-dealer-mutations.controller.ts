@@ -1,5 +1,4 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type { RequestHandler } from "express";
 import express, { type Request, type Response } from "express";
 import type { Pool } from "pg";
 import { appendAudit, auditReference, invitationUrl, requireAdmin, tokenDigest, validEmail, INVITATION_TTL_HOURS, type IdentityRouteOptions, type IdentityUser } from "../route-helpers";
@@ -14,7 +13,7 @@ export class AdminDealerMutationController {
     this.publicAppUrl = options.publicAppUrl ?? (options.production ? undefined : "http://localhost:3000");
   }
 
-  deleteAdminDealersByDealerId: RequestHandler = async (request: Request, response: Response) => {
+  async deleteAdminDealersByDealerId(request: Request, response: Response): Promise<void> {
     const dealerId = request.params.dealerId;
     if (typeof dealerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dealerId)) {
       response.status(400).json({ error: "El identificador del dealer no es válido." });
@@ -47,9 +46,9 @@ export class AdminDealerMutationController {
       await client.query("ROLLBACK").catch(() => undefined);
       response.status(500).json({ error: "No pudimos eliminar el dealer." });
     } finally { client.release(); }
-  };
+  }
 
-  updateAdminDealersByDealerIdName: RequestHandler = async (request: Request, response: Response) => {
+  async updateAdminDealersByDealerIdName(request: Request, response: Response): Promise<void> {
     const dealerId = request.params.dealerId;
     if (typeof dealerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dealerId)) {
       response.status(400).json({ error: "El identificador del dealer no es válido." });
@@ -89,9 +88,9 @@ export class AdminDealerMutationController {
       await client.query("ROLLBACK").catch(() => undefined);
       response.status(500).json({ error: "No pudimos guardar el nombre del dealer." });
     } finally { client.release(); }
-  };
+  }
 
-  createAdminDealers: RequestHandler = async (request: Request, response: Response) => {
+  async createAdminDealers(request: Request, response: Response): Promise<void> {
     const dealerName = typeof request.body?.dealerName === "string" ? request.body.dealerName.trim() : "";
     const ownerName = typeof request.body?.ownerName === "string" ? request.body.ownerName.trim() : "";
     const email = typeof request.body?.ownerEmail === "string" ? request.body.ownerEmail.trim().toLowerCase() : "";
@@ -163,9 +162,9 @@ export class AdminDealerMutationController {
     } finally {
       client.release();
     }
-  };
+  }
 
-  createAdminDealersByDealerIdInvitations: RequestHandler = async (request: Request, response: Response) => {
+  async createAdminDealersByDealerIdInvitations(request: Request, response: Response): Promise<void> {
     const email = typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
     const displayName = typeof request.body?.displayName === "string" ? request.body.displayName.trim() : "";
     if (!validEmail(email) || !displayName || displayName.length > 160) {
@@ -246,5 +245,5 @@ export class AdminDealerMutationController {
     } finally {
       client.release();
     }
-  };
+  }
 }

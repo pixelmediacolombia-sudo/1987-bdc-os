@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { RequestHandler } from "express";
 import express, { type Request, type Response } from "express";
 import type { Pool } from "pg";
 import { UUID, type Tenant, type ContactRow, type ContactInput, dealerUser, withUser, withTenant, isMember, parseContactInput, hasReachableAddress, lockContactIdentity, duplicateContact, loadContactSummary, auditContact, CONTACT_COLUMNS } from "../contacts.route-helpers";
@@ -9,7 +8,7 @@ import { UUID, type Tenant, type ContactRow, type ContactInput, dealerUser, with
 export class ContactDirectoryController {
   constructor(private readonly pool: Pool) {}
 
-  getContactsDealers: RequestHandler = async (request: Request, response: Response) => {
+  async getContactsDealers(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response);
       if (!user) return;
@@ -28,9 +27,9 @@ export class ContactDirectoryController {
       }
       response.status(200).json({ dealers });
     } catch { response.status(500).json({ error: "No pudimos cargar los dealers asociados." }); }
-  };
+  }
 
-  getContacts: RequestHandler = async (request: Request, response: Response) => {
+  async getContacts(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response);
       if (!user) return;
@@ -71,9 +70,9 @@ export class ContactDirectoryController {
       });
       response.status(200).json({ ...data, limit, offset });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar los contactos." }); }
-  };
+  }
 
-  createContacts: RequestHandler = async (request: Request, response: Response) => {
+  async createContacts(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response);
       if (!user) return;
@@ -109,5 +108,5 @@ export class ContactDirectoryController {
       if ((error as { code?: string })?.code === "23505") { response.status(409).json({ error: "Ya existe un contacto con esos datos." }); return; }
       if (!response.headersSent) response.status(500).json({ error: "No pudimos crear el contacto." });
     }
-  };
+  }
 }

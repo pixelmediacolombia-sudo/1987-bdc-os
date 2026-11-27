@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from "express";
-import type { RequestHandler } from "express";
 import type { Pool } from "pg";
 import { UUID, type ContactRow, type ContactInput, type ContactActivity, dealerUser, withTenant, isMember, optionalText, parseContactInput, hasReachableAddress, duplicateContact, lockContactIdentity, auditContact, loadContactSummary, CONTACT_COLUMNS, validEmail } from "../contacts.route-helpers";
 
@@ -8,7 +7,7 @@ import { UUID, type ContactRow, type ContactInput, type ContactActivity, dealerU
 export class ContactDetailController {
   constructor(private readonly pool: Pool) {}
 
-  updateContactsByContactId: RequestHandler = async (request: Request, response: Response) => {
+  async updateContactsByContactId(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response);
       if (!user) return;
@@ -57,9 +56,9 @@ export class ContactDetailController {
       if ((error as { code?: string })?.code === "23505") { response.status(409).json({ error: "Otro contacto ya usa esos datos." }); return; }
       if (!response.headersSent) response.status(500).json({ error: "No pudimos actualizar el contacto." });
     }
-  };
+  }
 
-  getContactsByContactId: RequestHandler = async (request: Request, response: Response) => {
+  async getContactsByContactId(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response);
       if (!user) return;
@@ -110,5 +109,5 @@ export class ContactDetailController {
       if (!contact) { response.status(404).json({ error: "No encontramos ese contacto en este dealer." }); return; }
       response.status(200).json({ contact });
     } catch { if (!response.headersSent) response.status(500).json({ error: "No pudimos cargar el detalle del contacto." }); }
-  };
+  }
 }

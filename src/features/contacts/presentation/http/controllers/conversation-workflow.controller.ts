@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from "express";
-import type { RequestHandler } from "express";
 import type { Pool } from "pg";
 import { UUID, dealerUser, withTenant, isMember, auditContact } from "../contacts.route-helpers";
 
@@ -8,7 +7,7 @@ import { UUID, dealerUser, withTenant, isMember, auditContact } from "../contact
 export class ConversationWorkflowController {
   constructor(private readonly pool: Pool) {}
 
-  updateConversationsByConversationId: RequestHandler = async (request: Request, response: Response) => {
+  async updateConversationsByConversationId(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response);
       if (!user) return;
@@ -53,5 +52,5 @@ export class ConversationWorkflowController {
       if (!result) { response.status(404).json({ error: "No encontramos la conversación en este dealer." }); return; }
       response.status(200).json(result);
     } catch { response.status(500).json({ error: "No pudimos actualizar la conversación." }); }
-  };
+  }
 }

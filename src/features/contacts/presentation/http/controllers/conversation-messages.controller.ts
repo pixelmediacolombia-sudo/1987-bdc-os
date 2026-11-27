@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from "express";
-import type { RequestHandler } from "express";
 import type { Pool } from "pg";
 import type { ConversationReplySender, ConversationReplyChannel } from "@/features/contacts/application/conversation-reply-sender.port";
 import { MetaGraphApiError } from "@/features/meta/infrastructure/meta-graph-api.client";
@@ -10,7 +9,7 @@ import { UUID, dealerUser, withTenant, isMember, auditContact } from "../contact
 export class ConversationMessageController {
   constructor(private readonly pool: Pool, private readonly replySender?: ConversationReplySender) {}
 
-  createConversationsByConversationIdMessages: RequestHandler = async (request: Request, response: Response) => {
+  async createConversationsByConversationIdMessages(request: Request, response: Response): Promise<void> {
     try {
       const user = await dealerUser(this.pool, request, response);
       if (!user) return;
@@ -127,5 +126,5 @@ export class ConversationMessageController {
     } catch {
       if (!response.headersSent) response.status(500).json({ error: "No pudimos procesar la respuesta." });
     }
-  };
+  }
 }
